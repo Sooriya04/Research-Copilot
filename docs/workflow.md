@@ -8,22 +8,9 @@ Research Copilot guides researchers through a 12-stage scientific workflow, brid
 
 ---
 
-## 🔄 12-Stage Flowchart
+## 🔄 12-Stage Lifecycle Overview
 
-```mermaid
-flowchart TD
-    S1[1. Researcher Initiation] --> S2[2. Enter Research Topic]
-    S2 --> S3[3. Search Trusted Sources]
-    S3 --> S4[4. Collect Papers & Datasets]
-    S4 --> S5[5. Understand Existing Research]
-    S5 --> S6[6. Identify Research Gaps]
-    S6 --> S7[7. Suggest New Research Direction]
-    S7 --> S8[8. Generate Implementation Plan]
-    S8 --> S9[9. Build & Evaluate Solution]
-    S9 --> S10[10. SOTA Benchmark Comparison]
-    S10 --> S11[11. Generate Paper Draft]
-    S11 --> S12[12. Review, Refine & Publish]
-```
+![Workflow Diagram](./images/simple_architecture.jpeg)
 
 <br />
 
