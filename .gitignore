@@ -1,2 +1,4 @@
 graphify-out
 *__pycache__
+.env
+services/pdf_extractor/pdf_extractor

@@ -16,11 +16,17 @@
 
 <br />
 
----
+## Commit 2 (dev) : Implement PostgreSQL Database Cache & Concurrent Go PDF Extraction Service
 
-## Commit 2 : Implement FastAPI QUERY Search with Structured Logging
-
-* Implemented custom HTTP `QUERY` method search endpoint (`QUERY /api/v1/search/arxiv`) using FastAPI.
-* Removed standard `GET` and `POST` search methods to limit query interface strictly to HTTP `QUERY` body payload semantics.
-* Configured structured logging (`logging.getLogger("research_copilot.api")`) to trace execution, log request inputs, track search durations, and log exception traces.
-
+* **PostgreSQL Database caching (`localhost:5432/research_copilot`)**:
+  * Configured connection parameters securely via local `.env` configuration file (ignored from version control).
+  * Initialized database tables `arxiv_papers` (tracking page metrics, word counts, and metadata) and `paper_paragraphs` (storing page-by-page parsed segment sequences).
+* **Stateless Go PDF Extractor Service**:
+  * Refactored a high-performance, stateless Go service on port `8001` into modular segments: `downloader.go`, `extractor.go`, and `main.go`.
+  * Implemented pure PDF validation (verifying header `%PDF-` signature) and page text extraction (avoiding OCR, resolving font-mapping panics).
+  * Implemented concurrency-safe download timers using a Go `sync.RWMutex`.
+* **Python Orchestrator Optimization**:
+  * Integrated database batch checking before downloading or processing papers to avoid API rate limits.
+  * Integrated `psycopg2.extras.execute_batch` to save parsed paragraphs in bulk, preventing database deadlocks.
+  * Configured `THROTTLE_DELAY = 15.0` to comply with the `Crawl-delay: 15` rule in arXiv's `robots.txt`.
+  * Exposed full parsed text and paragraph collections directly in the JSON search endpoint payload for Postman validation.

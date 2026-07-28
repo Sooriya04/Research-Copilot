@@ -1,7 +1,18 @@
+import logging
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from src.api.router import router as api_router
+
+# Configure standard logging to output to console
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[logging.StreamHandler()]
+)
+logger = logging.getLogger("research_copilot")
+logger.info("Initializing Research Copilot server logging...")
+
 
 app = FastAPI(
     title="Research Copilot API",

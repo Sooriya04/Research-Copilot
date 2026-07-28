@@ -19,16 +19,15 @@ async def health_check():
     return HealthResponse()
 
 
-@router.api_route(
+@router.post(
     "/search/arxiv",
-    methods=["QUERY"],
     response_model=ArxivSearchResult,
-    summary="Search arXiv Literature (QUERY)",
-    description="Retrieve top-K relevant research papers using the HTTP QUERY method with JSON body.",
+    summary="Search arXiv Literature (POST)",
+    description="Retrieve top-K relevant research papers using the HTTP POST method with JSON body.",
 )
 async def search_arxiv_query(req: SearchRequest):
-    """QUERY method endpoint supporting RFC-draft QUERY HTTP method with body."""
-    logger.info("Received arXiv search request via HTTP QUERY method. Query: '%s', Top K: %d", req.query, req.top_k)
+    """POST method endpoint supporting standard HTTP POST method with body."""
+    logger.info("Received arXiv search request via HTTP POST method. Query: '%s', Top K: %d", req.query, req.top_k)
     start_time = time.time()
     try:
         results = arxiv_client.search(

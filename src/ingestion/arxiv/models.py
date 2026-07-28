@@ -20,6 +20,8 @@ class ArxivPaper(BaseModel):
     categories: List[str] = Field(default_factory=list, description="All associated arXiv categories")
     doi: Optional[str] = Field(None, description="Digital Object Identifier if available")
     journal_ref: Optional[str] = Field(None, description="Journal reference if published")
+    full_text: Optional[str] = Field(None, description="Parsed text of the PDF")
+    paragraphs: Optional[List[str]] = Field(None, description="Parsed paragraphs of the PDF")
 
     def formatted_authors(self) -> str:
         names = [a.name for a in self.authors]
