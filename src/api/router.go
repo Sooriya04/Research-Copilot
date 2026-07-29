@@ -8,15 +8,18 @@ import (
 	"time"
 
 	"research_copilot/src/ingestion/arxiv"
+	"research_copilot/src/ingestion/huggingface"
 )
 
 var arxivClient = arxiv.NewArxivClient()
+var hfClient = huggingface.NewHuggingFaceClient()
 
 // RegisterRoutes registers the handlers on the given HTTP ServeMux
 func RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/health", handleHealth)
 	mux.HandleFunc("/api/v1/search/arxiv", handleSearchArxiv)
 	mux.HandleFunc("/api/v1/papers/arxiv/", handleGetPaperByID)
+	mux.HandleFunc("/api/v1/search/huggingface", handleSearchHuggingFace)
 }
 
 func writeJSONResponse(w http.ResponseWriter, status int, data interface{}) {
@@ -108,3 +111,31 @@ func handleGetPaperByID(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[API] Successfully fetched paper details for ID: '%s'", arxivID)
 	writeJSONResponse(w, http.StatusOK, results.Papers[0])
 }
+
+func handleSearchHuggingFace(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method Not Allowed")
+		return
+	}
+
+	var req HuggingFaceSearchRequest
+	// Decode is optional - if body is empty or null, it still works
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+
+	log.Printf("[API] Received Hugging Face daily papers request. Date: '%s'", req.Date)
+	startTime := time.Now()
+
+	results, err := hfClient.FetchDailyPapers(r.Context(), req.Date)
+	if err != nil {
+		log.Printf("[API] Exception occurred while fetching Hugging Face daily papers: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	duration := time.Since(startTime)
+	log.Printf("[API] Successfully fetched %d daily papers from Hugging Face in %v", results.ReturnedCount, duration)
+	writeJSONResponse(w, http.StatusOK, results)
+}
+

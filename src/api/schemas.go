@@ -10,3 +10,8 @@ type SearchRequest struct {
 	SortBy    string `json:"sort_by"`
 	SortOrder string `json:"sort_order"`
 }
+
+type HuggingFaceSearchRequest struct {
+	Date string `json:"date"`
+}
+

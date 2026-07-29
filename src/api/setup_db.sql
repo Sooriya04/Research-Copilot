@@ -25,3 +25,37 @@ CREATE TABLE IF NOT EXISTS paper_paragraphs (
 
 -- Indexing for fast search lookups
 CREATE INDEX IF NOT EXISTS idx_paper_paragraphs_paper_id ON paper_paragraphs(paper_id);
+
+-- Initialize Hugging Face schemas (Bronze & Silver layers)
+CREATE TABLE IF NOT EXISTS raw_hf_doc (
+    _id VARCHAR(50) PRIMARY KEY,
+    data JSONB NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS hf_papers (
+    paper_id VARCHAR(50) PRIMARY KEY,
+    title TEXT NOT NULL,
+    summary TEXT,
+    ai_summary TEXT,
+    published_at TIMESTAMP,
+    submitted_on_daily_at TIMESTAMP,
+    submitted_by TEXT,
+    upvotes INTEGER DEFAULT 0,
+    discussion_id TEXT,
+    github_repo TEXT,
+    github_stars INTEGER,
+    url TEXT NOT NULL,
+    ai_keywords TEXT[],
+    fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS hf_paper_authors (
+    paper_id VARCHAR(50) REFERENCES hf_papers(paper_id) ON DELETE CASCADE,
+    author_name TEXT NOT NULL,
+    PRIMARY KEY (paper_id, author_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_hf_papers_published_at ON hf_papers(published_at);
+
