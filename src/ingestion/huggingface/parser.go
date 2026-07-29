@@ -127,7 +127,7 @@ func (c *HuggingFaceClient) FetchDailyPapers(ctx context.Context, date string) (
 
 	log.Printf("[DATABASE] Found %d/%d papers already cached in PostgreSQL database.", len(existingPapers), len(paperIDs))
 
-	// 3. Identify papers that need background ingestion (both raw Bronze storage and silver relations)
+	// 3. Identify papers that need background ingestion
 	var missingPapers []HFPaper
 	var rawDocsToSave []HFResponseItem
 
@@ -162,5 +162,39 @@ func (c *HuggingFaceClient) FetchDailyPapers(ctx context.Context, date string) (
 		ReturnedCount: len(papers),
 		Papers:        papers,
 	}
+	return result, nil
+}
+
+// Search queries Hugging Face models and datasets by query/topic and limits to topK.
+func (c *HuggingFaceClient) Search(ctx context.Context, query string, topK int) (*HFSearchResult, error) {
+	if query == "" {
+		return c.FetchDailyPapers(ctx, "")
+	}
+
+	log.Printf("[HUGGINGFACE] Querying models search for query: '%s' (limit: %d)", query, topK)
+	models, err := c.searchModels(ctx, query, topK)
+	if err != nil {
+		log.Printf("[HUGGINGFACE] Warning: models search failed: %v", err)
+	}
+
+	log.Printf("[HUGGINGFACE] Querying datasets search for query: '%s' (limit: %d)", query, topK)
+	datasets, err := c.searchDatasets(ctx, query, topK)
+	if err != nil {
+		log.Printf("[HUGGINGFACE] Warning: datasets search failed: %v", err)
+	}
+
+	// Trigger background ingestion (non-blocking DB upserts)
+	bgCtx := context.Background()
+	go func(mds []HFModel, dts []HFDataset) {
+		c.ingestModelsAndDatasets(bgCtx, mds, dts)
+	}(models, datasets)
+
+	result := &HFSearchResult{
+		Query:         query,
+		ReturnedCount: len(models) + len(datasets),
+		Models:        models,
+		Datasets:      datasets,
+	}
+
 	return result, nil
 }

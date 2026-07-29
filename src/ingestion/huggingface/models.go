@@ -47,8 +47,31 @@ type HFPaper struct {
 	Authors            []string   `json:"authors"`
 }
 
+type HFModel struct {
+	ModelID     string   `json:"id"`
+	Likes       int      `json:"likes"`
+	Downloads   int      `json:"downloads"`
+	PipelineTag string   `json:"pipeline_tag"`
+	LibraryName string   `json:"library_name"`
+	Tags        []string `json:"tags"`
+	URL         string   `json:"url"`
+}
+
+type HFDataset struct {
+	DatasetID   string   `json:"id"`
+	Author      string   `json:"author"`
+	Likes       int      `json:"likes"`
+	Downloads   int      `json:"downloads"`
+	Description string   `json:"description"`
+	Tags        []string `json:"tags"`
+	URL         string   `json:"url"`
+}
+
 type HFSearchResult struct {
-	Date          string    `json:"date"`
-	ReturnedCount int       `json:"returned_count"`
-	Papers        []HFPaper `json:"papers"`
+	Query         string      `json:"query,omitempty"`
+	Date          string      `json:"date,omitempty"`
+	ReturnedCount int         `json:"returned_count"`
+	Papers        []HFPaper   `json:"papers,omitempty"`
+	Models        []HFModel   `json:"models,omitempty"`
+	Datasets      []HFDataset `json:"datasets,omitempty"`
 }

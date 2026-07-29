@@ -57,5 +57,32 @@ CREATE TABLE IF NOT EXISTS hf_paper_authors (
     PRIMARY KEY (paper_id, author_name)
 );
 
+CREATE TABLE IF NOT EXISTS hf_models (
+    model_id      TEXT PRIMARY KEY,
+    likes         INTEGER DEFAULT 0,
+    downloads     INTEGER DEFAULT 0,
+    pipeline_tag  TEXT,
+    library_name  TEXT,
+    tags          TEXT[],
+    url           TEXT NOT NULL,
+    created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    fetched_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS hf_datasets (
+    dataset_id    TEXT PRIMARY KEY,
+    author        TEXT,
+    likes         INTEGER DEFAULT 0,
+    downloads     INTEGER DEFAULT 0,
+    description   TEXT,
+    tags          TEXT[],
+    url           TEXT NOT NULL,
+    created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    fetched_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE INDEX IF NOT EXISTS idx_hf_papers_published_at ON hf_papers(published_at);
+CREATE INDEX IF NOT EXISTS idx_hf_models_downloads ON hf_models(downloads);
+CREATE INDEX IF NOT EXISTS idx_hf_datasets_downloads ON hf_datasets(downloads);
+
 

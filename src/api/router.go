@@ -119,23 +119,34 @@ func handleSearchHuggingFace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req HuggingFaceSearchRequest
-	// Decode is optional - if body is empty or null, it still works
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
 
-	log.Printf("[API] Received Hugging Face daily papers request. Date: '%s'", req.Date)
+	if req.TopK <= 0 {
+		req.TopK = 5
+	}
+
+	var results *huggingface.HFSearchResult
+	var err error
 	startTime := time.Now()
 
-	results, err := hfClient.FetchDailyPapers(r.Context(), req.Date)
+	if req.Query != "" {
+		log.Printf("[API] Received Hugging Face search request. Query: '%s', Top K: %d", req.Query, req.TopK)
+		results, err = hfClient.Search(r.Context(), req.Query, req.TopK)
+	} else {
+		log.Printf("[API] Received Hugging Face daily papers request. Date: '%s'", req.Date)
+		results, err = hfClient.FetchDailyPapers(r.Context(), req.Date)
+	}
+
 	if err != nil {
-		log.Printf("[API] Exception occurred while fetching Hugging Face daily papers: %v", err)
+		log.Printf("[API] Exception occurred during Hugging Face query: %v", err)
 		writeJSONError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	duration := time.Since(startTime)
-	log.Printf("[API] Successfully fetched %d daily papers from Hugging Face in %v", results.ReturnedCount, duration)
+	log.Printf("[API] Successfully fetched %d Hugging Face results in %v", results.ReturnedCount, duration)
 	writeJSONResponse(w, http.StatusOK, results)
 }
 

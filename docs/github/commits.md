@@ -68,3 +68,15 @@
   * Ran static AST code update via `/graphify update .` to update the structure graph with the new Hugging Face and extractor packages.
 
 
+## Commit 5 (dev and main) : Implement Hugging Face Topic-Based Search, Unified Models/Datasets Caching, JSON Mapping Fixes, and Strict Package Code-Splitting
+
+* **Topic-Based Models and Datasets Search**:
+  * Implemented query-based search capability to fetch Hugging Face models (`/api/models`) and datasets (`/api/datasets`) in the Go client, returning and sorting the top_k matched resources.
+* **Silver Caching Tables (`hf_models` / `hf_datasets`)**:
+  * Deployed relational database schemas for `hf_models` and `hf_datasets` in PostgreSQL to store download counts, tags, upvotes, pipeline tags, and metadata.
+* **Strict Source Code Splitting (No 200+ Line Files)**:
+  * Modularized the Hugging Face codebase by splitting logic into 7 single-responsibility files (`client.go`, `models.go`, `parser.go`, `search_api.go`, `ingest_paper.go`, `ingest_metadata.go`, and `sync_extractor.go`), keeping every single source file strictly under 170 lines.
+* **JSON Mapping Corrections**:
+  * Aligned the JSON struct tags in `HFModel` and `HFDataset` from `model_id` / `dataset_id` to `id` to match the incoming REST response schemas, correcting empty ID and URL response structures.
+* **Graphify Rebuild**:
+  * Refreshed structural knowledge index via `/graphify update .` using static AST extraction.

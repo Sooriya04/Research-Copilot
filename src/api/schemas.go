@@ -12,6 +12,8 @@ type SearchRequest struct {
 }
 
 type HuggingFaceSearchRequest struct {
-	Date string `json:"date"`
+	Query string `json:"query"`
+	Date  string `json:"date"`
+	TopK  int    `json:"top_k"`
 }
 
