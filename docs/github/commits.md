@@ -50,3 +50,21 @@
 * **Build Scripts and Git Ignore Updates**:
   * Configured `.gitignore` to track only source files, ignoring Go compiled binaries, directories like `bin/`, and log outputs.
 
+<br />
+
+## Commit 4 (dev and main) : Add Hugging Face Ingestion client, Parser, models, schemas, database table, and API router
+
+* **Hugging Face Ingestion Module (`src/ingestion/huggingface`)**:
+  * Built a native Go connector to query the Hugging Face daily papers API (`https://huggingface.co/api/daily_papers`).
+  * Created modular components: `client.go` (initialization), `models.go` (data mapping structs), `parser.go` (fetching and checks), and `ingestion.go` (asynchronous pipeline processing).
+* **Bronze & Silver Database Relational Schemas**:
+  * Appended schemas for `raw_hf_doc` (Bronze layer raw payload table), `hf_papers` (Silver layer paper schema), and `hf_paper_authors` (Silver layer authors table) to `src/api/setup_db.sql` and initialized them in PostgreSQL.
+* **Extraction Reuse & Sync**:
+  * Reused the shared `extractor` client inside the Hugging Face pipeline to download and parse PDFs (using poppler `pdftotext` microservice) for papers that are hosted on arXiv.
+  * Synchronized the extracted full text and paragraph segments back to the global `arxiv_papers` and `paper_paragraphs` databases for search unified access.
+* **Hugging Face Endpoint Handler**:
+  * Exposed `/api/v1/search/huggingface` POST API endpoint in `src/api/router.go` mapped to `handleSearchHuggingFace` to execute daily syncs.
+* **Knowledge Graph Update**:
+  * Ran static AST code update via `/graphify update .` to update the structure graph with the new Hugging Face and extractor packages.
+
+
