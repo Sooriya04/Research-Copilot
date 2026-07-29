@@ -1,3 +1,0 @@
-"""
-Research Copilot Source Package
-"""

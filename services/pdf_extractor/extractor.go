@@ -3,14 +3,38 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"io"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/dslipak/pdf"
 )
+
+// sanitizeText strips null bytes and normalizes whitespace.
+// PostgreSQL UTF-8 rejects 0x00 null bytes; PDF binary streams often embed them.
+func sanitizeText(s string) string {
+	// Strip null bytes
+	s = strings.ReplaceAll(s, "\x00", "")
+	// Normalize excessive whitespace
+	return strings.TrimSpace(s)
+}
+
+// extractWithPopplerPdftotext uses the system pdftotext binary (poppler-utils)
+// for high-quality text extraction with correct word spacing.
+func extractWithPopplerPdftotext(localPath string) (string, error) {
+	cmd := exec.Command("pdftotext", "-layout", localPath, "-")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("pdftotext failed: %v | stderr: %s", err, stderr.String())
+	}
+
+	return sanitizeText(stdout.String()), nil
+}
 
 func handleExtract(localPath string) (*ExtractResponse, error) {
 	fileInfo, err := os.Stat(localPath)
@@ -18,23 +42,68 @@ func handleExtract(localPath string) (*ExtractResponse, error) {
 		return nil, fmt.Errorf("file not found: %w", err)
 	}
 
+	// Try pdftotext first (best quality, correct word spacing)
+	fullText, popplerErr := extractWithPopplerPdftotext(localPath)
+	if popplerErr != nil {
+		log.Printf("[EXTRACT] pdftotext failed for %s (%v), falling back to Go PDF parser", localPath, popplerErr)
+		fullText = ""
+	}
+
+	if fullText != "" {
+		// pdftotext succeeded: split into paragraphs by double newlines
+		log.Printf("[EXTRACT] pdftotext extracted text from %s (%d chars)", localPath, len(fullText))
+
+		rawParagraphs := strings.Split(fullText, "\n\n")
+		var paragraphs []Paragraph
+		wordCount := 0
+		paragraphIndex := 0
+		pageNum := 1
+
+		for _, rawP := range rawParagraphs {
+			cleaned := sanitizeText(rawP)
+			cleaned = strings.ReplaceAll(cleaned, "\n", " ")
+			cleaned = reNormalizeSpaces(cleaned)
+
+			// pdftotext uses \f (form feed) as page separator
+			if strings.ContainsRune(cleaned, '\f') {
+				pageNum++
+				cleaned = strings.ReplaceAll(cleaned, "\f", " ")
+				cleaned = reNormalizeSpaces(cleaned)
+			}
+
+			if len(cleaned) < 5 {
+				continue
+			}
+
+			words := strings.Fields(cleaned)
+			wordCount += len(words)
+
+			paragraphs = append(paragraphs, Paragraph{
+				ParagraphIndex: paragraphIndex,
+				PageNumber:     pageNum,
+				Text:           cleaned,
+			})
+			paragraphIndex++
+		}
+
+		id := strings.TrimSuffix(filepath.Base(localPath), ".pdf")
+		return &ExtractResponse{
+			ID:         id,
+			Status:     "success",
+			PageCount:  pageNum,
+			WordCount:  wordCount,
+			Paragraphs: paragraphs,
+		}, nil
+	}
+
+	// Fallback: Go dslipak/pdf parser
+	log.Printf("[EXTRACT] Using Go PDF parser (fallback) for %s", localPath)
+
 	file, err := os.Open(localPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file: %w", err)
 	}
 	defer file.Close()
-
-	// PDF Validation (Header check)
-	header := make([]byte, 5)
-	if _, err := file.Read(header); err != nil {
-		return nil, fmt.Errorf("failed to read file header: %w", err)
-	}
-	if !bytes.Equal(header, []byte("%PDF-")) {
-		return nil, fmt.Errorf("invalid PDF format: file header signature mismatch")
-	}
-
-	// Reset file pointer
-	file.Seek(0, io.SeekStart)
 
 	r, err := pdf.NewReader(file, fileInfo.Size())
 	if err != nil {
@@ -55,22 +124,20 @@ func handleExtract(localPath string) (*ExtractResponse, error) {
 		fonts := make(map[string]*pdf.Font)
 		plainText, err := page.GetPlainText(fonts)
 		if err != nil {
-			log.Printf("Warning: failed to extract text from page %d: %v", pageNum, err)
+			log.Printf("[EXTRACT] failed to extract text from page %d: %v", pageNum, err)
 			continue
 		}
 
-		// Parse plainText into paragraphs split by double newlines
 		rawParagraphs := strings.Split(plainText, "\n\n")
 		for _, rawP := range rawParagraphs {
-			cleaned := strings.TrimSpace(rawP)
-			cleaned = strings.ReplaceAll(cleaned, "\n", " ") // Normalize single newlines to spaces
+			cleaned := sanitizeText(rawP)
+			cleaned = strings.ReplaceAll(cleaned, "\n", " ")
 			cleaned = reNormalizeSpaces(cleaned)
 
-			if len(cleaned) < 5 { // Skip trivial segments
+			if len(cleaned) < 5 {
 				continue
 			}
 
-			// Count words
 			words := strings.Fields(cleaned)
 			wordCount += len(words)
 
@@ -84,7 +151,6 @@ func handleExtract(localPath string) (*ExtractResponse, error) {
 	}
 
 	id := strings.TrimSuffix(filepath.Base(localPath), ".pdf")
-
 	return &ExtractResponse{
 		ID:         id,
 		Status:     "success",

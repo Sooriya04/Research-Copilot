@@ -35,13 +35,16 @@ func main() {
 			return
 		}
 
+		log.Printf("[DOWNLOAD] Received download request for paper ID: %s, URL: %s", req.ID, req.PDFURL)
 		t0 := time.Now()
 		resp, err := handleDownload(&req)
 		if err != nil {
+			log.Printf("[DOWNLOAD] Failed to download paper %s: %v", req.ID, err)
 			writeJSONError(w, http.StatusInternalServerError, "Download Failed", err.Error())
 			return
 		}
 		duration := time.Since(t0)
+		log.Printf("[DOWNLOAD] Successfully downloaded paper %s in %d ms (saved to %s)", req.ID, duration.Milliseconds(), resp.LocalPath)
 
 		timersMutex.Lock()
 		downloadTimers[req.ID] = duration
@@ -63,13 +66,16 @@ func main() {
 			return
 		}
 
+		log.Printf("[EXTRACT] Received extraction request for path: %s", req.Path)
 		t0 := time.Now()
 		resp, err := handleExtract(req.Path)
 		if err != nil {
+			log.Printf("[EXTRACT] Failed to extract text from path %s: %v", req.Path, err)
 			writeJSONError(w, http.StatusInternalServerError, "Extraction Failed", err.Error())
 			return
 		}
 		extractDuration := time.Since(t0)
+		log.Printf("[EXTRACT] Successfully extracted text from paper %s (pages: %d, words: %d) in %d ms", resp.ID, resp.PageCount, resp.WordCount, extractDuration.Milliseconds())
 
 		id := resp.ID
 		timersMutex.Lock()
@@ -87,7 +93,7 @@ func main() {
 	})
 
 	port := "8001"
-	log.Printf("🚀 Starting stateless Go PDF Extractor service on port %s...", port)
+	log.Printf("Starting stateless Go PDF Extractor service on port %s...", port)
 	if err := http.ListenAndServe(":"+port, mux); err != nil {
 		log.Fatalf("Go server failed to start: %v", err)
 	}

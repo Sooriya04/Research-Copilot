@@ -1,4 +1,6 @@
 graphify-out
-*__pycache__
 .env
-services/pdf_extractor/pdf_extractor
+*.log
+research_copilot
+bin/
+pdf_extractor
