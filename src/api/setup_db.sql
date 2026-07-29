@@ -85,4 +85,42 @@ CREATE INDEX IF NOT EXISTS idx_hf_papers_published_at ON hf_papers(published_at)
 CREATE INDEX IF NOT EXISTS idx_hf_models_downloads ON hf_models(downloads);
 CREATE INDEX IF NOT EXISTS idx_hf_datasets_downloads ON hf_datasets(downloads);
 
+-- Initialize Semantic Scholar schemas (Bronze & Silver layers)
+CREATE TABLE IF NOT EXISTS raw_s2_documents (
+    source_id VARCHAR(50) PRIMARY KEY,
+    payload JSONB NOT NULL,
+    fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS s2_papers (
+    paper_id VARCHAR(50) PRIMARY KEY,
+    title TEXT NOT NULL,
+    abstract TEXT,
+    year INTEGER,
+    citation_count INTEGER DEFAULT 0,
+    influential_citation_count INTEGER DEFAULT 0,
+    is_open_access BOOLEAN DEFAULT FALSE,
+    pdf_url TEXT,
+    paper_url TEXT,
+    reference_count INTEGER DEFAULT 0,
+    venue TEXT,
+    publication_date DATE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS s2_authors (
+    author_id VARCHAR(50) PRIMARY KEY,
+    name TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS s2_paper_authors (
+    paper_id VARCHAR(50) REFERENCES s2_papers(paper_id) ON DELETE CASCADE,
+    author_id VARCHAR(50) REFERENCES s2_authors(author_id) ON DELETE CASCADE,
+    PRIMARY KEY (paper_id, author_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_s2_papers_citation ON s2_papers(citation_count);
+
+
 

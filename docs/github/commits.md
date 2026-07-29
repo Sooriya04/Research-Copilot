@@ -80,3 +80,19 @@
   * Aligned the JSON struct tags in `HFModel` and `HFDataset` from `model_id` / `dataset_id` to `id` to match the incoming REST response schemas, correcting empty ID and URL response structures.
 * **Graphify Rebuild**:
   * Refreshed structural knowledge index via `/graphify update .` using static AST extraction.
+
+<br />
+
+## Commit 6 (dev and main) : Implement Semantic Scholar Ingestion, In-Flight Task Deduplication, and Global Query Duplication Middleware
+
+* **Semantic Scholar Search & Ingestion (`src/ingestion/semanticscholar`)**:
+  * Built a native Go connector to query the Semantic Scholar Graph Search API (`/paper/search`) to retrieve rich academic metadata including citation counts, influential citations, venue, reference count, and open access properties.
+  * Extracted Open Access PDF URLs (including resolving arXiv pdf documents) and concurrently downloaded and indexed text paragraphs using the shared PDF extractor.
+  * Kept the package strictly modular with 5 source files (`client.go`, `models.go`, `parser.go`, `ingest_paper.go`, `sync_extractor.go`) all under 125 lines.
+* **Bronze & Silver Database Schemas**:
+  * Deployed `raw_s2_documents`, `s2_papers`, `s2_authors`, and `s2_paper_authors` schemas in PostgreSQL to cache all fetched research metadata.
+* **In-Flight Task Deduplication Manager**:
+  * Developed a thread-safe deduplication lock manager (`src/core/dedup.go`) with `AcquireInFlight` and `ReleaseInFlight` to avoid concurrent redundant PDF downloads or extraction calls for the same paper ID.
+* **Global HTTP Duplication Monitor Middleware**:
+  * Built a custom HTTP middleware (`duplicationMonitorMiddleware`) wrapping the search endpoints to detect identical keyword/topic queries submitted within a 30-second window, reporting total queries, duplicate counts, and duplication rates in terminal logs.
+

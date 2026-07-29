@@ -15,6 +15,14 @@ import (
 // 3. Stores transformed metadata into hf_papers / hf_paper_authors (Silver).
 // 4. Concurrently triggers arXiv-style PDF download + text extraction & stores text in arxiv_papers database.
 func (c *HuggingFaceClient) ingestHFPaper(ctx context.Context, p HFPaper, rawDoc HFResponseItem) {
+	// Deduplicate in-flight ingestion tasks
+	lockKey := "huggingface:" + p.PaperID
+	if !core.AcquireInFlight(lockKey) {
+		log.Printf("[INGESTION] [HF:%s] Ingestion already in-flight. Skipping duplicate worker.", p.PaperID)
+		return
+	}
+	defer core.ReleaseInFlight(lockKey)
+
 	// Sanitize inputs
 	p.PaperID = strings.ReplaceAll(p.PaperID, "\x00", "")
 	p.Title = strings.ReplaceAll(p.Title, "\x00", "")

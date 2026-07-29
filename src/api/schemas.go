@@ -17,3 +17,9 @@ type HuggingFaceSearchRequest struct {
 	TopK  int    `json:"top_k"`
 }
 
+type SemanticScholarSearchRequest struct {
+	Query string `json:"query"`
+	TopK  int    `json:"top_k"`
+}
+
+

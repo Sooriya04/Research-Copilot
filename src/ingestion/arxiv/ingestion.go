@@ -12,6 +12,14 @@ import (
 
 // ingestPaper handles the full download → extract → DB write pipeline for a single paper.
 func (c *ArxivClient) ingestPaper(ctx context.Context, p ArxivPaper) {
+	// Deduplicate in-flight ingestion tasks
+	lockKey := "arxiv:" + p.ArxivID
+	if !core.AcquireInFlight(lockKey) {
+		log.Printf("[INGESTION] [%s] Ingestion already in-flight. Skipping duplicate worker.", p.ArxivID)
+		return
+	}
+	defer core.ReleaseInFlight(lockKey)
+
 	// Sanitize paper struct strings to strip null bytes (PostgreSQL doesn't support them in text fields)
 	p.Title = strings.ReplaceAll(p.Title, "\x00", "")
 	p.Abstract = strings.ReplaceAll(p.Abstract, "\x00", "")

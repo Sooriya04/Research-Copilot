@@ -9,10 +9,12 @@ import (
 
 	"research_copilot/src/ingestion/arxiv"
 	"research_copilot/src/ingestion/huggingface"
+	"research_copilot/src/ingestion/semanticscholar"
 )
 
 var arxivClient = arxiv.NewArxivClient()
 var hfClient = huggingface.NewHuggingFaceClient()
+var s2Client = semanticscholar.NewS2Client()
 
 // RegisterRoutes registers the handlers on the given HTTP ServeMux
 func RegisterRoutes(mux *http.ServeMux) {
@@ -20,6 +22,7 @@ func RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/search/arxiv", handleSearchArxiv)
 	mux.HandleFunc("/api/v1/papers/arxiv/", handleGetPaperByID)
 	mux.HandleFunc("/api/v1/search/huggingface", handleSearchHuggingFace)
+	mux.HandleFunc("/api/v1/search/semanticscholar", handleSearchSemanticScholar)
 }
 
 func writeJSONResponse(w http.ResponseWriter, status int, data interface{}) {
@@ -149,4 +152,40 @@ func handleSearchHuggingFace(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[API] Successfully fetched %d Hugging Face results in %v", results.ReturnedCount, duration)
 	writeJSONResponse(w, http.StatusOK, results)
 }
+
+func handleSearchSemanticScholar(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method Not Allowed")
+		return
+	}
+
+	var req SemanticScholarSearchRequest
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+
+	if req.Query == "" {
+		writeJSONError(w, http.StatusBadRequest, "Missing query parameter")
+		return
+	}
+
+	if req.TopK <= 0 {
+		req.TopK = 5
+	}
+
+	log.Printf("[API] Received Semantic Scholar search request. Query: '%s', Top K: %d", req.Query, req.TopK)
+	startTime := time.Now()
+
+	results, err := s2Client.Search(r.Context(), req.Query, req.TopK)
+	if err != nil {
+		log.Printf("[API] Exception occurred during Semantic Scholar search: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	duration := time.Since(startTime)
+	log.Printf("[API] Successfully fetched %d Semantic Scholar results in %v", results.ReturnedCount, duration)
+	writeJSONResponse(w, http.StatusOK, results)
+}
+
 
