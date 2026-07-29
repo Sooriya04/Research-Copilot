@@ -24,7 +24,7 @@ var (
 func duplicationMonitorMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Only monitor POST search requests
-		if r.Method == http.MethodPost && (r.URL.Path == "/api/v1/search/arxiv" || r.URL.Path == "/api/v1/search/huggingface" || r.URL.Path == "/api/v1/search/semanticscholar") {
+		if r.Method == http.MethodPost && (r.URL.Path == "/api/v1/search/arxiv" || r.URL.Path == "/api/v1/search/huggingface" || r.URL.Path == "/api/v1/search/semanticscholar" || r.URL.Path == "/api/v1/search/kaggle") {
 			// Read body to extract query
 			bodyBytes, err := io.ReadAll(r.Body)
 			if err == nil {

@@ -22,4 +22,10 @@ type SemanticScholarSearchRequest struct {
 	TopK  int    `json:"top_k"`
 }
 
+type KaggleSearchRequest struct {
+	Query string `json:"query"`
+	TopK  int    `json:"top_k"`
+}
+
+
 

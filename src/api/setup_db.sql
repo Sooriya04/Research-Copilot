@@ -122,5 +122,47 @@ CREATE TABLE IF NOT EXISTS s2_paper_authors (
 
 CREATE INDEX IF NOT EXISTS idx_s2_papers_citation ON s2_papers(citation_count);
 
+-- Initialize Kaggle schemas (Bronze & Silver layers)
+CREATE TABLE IF NOT EXISTS raw_kaggle_doc (
+    ref VARCHAR(255) PRIMARY KEY,
+    type VARCHAR(50) NOT NULL, -- 'dataset' or 'model'
+    payload JSONB NOT NULL,
+    fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS kaggle_datasets (
+    ref VARCHAR(255) PRIMARY KEY,
+    title TEXT NOT NULL,
+    subtitle TEXT,
+    creator_name TEXT,
+    creator_url TEXT,
+    total_bytes BIGINT DEFAULT 0,
+    url TEXT,
+    download_count INTEGER DEFAULT 0,
+    vote_count INTEGER DEFAULT 0,
+    usability_rating NUMERIC(4, 2) DEFAULT 0.0,
+    license_name TEXT,
+    tags TEXT[],
+    fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS kaggle_models (
+    url TEXT PRIMARY KEY,
+    ref VARCHAR(255) NOT NULL,
+    title TEXT NOT NULL,
+    subtitle TEXT,
+    owner_name TEXT,
+    owner_ref TEXT,
+    framework VARCHAR(100),
+    fine_tunable BOOLEAN DEFAULT FALSE,
+    vote_count INTEGER DEFAULT 0,
+    tags TEXT[],
+    fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_kaggle_datasets_downloads ON kaggle_datasets(download_count);
+CREATE INDEX IF NOT EXISTS idx_kaggle_models_votes ON kaggle_models(vote_count);
+
+
 
 

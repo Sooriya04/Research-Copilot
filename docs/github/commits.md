@@ -96,3 +96,16 @@
 * **Global HTTP Duplication Monitor Middleware**:
   * Built a custom HTTP middleware (`duplicationMonitorMiddleware`) wrapping the search endpoints to detect identical keyword/topic queries submitted within a 30-second window, reporting total queries, duplicate counts, and duplication rates in terminal logs.
 
+
+## Commit 7 (dev and main) : Implement Kaggle Client for Datasets & Models Search and Ingestion
+
+* **Kaggle REST API Integration (`src/ingestion/kaggle`)**:
+  * Implemented a native Go client to search Kaggle Datasets (`/datasets/list`) and Models (`/models/list`) using the new Kaggle API Bearer Token authentication flow.
+  * Flat-mapped models variations structures into standard entities to present frameworks and tuning attributes seamlessly.
+  * Ensured a highly modular package layout with 4 files (`client.go`, `models.go`, `parser.go`, `ingestion.go`) all under 190 lines of code.
+* **Bronze & Silver Database Relational Schemas**:
+  * Deployed `raw_kaggle_doc` (Bronze storage payload table), `kaggle_datasets` (Silver datasets cache), and `kaggle_models` (Silver models cache) to support robust background persistence.
+* **Duplication Middleware & Graphify update**:
+  * Configured duplication middleware to monitor Kaggle POST requests, calculating rates and hit ratios, and ran static `graphify` code AST updates.
+
+
