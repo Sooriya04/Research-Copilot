@@ -32,6 +32,12 @@ type OpenAlexSearchRequest struct {
 	TopK  int    `json:"top_k"`
 }
 
+type CrossrefSearchRequest struct {
+	Query string `json:"query"`
+	TopK  int    `json:"top_k"`
+}
+
+
 
 
 

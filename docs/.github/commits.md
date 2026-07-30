@@ -122,3 +122,16 @@
   * Serialized background ingestion loop with a 1.2-second rate-limiting delay between tasks to protect public API allocations.
 
 
+## Commit 9 (dev and main) : Implement Crossref Client for Works Search and Polite Pool Ingestion
+
+* **Crossref Ingestion Subsystem (`src/ingestion/crossref`)**:
+  * Deployed a native Go client to query Crossref REST API works (`/works?query=query`), utilizing `CROSSREF_EMAIL` environment variable to hook into the API's "Polite Pool" for high-priority bandwidth.
+  * Created Bronze (`raw_crossref_doc`) and Silver (`crossref_papers`, `crossref_authors`, `crossref_paper_authors`) schema tables.
+  * Constructed parsing rules to handle Citeproc-JSON `date-parts` formats, links array PDF mapping, and JATS XML abstract tag-stripping.
+  * Integrated sequential rate-limiting (1.2-second sleep) inside the background worker pipeline to respect polite pool guidelines.
+  * Added Semantic Scholar fallback DOI lookup and PDF extraction sync paths.
+* **Routing & Middleware Integration**:
+  * Registered route `POST /api/v1/search/crossref` in `router.go` and mapped it to query duplication detection middleware.
+
+
+

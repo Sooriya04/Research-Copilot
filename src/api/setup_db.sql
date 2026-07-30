@@ -196,3 +196,40 @@ CREATE TABLE IF NOT EXISTS openalex_paper_authors (
 );
 
 CREATE INDEX IF NOT EXISTS idx_openalex_papers_citation ON openalex_papers(citation_count);
+
+-- Initialize Crossref schemas (Bronze & Silver layers)
+CREATE TABLE IF NOT EXISTS raw_crossref_doc (
+    source_id VARCHAR(100) PRIMARY KEY,
+    payload JSONB NOT NULL,
+    fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS crossref_papers (
+    paper_id VARCHAR(100) PRIMARY KEY, -- Stores DOI
+    title TEXT NOT NULL,
+    abstract TEXT,
+    year INTEGER,
+    citation_count INTEGER DEFAULT 0,
+    is_open_access BOOLEAN DEFAULT FALSE,
+    pdf_url TEXT,
+    paper_url TEXT,
+    publication_date DATE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS crossref_authors (
+    author_id SERIAL PRIMARY KEY,
+    given_name TEXT,
+    family_name TEXT,
+    full_name TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uniq_crossref_author UNIQUE (given_name, family_name, full_name)
+);
+
+CREATE TABLE IF NOT EXISTS crossref_paper_authors (
+    paper_id VARCHAR(100) REFERENCES crossref_papers(paper_id) ON DELETE CASCADE,
+    author_id INTEGER REFERENCES crossref_authors(author_id) ON DELETE CASCADE,
+    PRIMARY KEY (paper_id, author_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_crossref_papers_citation ON crossref_papers(citation_count);
