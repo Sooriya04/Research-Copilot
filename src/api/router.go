@@ -10,6 +10,7 @@ import (
 	"research_copilot/src/ingestion/arxiv"
 	"research_copilot/src/ingestion/huggingface"
 	"research_copilot/src/ingestion/kaggle"
+	"research_copilot/src/ingestion/openalex"
 	"research_copilot/src/ingestion/semanticscholar"
 )
 
@@ -17,6 +18,7 @@ var arxivClient = arxiv.NewArxivClient()
 var hfClient = huggingface.NewHuggingFaceClient()
 var s2Client = semanticscholar.NewS2Client()
 var kaggleClient = kaggle.NewKaggleClient()
+var openAlexClient = openalex.NewOpenAlexClient()
 
 // RegisterRoutes registers the handlers on the given HTTP ServeMux
 func RegisterRoutes(mux *http.ServeMux) {
@@ -26,6 +28,7 @@ func RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/search/huggingface", handleSearchHuggingFace)
 	mux.HandleFunc("/api/v1/search/semanticscholar", handleSearchSemanticScholar)
 	mux.HandleFunc("/api/v1/search/kaggle", handleSearchKaggle)
+	mux.HandleFunc("/api/v1/search/openalex", handleSearchOpenAlex)
 }
 
 func writeJSONResponse(w http.ResponseWriter, status int, data interface{}) {
@@ -225,6 +228,42 @@ func handleSearchKaggle(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[API] Successfully fetched %d Kaggle results in %v", results.ReturnedCount, duration)
 	writeJSONResponse(w, http.StatusOK, results)
 }
+
+func handleSearchOpenAlex(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method Not Allowed")
+		return
+	}
+
+	var req OpenAlexSearchRequest
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+
+	if req.Query == "" {
+		writeJSONError(w, http.StatusBadRequest, "Missing query parameter")
+		return
+	}
+
+	if req.TopK <= 0 {
+		req.TopK = 5
+	}
+
+	log.Printf("[API] Received OpenAlex search request. Query: '%s', Top K: %d", req.Query, req.TopK)
+	startTime := time.Now()
+
+	results, err := openAlexClient.Search(r.Context(), req.Query, req.TopK)
+	if err != nil {
+		log.Printf("[API] Exception occurred during OpenAlex search: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	duration := time.Since(startTime)
+	log.Printf("[API] Successfully fetched %d OpenAlex results in %v", results.ReturnedCount, duration)
+	writeJSONResponse(w, http.StatusOK, results)
+}
+
 
 
 

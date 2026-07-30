@@ -18,17 +18,14 @@ cleanup_on_exit() {
 trap cleanup_on_exit SIGINT SIGTERM
 
 echo "🚀 Starting Go PDF Extractor service on port 8001..."
-# Run and prefix output with [PDF EXTRACTOR]
-./services/pdf_extractor/pdf_extractor 2>&1 | sed -e 's/^/[PDF EXTRACTOR] : /' &
+# Run and prefix output with [PDF EXTRACTOR] (unbuffered)
+./services/pdf_extractor/pdf_extractor 2>&1 | sed -u -e 's/^/[PDF EXTRACTOR] : /' &
 EXTRACTOR_PID=$!
 
 echo "🚀 Starting Main Go Backend Server on port 8000..."
-# Run and prefix output with [GO BACKEND]
-./research_copilot 2>&1 | sed -e 's/^/[GO BACKEND]   : /' &
+# Run and prefix output with [GO BACKEND] (unbuffered)
+./research_copilot 2>&1 | sed -u -e 's/^/[GO BACKEND]   : /' &
 BACKEND_PID=$!
 
 echo "🟢 Both services are running. Live logs stream below (Press Ctrl+C to stop):"
 echo "------------------------------------------------------------------------"
-
-# Wait for background processes to keep script running in foreground
-wait $EXTRACTOR_PID $BACKEND_PID

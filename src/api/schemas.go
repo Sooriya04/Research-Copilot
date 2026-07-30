@@ -27,5 +27,11 @@ type KaggleSearchRequest struct {
 	TopK  int    `json:"top_k"`
 }
 
+type OpenAlexSearchRequest struct {
+	Query string `json:"query"`
+	TopK  int    `json:"top_k"`
+}
+
+
 
 

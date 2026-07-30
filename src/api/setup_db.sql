@@ -163,6 +163,36 @@ CREATE TABLE IF NOT EXISTS kaggle_models (
 CREATE INDEX IF NOT EXISTS idx_kaggle_datasets_downloads ON kaggle_datasets(download_count);
 CREATE INDEX IF NOT EXISTS idx_kaggle_models_votes ON kaggle_models(vote_count);
 
+-- Initialize OpenAlex schemas (Bronze & Silver layers)
+CREATE TABLE IF NOT EXISTS raw_openalex_doc (
+    source_id VARCHAR(50) PRIMARY KEY,
+    payload JSONB NOT NULL,
+    fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
+CREATE TABLE IF NOT EXISTS openalex_papers (
+    paper_id VARCHAR(50) PRIMARY KEY,
+    title TEXT NOT NULL,
+    abstract TEXT,
+    year INTEGER,
+    citation_count INTEGER DEFAULT 0,
+    is_open_access BOOLEAN DEFAULT FALSE,
+    pdf_url TEXT,
+    paper_url TEXT,
+    publication_date DATE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
+CREATE TABLE IF NOT EXISTS openalex_authors (
+    author_id VARCHAR(50) PRIMARY KEY,
+    name TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
+CREATE TABLE IF NOT EXISTS openalex_paper_authors (
+    paper_id VARCHAR(50) REFERENCES openalex_papers(paper_id) ON DELETE CASCADE,
+    author_id VARCHAR(50) REFERENCES openalex_authors(author_id) ON DELETE CASCADE,
+    PRIMARY KEY (paper_id, author_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_openalex_papers_citation ON openalex_papers(citation_count);

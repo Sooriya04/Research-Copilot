@@ -109,3 +109,16 @@
   * Configured duplication middleware to monitor Kaggle POST requests, calculating rates and hit ratios, and ran static `graphify` code AST updates.
 
 
+## Commit 8 (dev and main) : Implement OpenAlex Client & Multi-Level Fallback Abstract Extraction
+
+* **OpenAlex Ingestion Subsystem (`src/ingestion/openalex`)**:
+  * Built a native Go client to search OpenAlex works (`/works?search=query`), supporting the optional `OPENALEX_API_KEY` configuration.
+  * Deployed Bronze (`raw_openalex_doc`) and Silver (`openalex_papers`, `openalex_authors`, `openalex_paper_authors`) schemas.
+  * Registered `POST /api/v1/search/openalex` in `router.go` and integrated it with `duplicationMonitorMiddleware` in `main.go`.
+* **Multi-Level Robust Abstract Fallback Ingestion**:
+  * Added fallback 1: Resolves missing abstracts by querying Semantic Scholar API via paper DOI (extracting it from OpenAlex response).
+  * Added S2 key-bypass logic: Automatically retries without an API key if the `.env` S2 key returns a `429` (Rate Limited) or `403` error.
+  * Added fallback 2: Concurrently downloads Open Access PDFs, triggering the Go PDF extractor microservice, and parses paragraphs to extract abstract segments if public catalog lookups fail.
+  * Serialized background ingestion loop with a 1.2-second rate-limiting delay between tasks to protect public API allocations.
+
+
