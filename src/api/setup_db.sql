@@ -233,3 +233,31 @@ CREATE TABLE IF NOT EXISTS crossref_paper_authors (
 );
 
 CREATE INDEX IF NOT EXISTS idx_crossref_papers_citation ON crossref_papers(citation_count);
+
+-- Unified search session and research papers tables
+CREATE TABLE IF NOT EXISTS search_sessions (
+    request_id UUID PRIMARY KEY,
+    query TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS research_papers (
+    id UUID PRIMARY KEY,
+    request_id UUID REFERENCES search_sessions(request_id) ON DELETE CASCADE,
+    source VARCHAR(50) NOT NULL,
+    external_id VARCHAR(255) NOT NULL,
+    title TEXT NOT NULL,
+    abstract TEXT,
+    authors JSONB DEFAULT '[]'::jsonb,
+    url TEXT,
+    pdf_url TEXT,
+    published_at TIMESTAMP,
+    citation_count INTEGER DEFAULT 0,
+    raw_metadata JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_research_papers_request_id ON research_papers(request_id);
+CREATE INDEX IF NOT EXISTS idx_research_papers_source ON research_papers(source);
+CREATE INDEX IF NOT EXISTS idx_search_sessions_query ON search_sessions(query);
+

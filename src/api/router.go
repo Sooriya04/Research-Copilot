@@ -7,6 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
+	"research_copilot/src/core"
 	"research_copilot/src/ingestion/arxiv"
 	"research_copilot/src/ingestion/crossref"
 	"research_copilot/src/ingestion/huggingface"
@@ -14,6 +17,7 @@ import (
 	"research_copilot/src/ingestion/openalex"
 	"research_copilot/src/ingestion/semanticscholar"
 )
+
 
 var arxivClient = arxiv.NewArxivClient()
 var hfClient = huggingface.NewHuggingFaceClient()
@@ -32,7 +36,10 @@ func RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/search/kaggle", handleSearchKaggle)
 	mux.HandleFunc("/api/v1/search/openalex", handleSearchOpenAlex)
 	mux.HandleFunc("/api/v1/search/crossref", handleSearchCrossref)
+	mux.HandleFunc("/api/v1/search/unified", handleSearchUnified)
+	mux.HandleFunc("/api/v1/papers/by-request/", handleGetPapersByRequestID)
 }
+
 
 func writeJSONResponse(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
@@ -301,6 +308,228 @@ func handleSearchCrossref(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[API] Successfully fetched %d Crossref results in %v", results.ReturnedCount, duration)
 	writeJSONResponse(w, http.StatusOK, results)
 }
+
+func extractArxivAuthors(authors []arxiv.Author) []string {
+	res := make([]string, len(authors))
+	for i, a := range authors {
+		res[i] = a.Name
+	}
+	return res
+}
+
+func extractOpenAlexAuthors(authors []openalex.OpenAlexAuthor) []string {
+	res := make([]string, len(authors))
+	for i, a := range authors {
+		res[i] = a.Name
+	}
+	return res
+}
+
+func extractS2Authors(authors []semanticscholar.S2Author) []string {
+	res := make([]string, len(authors))
+	for i, a := range authors {
+		res[i] = a.Name
+	}
+	return res
+}
+
+func strVal(s *string) string {
+	if s != nil {
+		return *s
+	}
+	return ""
+}
+
+func timeStrVal(t *time.Time) string {
+	if t != nil {
+		return t.Format(time.RFC3339)
+	}
+	return ""
+}
+
+func handleSearchUnified(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method Not Allowed")
+		return
+	}
+
+	var req UnifiedSearchRequest
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+
+	if req.Query == "" {
+		writeJSONError(w, http.StatusBadRequest, "Missing query parameter")
+		return
+	}
+
+	if req.TopK <= 0 {
+		req.TopK = 5
+	}
+
+	requestID := uuid.New().String()
+	log.Printf("[API] Received Unified search request. RequestID: '%s', Query: '%s', Top K: %d", requestID, req.Query, req.TopK)
+	startTime := time.Now()
+
+	// Insert search session if DB is initialized
+	if core.DB != nil {
+		_, _ = core.DB.Exec("INSERT INTO search_sessions (request_id, query) VALUES ($1, $2) ON CONFLICT DO NOTHING", requestID, req.Query)
+	}
+
+	var unifiedPapers []UnifiedResearchPaper
+
+	// 1. Fetch arXiv
+	arxivRes, err := arxivClient.Search(r.Context(), req.Query, req.TopK, 0, "relevance", "descending")
+	if err == nil && arxivRes != nil {
+		for _, p := range arxivRes.Papers {
+			authorNames := extractArxivAuthors(p.Authors)
+			authorsJSON, _ := json.Marshal(authorNames)
+			up := UnifiedResearchPaper{
+				ID:            uuid.New().String(),
+				RequestID:     requestID,
+				Source:        "arxiv",
+				ExternalID:    p.ArxivID,
+				Title:         p.Title,
+				Abstract:      p.Abstract,
+				Authors:       authorNames,
+				URL:           p.PDFURL,
+				PDFURL:        p.PDFURL,
+				PublishedAt:   p.PublishedDate,
+				CitationCount: 0,
+				RawMetadata:   map[string]interface{}{"journal_ref": strVal(p.JournalRef)},
+				CreatedAt:     time.Now().Format(time.RFC3339),
+			}
+			unifiedPapers = append(unifiedPapers, up)
+
+			if core.DB != nil {
+				_, _ = core.DB.Exec(`INSERT INTO research_papers (id, request_id, source, external_id, title, abstract, authors, url, pdf_url, raw_metadata)
+					VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+					up.ID, up.RequestID, up.Source, up.ExternalID, up.Title, up.Abstract, string(authorsJSON), up.URL, up.PDFURL, "{}")
+			}
+		}
+	}
+
+	// 2. Fetch OpenAlex
+	openAlexRes, err := openAlexClient.Search(r.Context(), req.Query, req.TopK)
+	if err == nil && openAlexRes != nil {
+		for _, p := range openAlexRes.Papers {
+			authorNames := extractOpenAlexAuthors(p.Authors)
+			authorsJSON, _ := json.Marshal(authorNames)
+			up := UnifiedResearchPaper{
+				ID:            uuid.New().String(),
+				RequestID:     requestID,
+				Source:        "openalex",
+				ExternalID:    p.PaperID,
+				Title:         p.Title,
+				Abstract:      p.Abstract,
+				Authors:       authorNames,
+				URL:           strVal(p.PaperURL),
+				PDFURL:        strVal(p.PDFURL),
+				PublishedAt:   timeStrVal(p.PublicationDate),
+				CitationCount: p.CitationCount,
+				RawMetadata:   map[string]interface{}{"is_open_access": p.IsOpenAccess},
+				CreatedAt:     time.Now().Format(time.RFC3339),
+			}
+			unifiedPapers = append(unifiedPapers, up)
+
+			if core.DB != nil {
+				_, _ = core.DB.Exec(`INSERT INTO research_papers (id, request_id, source, external_id, title, abstract, authors, url, pdf_url, citation_count, raw_metadata)
+					VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+					up.ID, up.RequestID, up.Source, up.ExternalID, up.Title, up.Abstract, string(authorsJSON), up.URL, up.PDFURL, up.CitationCount, "{}")
+			}
+		}
+	}
+
+	// 3. Fetch Semantic Scholar
+	s2Res, err := s2Client.Search(r.Context(), req.Query, req.TopK)
+	if err == nil && s2Res != nil {
+		for _, p := range s2Res.Papers {
+			authorNames := extractS2Authors(p.Authors)
+			authorsJSON, _ := json.Marshal(authorNames)
+			up := UnifiedResearchPaper{
+				ID:            uuid.New().String(),
+				RequestID:     requestID,
+				Source:        "semanticscholar",
+				ExternalID:    p.PaperID,
+				Title:         p.Title,
+				Abstract:      p.Abstract,
+				Authors:       authorNames,
+				URL:           strVal(p.PaperURL),
+				PDFURL:        strVal(p.PDFURL),
+				PublishedAt:   timeStrVal(p.PublicationDate),
+				CitationCount: p.CitationCount,
+				RawMetadata:   map[string]interface{}{"venue": strVal(p.Venue), "influential_citations": p.InfluentialCitationCount},
+				CreatedAt:     time.Now().Format(time.RFC3339),
+			}
+			unifiedPapers = append(unifiedPapers, up)
+
+			if core.DB != nil {
+				_, _ = core.DB.Exec(`INSERT INTO research_papers (id, request_id, source, external_id, title, abstract, authors, url, pdf_url, citation_count, raw_metadata)
+					VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+					up.ID, up.RequestID, up.Source, up.ExternalID, up.Title, up.Abstract, string(authorsJSON), up.URL, up.PDFURL, up.CitationCount, "{}")
+			}
+		}
+	}
+
+	duration := time.Since(startTime)
+	log.Printf("[API] Successfully fetched %d unified papers across sources for request_id '%s' in %v", len(unifiedPapers), requestID, duration)
+
+	resp := UnifiedSearchResponse{
+		RequestID:  requestID,
+		Query:      req.Query,
+		TotalCount: len(unifiedPapers),
+		Papers:     unifiedPapers,
+	}
+
+	writeJSONResponse(w, http.StatusOK, resp)
+}
+
+
+func handleGetPapersByRequestID(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method Not Allowed")
+		return
+	}
+
+	pathParts := strings.Split(r.URL.Path, "/api/v1/papers/by-request/")
+	if len(pathParts) < 2 || pathParts[1] == "" {
+		writeJSONError(w, http.StatusBadRequest, "Missing request_id in path")
+		return
+	}
+	reqID := pathParts[1]
+
+	log.Printf("[API] Querying unified research_papers for request_id: '%s'", reqID)
+
+	var papers []UnifiedResearchPaper
+
+	if core.DB != nil {
+		rows, err := core.DB.Query(`SELECT id, request_id, source, external_id, title, COALESCE(abstract, ''), authors, COALESCE(url, ''), COALESCE(pdf_url, ''), citation_count, created_at FROM research_papers WHERE request_id = $1`, reqID)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var p UnifiedResearchPaper
+				var authorsRaw string
+				var createdAt time.Time
+				if err := rows.Scan(&p.ID, &p.RequestID, &p.Source, &p.ExternalID, &p.Title, &p.Abstract, &authorsRaw, &p.URL, &p.PDFURL, &p.CitationCount, &createdAt); err == nil {
+					_ = json.Unmarshal([]byte(authorsRaw), &p.Authors)
+					p.CreatedAt = createdAt.Format(time.RFC3339)
+					papers = append(papers, p)
+				}
+			}
+		}
+	}
+
+	if papers == nil {
+		papers = []UnifiedResearchPaper{}
+	}
+
+	writeJSONResponse(w, http.StatusOK, map[string]interface{}{
+		"request_id":  reqID,
+		"total_count": len(papers),
+		"papers":      papers,
+	})
+}
+
 
 
 

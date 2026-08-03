@@ -4,4 +4,7 @@ graphify-out
 research_copilot
 bin/
 pdf_extractor
-services/omnigraph
+/services/omnigraph/omnigraph
+/services/pdf_extractor/pdf_extractor
+*.exe
+
