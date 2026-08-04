@@ -14,6 +14,11 @@ type S2OpenAccessPdfAPI struct {
 	Status string `json:"status"`
 }
 
+type S2FieldOfStudy struct {
+	Category string `json:"category"`
+	Source   string `json:"source"`
+}
+
 type S2PaperAPI struct {
 	PaperID                  string              `json:"paperId"`
 	Title                    string              `json:"title"`
@@ -28,6 +33,7 @@ type S2PaperAPI struct {
 	ReferenceCount           int                 `json:"referenceCount"`
 	Venue                    string              `json:"venue"`
 	PublicationDate          string              `json:"publicationDate"`
+	S2FieldsOfStudy          []S2FieldOfStudy    `json:"s2FieldsOfStudy"`
 }
 
 type S2APIResponse struct {
@@ -56,6 +62,7 @@ type S2Paper struct {
 	Venue                    *string    `json:"venue"`
 	PublicationDate          *time.Time `json:"publication_date"`
 	Authors                  []S2Author `json:"authors"`
+	Tasks                    []string   `json:"tasks"`
 }
 
 type S2SearchResult struct {

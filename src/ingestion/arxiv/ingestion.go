@@ -50,6 +50,10 @@ func (c *ArxivClient) ingestPaper(ctx context.Context, p ArxivPaper) {
 		cleanRef := strings.ReplaceAll(*p.JournalRef, "\x00", "")
 		p.JournalRef = &cleanRef
 	}
+	if p.Comment != nil {
+		cleanComment := strings.ReplaceAll(*p.Comment, "\x00", "")
+		p.Comment = &cleanComment
+	}
 
 	log.Printf("[INGESTION] [%s] Starting ingestion: '%s'", p.ArxivID, p.Title)
 

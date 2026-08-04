@@ -233,3 +233,81 @@ CREATE TABLE IF NOT EXISTS crossref_paper_authors (
 );
 
 CREATE INDEX IF NOT EXISTS idx_crossref_papers_citation ON crossref_papers(citation_count);
+
+-- Initialize Papers With Code schemas (Bronze & Silver layers)
+CREATE TABLE IF NOT EXISTS pwc_papers (
+    paper_id VARCHAR(255) PRIMARY KEY,
+    title TEXT NOT NULL,
+    abstract TEXT,
+    tasks JSONB DEFAULT '[]'::jsonb,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS pwc_repositories (
+    repo_url TEXT PRIMARY KEY,
+    paper_id VARCHAR(255) REFERENCES pwc_papers(paper_id) ON DELETE CASCADE,
+    framework VARCHAR(100),
+    stars INTEGER DEFAULT 0,
+    is_official BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS pwc_results (
+    id SERIAL PRIMARY KEY,
+    paper_id VARCHAR(255) REFERENCES pwc_papers(paper_id) ON DELETE CASCADE,
+    dataset TEXT,
+    task TEXT,
+    metric TEXT,
+    value TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Core search sessions mapping request_id to query
+CREATE TABLE IF NOT EXISTS search_sessions (
+    request_id VARCHAR(255) PRIMARY KEY,
+    query TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Unified research papers table for storing search results with reproduction details
+CREATE TABLE IF NOT EXISTS research_papers (
+    id VARCHAR(255) PRIMARY KEY,
+    request_id VARCHAR(255) REFERENCES search_sessions(request_id) ON DELETE CASCADE,
+    source VARCHAR(50) NOT NULL,
+    external_id VARCHAR(255) NOT NULL,
+    title TEXT NOT NULL,
+    abstract TEXT,
+    authors TEXT, -- JSON array string
+    url TEXT,
+    pdf_url TEXT,
+    citation_count INTEGER DEFAULT 0,
+    raw_metadata JSONB DEFAULT '{}'::jsonb,
+    code_repository TEXT,
+    frameworks JSONB DEFAULT '[]'::jsonb,
+    tasks JSONB DEFAULT '[]'::jsonb,
+    benchmarks JSONB DEFAULT '[]'::jsonb,
+    hyperparameters JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Schema tables for graph engine visualizer compatibility
+CREATE TABLE IF NOT EXISTS graph_nodes (
+    id VARCHAR(255) PRIMARY KEY,
+    request_id VARCHAR(255) REFERENCES search_sessions(request_id) ON DELETE CASCADE,
+    type VARCHAR(50) NOT NULL,
+    label TEXT NOT NULL,
+    properties JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS graph_edges (
+    id VARCHAR(255) PRIMARY KEY,
+    request_id VARCHAR(255) REFERENCES search_sessions(request_id) ON DELETE CASCADE,
+    source VARCHAR(255) NOT NULL,
+    target VARCHAR(255) NOT NULL,
+    relation VARCHAR(50) NOT NULL,
+    weight NUMERIC(4,2) DEFAULT 1.0,
+    properties JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+

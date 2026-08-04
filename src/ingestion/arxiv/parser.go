@@ -41,6 +41,7 @@ type AtomEntry struct {
 	Links           []AtomLink      `xml:"link"`
 	DOI             string          `xml:"doi"`
 	JournalRef      string          `xml:"journal_ref"`
+	Comment         string          `xml:"comment"`
 }
 
 type AtomAuthor struct {
@@ -183,6 +184,12 @@ func (c *ArxivClient) Search(ctx context.Context, query string, maxResults int, 
 			journalRef = &cleanRef
 		}
 
+		var commentPtr *string
+		if entry.Comment != "" {
+			cleanComment := c.cleanText(entry.Comment)
+			commentPtr = &cleanComment
+		}
+
 		paper := ArxivPaper{
 			ArxivID:         id,
 			Title:           c.cleanText(entry.Title),
@@ -195,6 +202,7 @@ func (c *ArxivClient) Search(ctx context.Context, query string, maxResults int, 
 			Categories:      categories,
 			DOI:             doi,
 			JournalRef:      journalRef,
+			Comment:         commentPtr,
 		}
 		if entry.Updated != "" {
 			upDate := entry.Updated

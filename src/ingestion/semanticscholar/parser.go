@@ -87,6 +87,13 @@ func (c *S2Client) Search(ctx context.Context, query string, limit int) (*S2Sear
 			}
 		}
 
+		var tasks []string
+		for _, fos := range item.S2FieldsOfStudy {
+			if fos.Category != "" {
+				tasks = append(tasks, fos.Category)
+			}
+		}
+
 		papers = append(papers, S2Paper{
 			PaperID:                  item.PaperID,
 			Title:                    item.Title,
@@ -101,6 +108,7 @@ func (c *S2Client) Search(ctx context.Context, query string, limit int) (*S2Sear
 			Venue:                    &item.Venue,
 			PublicationDate:          pubDate,
 			Authors:                  authors,
+			Tasks:                    tasks,
 		})
 	}
 

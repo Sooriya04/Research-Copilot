@@ -18,6 +18,7 @@ type ArxivPaper struct {
 	Categories      []string  `json:"categories"`
 	DOI             *string   `json:"doi"`
 	JournalRef      *string   `json:"journal_ref"`
+	Comment         *string   `json:"comment"`
 	FullText        *string   `json:"full_text"`
 	Paragraphs      []string  `json:"paragraphs"`
 }

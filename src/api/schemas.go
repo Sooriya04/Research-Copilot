@@ -37,6 +37,38 @@ type CrossrefSearchRequest struct {
 	TopK  int    `json:"top_k"`
 }
 
+type UnifiedSearchRequest struct {
+	Query string `json:"query"`
+	TopK  int    `json:"top_k"`
+}
+
+type UnifiedResearchPaper struct {
+	ID              string                 `json:"id"`
+	RequestID       string                 `json:"request_id"`
+	Source          string                 `json:"source"`
+	ExternalID      string                 `json:"external_id"`
+	Title           string                 `json:"title"`
+	Abstract        string                 `json:"abstract"`
+	Authors         []string               `json:"authors"`
+	URL             string                 `json:"url"`
+	PDFURL          string                 `json:"pdf_url"`
+	CitationCount   int                    `json:"citation_count"`
+	RawMetadata     map[string]interface{} `json:"raw_metadata"`
+	CodeRepository  string                 `json:"code_repository,omitempty"`
+	Frameworks      []string               `json:"frameworks"`
+	Tasks           []string               `json:"tasks"`
+	Benchmarks      []map[string]string    `json:"benchmarks"`
+	Hyperparameters map[string]interface{} `json:"hyperparameters,omitempty"`
+	CreatedAt       string                 `json:"created_at"`
+}
+
+type UnifiedSearchResponse struct {
+	RequestID  string                 `json:"request_id"`
+	Query      string                 `json:"query"`
+	TotalCount int                    `json:"total_count"`
+	Papers     []UnifiedResearchPaper `json:"papers"`
+}
+
 
 
 

@@ -133,5 +133,17 @@
 * **Routing & Middleware Integration**:
   * Registered route `POST /api/v1/search/crossref` in `router.go` and mapped it to query duplication detection middleware.
 
+## Commit 10 (dev and main) : Papers With Code Integration, Reproduction Enrichment & Modular Routing
 
-
+* **Database Refactoring & Reproduction Details**:
+  * Updated `research_papers` schema in `setup_db.sql` to support rich reproduction attributes (`code_repository`, `frameworks`, `tasks`, `benchmarks`, `hyperparameters`).
+  * Deployed Silver schemas for Papers With Code: `pwc_papers`, `pwc_repositories`, and `pwc_results`.
+* **Papers With Code Integration (`src/ingestion/paperswithcode`)**:
+  * Built the PWC API client to parse linked GitHub repositories, ML tasks, evaluation metrics, and framework details.
+* **Unified Provider Enrichment**:
+  * Extended arXiv, OpenAlex, Semantic Scholar, Crossref, and Hugging Face parsers to extract GitHub/GitLab links from abstracts/comments.
+  * Extracted concepts and topics as specific ML "tasks".
+  * Mapped deep learning frameworks (PyTorch, TensorFlow, Jax) from descriptions via regex heuristics.
+* **Modular API Routing Strategy**:
+  * Refactored monolithic `router.go` into domain-specific, independent routers (`arxiv_router.go`, `openalex_router.go`, `paperswithcode_router.go`, etc.).
+  * Centralized duplication and fallback logic inside `unified_router.go` for executing parallel cross-provider queries securely and aggregating the results.

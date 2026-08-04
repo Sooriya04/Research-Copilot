@@ -22,7 +22,7 @@ func NewS2Client() *S2Client {
 	return &S2Client{
 		BaseURL:   "https://api.semanticscholar.org/graph/v1",
 		APIKey:    apiKey,
-		Fields:    "paperId,title,abstract,authors,year,citationCount,influentialCitationCount,isOpenAccess,openAccessPdf,url,referenceCount,venue,publicationDate",
+		Fields:    "paperId,title,abstract,authors,year,citationCount,influentialCitationCount,isOpenAccess,openAccessPdf,url,referenceCount,venue,publicationDate,s2FieldsOfStudy",
 		Extractor: extractor.NewExtractorClient("http://localhost:8001/api/v1"),
 		Timeout:   15 * time.Second,
 		HTTPClient: &http.Client{

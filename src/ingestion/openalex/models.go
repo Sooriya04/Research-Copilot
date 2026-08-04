@@ -19,6 +19,11 @@ type OpenAlexOpenAccessAPI struct {
 	OAURL string `json:"oa_url"`
 }
 
+type OpenAlexConceptAPI struct {
+	DisplayName string `json:"display_name"`
+	Level       int    `json:"level"`
+}
+
 type OpenAlexWorkAPI struct {
 	ID                    string                 `json:"id"`
 	Title                 string                 `json:"title"`
@@ -29,6 +34,7 @@ type OpenAlexWorkAPI struct {
 	CitedByCount          int                    `json:"cited_by_count"`
 	OpenAccess            *OpenAlexOpenAccessAPI `json:"open_access"`
 	AbstractInvertedIndex map[string][]int       `json:"abstract_inverted_index"`
+	Concepts              []OpenAlexConceptAPI   `json:"concepts"`
 }
 
 type OpenAlexMeta struct {
@@ -56,6 +62,7 @@ type OpenAlexPaper struct {
 	PaperURL      *string    `json:"paper_url"`
 	PublicationDate *time.Time `json:"publication_date"`
 	Authors       []OpenAlexAuthor `json:"authors"`
+	Tasks         []string   `json:"tasks"`
 }
 
 type OpenAlexSearchResult struct {

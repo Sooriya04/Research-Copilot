@@ -4,14 +4,13 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"strings"
-	"time"
 
 	"research_copilot/src/ingestion/arxiv"
 	"research_copilot/src/ingestion/crossref"
 	"research_copilot/src/ingestion/huggingface"
 	"research_copilot/src/ingestion/kaggle"
 	"research_copilot/src/ingestion/openalex"
+	"research_copilot/src/ingestion/paperswithcode"
 	"research_copilot/src/ingestion/semanticscholar"
 )
 
@@ -21,6 +20,7 @@ var s2Client = semanticscholar.NewS2Client()
 var kaggleClient = kaggle.NewKaggleClient()
 var openAlexClient = openalex.NewOpenAlexClient()
 var crossrefClient = crossref.NewCrossrefClient()
+var pwcClient = paperswithcode.NewPWCClient()
 
 // RegisterRoutes registers the handlers on the given HTTP ServeMux
 func RegisterRoutes(mux *http.ServeMux) {
@@ -32,6 +32,10 @@ func RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/search/kaggle", handleSearchKaggle)
 	mux.HandleFunc("/api/v1/search/openalex", handleSearchOpenAlex)
 	mux.HandleFunc("/api/v1/search/crossref", handleSearchCrossref)
+	mux.HandleFunc("/api/v1/search/paperswithcode", handleSearchPapersWithCode)
+	mux.HandleFunc("/api/v1/search/unified", handleSearchUnified)
+	mux.HandleFunc("/api/v1/search/sessions", handleGetSearchSessions)
+	mux.HandleFunc("/api/v1/papers/by-request/", handleGetPapersByRequestID)
 }
 
 func writeJSONResponse(w http.ResponseWriter, status int, data interface{}) {
@@ -52,257 +56,3 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	log.Println("[API] Health check endpoint queried")
 	writeJSONResponse(w, http.StatusOK, HealthResponse{Status: "healthy"})
 }
-
-func handleSearchArxiv(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeJSONError(w, http.StatusMethodNotAllowed, "Method Not Allowed")
-		return
-	}
-
-	var req SearchRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "Invalid JSON body: "+err.Error())
-		return
-	}
-
-	if req.TopK == 0 {
-		req.TopK = 5
-	}
-	if req.SortBy == "" {
-		req.SortBy = "relevance"
-	}
-	if req.SortOrder == "" {
-		req.SortOrder = "descending"
-	}
-
-	log.Printf("[API] Received arXiv search request via HTTP POST. Query: '%s', Top K: %d", req.Query, req.TopK)
-	startTime := time.Now()
-
-	results, err := arxivClient.Search(r.Context(), req.Query, req.TopK, 0, req.SortBy, req.SortOrder)
-	if err != nil {
-		log.Printf("[API] ❌ Exception occurred while searching arXiv: %v", err)
-		// Return empty search result rather than crashing
-		writeJSONResponse(w, http.StatusOK, arxiv.ArxivSearchResult{
-			Query:        req.Query,
-			TotalResults: 0,
-			Papers:       []arxiv.ArxivPaper{},
-		})
-		return
-	}
-
-	duration := time.Since(startTime)
-	log.Printf("[API] Successfully fetched %d papers for query '%s' in %v (total matched: %d)",
-		results.ReturnedCount, req.Query, duration, results.TotalResults)
-
-	writeJSONResponse(w, http.StatusOK, results)
-}
-
-func handleGetPaperByID(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeJSONError(w, http.StatusMethodNotAllowed, "Method Not Allowed")
-		return
-	}
-
-	// Extract arxiv_id from url path e.g. "/api/v1/papers/arxiv/1706.03762"
-	pathParts := strings.Split(r.URL.Path, "/api/v1/papers/arxiv/")
-	if len(pathParts) < 2 || pathParts[1] == "" {
-		writeJSONError(w, http.StatusBadRequest, "Missing arXiv ID in path")
-		return
-	}
-	arxivID := pathParts[1]
-
-	log.Printf("[API] Received request to fetch paper by ID: '%s'", arxivID)
-
-	results, err := arxivClient.Search(r.Context(), "id:"+arxivID, 1, 0, "relevance", "descending")
-	if err != nil || len(results.Papers) == 0 {
-		log.Printf("[API] ⚠️ Paper with arXiv ID '%s' not found.", arxivID)
-		writeJSONError(w, http.StatusNotFound, "Paper with arXiv ID "+arxivID+" not found.")
-		return
-	}
-
-	log.Printf("[API] Successfully fetched paper details for ID: '%s'", arxivID)
-	writeJSONResponse(w, http.StatusOK, results.Papers[0])
-}
-
-func handleSearchHuggingFace(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeJSONError(w, http.StatusMethodNotAllowed, "Method Not Allowed")
-		return
-	}
-
-	var req HuggingFaceSearchRequest
-	if r.Body != nil {
-		_ = json.NewDecoder(r.Body).Decode(&req)
-	}
-
-	if req.TopK <= 0 {
-		req.TopK = 5
-	}
-
-	var results *huggingface.HFSearchResult
-	var err error
-	startTime := time.Now()
-
-	if req.Query != "" {
-		log.Printf("[API] Received Hugging Face search request. Query: '%s', Top K: %d", req.Query, req.TopK)
-		results, err = hfClient.Search(r.Context(), req.Query, req.TopK)
-	} else {
-		log.Printf("[API] Received Hugging Face daily papers request. Date: '%s'", req.Date)
-		results, err = hfClient.FetchDailyPapers(r.Context(), req.Date)
-	}
-
-	if err != nil {
-		log.Printf("[API] Exception occurred during Hugging Face query: %v", err)
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	duration := time.Since(startTime)
-	log.Printf("[API] Successfully fetched %d Hugging Face results in %v", results.ReturnedCount, duration)
-	writeJSONResponse(w, http.StatusOK, results)
-}
-
-func handleSearchSemanticScholar(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeJSONError(w, http.StatusMethodNotAllowed, "Method Not Allowed")
-		return
-	}
-
-	var req SemanticScholarSearchRequest
-	if r.Body != nil {
-		_ = json.NewDecoder(r.Body).Decode(&req)
-	}
-
-	if req.Query == "" {
-		writeJSONError(w, http.StatusBadRequest, "Missing query parameter")
-		return
-	}
-
-	if req.TopK <= 0 {
-		req.TopK = 5
-	}
-
-	log.Printf("[API] Received Semantic Scholar search request. Query: '%s', Top K: %d", req.Query, req.TopK)
-	startTime := time.Now()
-
-	results, err := s2Client.Search(r.Context(), req.Query, req.TopK)
-	if err != nil {
-		log.Printf("[API] Exception occurred during Semantic Scholar search: %v", err)
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	duration := time.Since(startTime)
-	log.Printf("[API] Successfully fetched %d Semantic Scholar results in %v", results.ReturnedCount, duration)
-	writeJSONResponse(w, http.StatusOK, results)
-}
-
-func handleSearchKaggle(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeJSONError(w, http.StatusMethodNotAllowed, "Method Not Allowed")
-		return
-	}
-
-	var req KaggleSearchRequest
-	if r.Body != nil {
-		_ = json.NewDecoder(r.Body).Decode(&req)
-	}
-
-	if req.Query == "" {
-		writeJSONError(w, http.StatusBadRequest, "Missing query parameter")
-		return
-	}
-
-	if req.TopK <= 0 {
-		req.TopK = 5
-	}
-
-	log.Printf("[API] Received Kaggle search request. Query: '%s', Top K: %d", req.Query, req.TopK)
-	startTime := time.Now()
-
-	results, err := kaggleClient.Search(r.Context(), req.Query, req.TopK)
-	if err != nil {
-		log.Printf("[API] Exception occurred during Kaggle search: %v", err)
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	duration := time.Since(startTime)
-	log.Printf("[API] Successfully fetched %d Kaggle results in %v", results.ReturnedCount, duration)
-	writeJSONResponse(w, http.StatusOK, results)
-}
-
-func handleSearchOpenAlex(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeJSONError(w, http.StatusMethodNotAllowed, "Method Not Allowed")
-		return
-	}
-
-	var req OpenAlexSearchRequest
-	if r.Body != nil {
-		_ = json.NewDecoder(r.Body).Decode(&req)
-	}
-
-	if req.Query == "" {
-		writeJSONError(w, http.StatusBadRequest, "Missing query parameter")
-		return
-	}
-
-	if req.TopK <= 0 {
-		req.TopK = 5
-	}
-
-	log.Printf("[API] Received OpenAlex search request. Query: '%s', Top K: %d", req.Query, req.TopK)
-	startTime := time.Now()
-
-	results, err := openAlexClient.Search(r.Context(), req.Query, req.TopK)
-	if err != nil {
-		log.Printf("[API] Exception occurred during OpenAlex search: %v", err)
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	duration := time.Since(startTime)
-	log.Printf("[API] Successfully fetched %d OpenAlex results in %v", results.ReturnedCount, duration)
-	writeJSONResponse(w, http.StatusOK, results)
-}
-
-func handleSearchCrossref(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeJSONError(w, http.StatusMethodNotAllowed, "Method Not Allowed")
-		return
-	}
-
-	var req CrossrefSearchRequest
-	if r.Body != nil {
-		_ = json.NewDecoder(r.Body).Decode(&req)
-	}
-
-	if req.Query == "" {
-		writeJSONError(w, http.StatusBadRequest, "Missing query parameter")
-		return
-	}
-
-	if req.TopK <= 0 {
-		req.TopK = 5
-	}
-
-	log.Printf("[API] Received Crossref search request. Query: '%s', Top K: %d", req.Query, req.TopK)
-	startTime := time.Now()
-
-	results, err := crossrefClient.Search(r.Context(), req.Query, req.TopK)
-	if err != nil {
-		log.Printf("[API] Exception occurred during Crossref search: %v", err)
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	duration := time.Since(startTime)
-	log.Printf("[API] Successfully fetched %d Crossref results in %v", results.ReturnedCount, duration)
-	writeJSONResponse(w, http.StatusOK, results)
-}
-
-
-
-
-

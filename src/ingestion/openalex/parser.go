@@ -93,6 +93,13 @@ func (c *OpenAlexClient) Search(ctx context.Context, query string, limit int) (*
 			paperURL = item.ID
 		}
 
+		var tasks []string
+		for _, concept := range item.Concepts {
+			if concept.Level >= 1 {
+				tasks = append(tasks, concept.DisplayName)
+			}
+		}
+
 		papers = append(papers, OpenAlexPaper{
 			PaperID:       cleanID,
 			Title:         item.Title,
@@ -104,6 +111,7 @@ func (c *OpenAlexClient) Search(ctx context.Context, query string, limit int) (*
 			PaperURL:      &paperURL,
 			PublicationDate: pubDate,
 			Authors:       authors,
+			Tasks:         tasks,
 		})
 	}
 
