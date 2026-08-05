@@ -147,3 +147,14 @@
 * **Modular API Routing Strategy**:
   * Refactored monolithic `router.go` into domain-specific, independent routers (`arxiv_router.go`, `openalex_router.go`, `paperswithcode_router.go`, etc.).
   * Centralized duplication and fallback logic inside `unified_router.go` for executing parallel cross-provider queries securely and aggregating the results.
+
+## Commit 11 (dev and main) : Refactor Knowledge Engine and Optimize Visualizer Graph Generation
+
+* **Knowledge Engine Modular Re-architecture (`services/knowledge_engine`)**:
+  * Refactored monolithic `graph.go` by decoupling logical layers into dedicated packages: `similarity.go` (computes tokenize/Jaccard content overlap), `llm.go` (coordinates LLM prompt composition and Gemini REST API fallbacks), and `graph.go` (constructs graph metadata layers and handles exports).
+  * Implemented resilient fallback routines for CrossRef or Open Access documents lacking abstracts or PDF text: formats custom publication summaries dynamically using paper titles and metadata to prevent blank placeholders.
+  * Re-configured PostgreSQL persistence calls to use `ON CONFLICT (id) DO UPDATE` upserts to prevent concurrent database isolation failures.
+* **Understand-Anything Visualizer Optimization**:
+  * Gutted noisy ML task classifications (e.g. general physics concepts) and duplicate author/dataset nodes, showing only root search topics, publication articles, ML frameworks, and linked repository nodes.
+  * Added dynamic git subprocess querying in the Knowledge Engine: queries `git rev-parse HEAD` on the fly to write git commit hash metadata inside `.ua/knowledge-graph.json` to prevent freshness errors.
+  * Patched `StalenessBanner.tsx` in the dashboard frontend code to return `null` immediately, disabling the uncommitted working-tree changes banner permanently.

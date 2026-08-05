@@ -298,6 +298,7 @@ func handleSearchUnified(w http.ResponseWriter, r *http.Request) {
 				citation_count, code_repository, frameworks, tasks, benchmarks, hyperparameters, created_at
 			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())
 			ON CONFLICT (id) DO UPDATE SET
+				request_id = EXCLUDED.request_id,
 				code_repository = EXCLUDED.code_repository,
 				frameworks = EXCLUDED.frameworks,
 				tasks = EXCLUDED.tasks,

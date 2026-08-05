@@ -9,7 +9,13 @@ cd services/pdf_extractor
 go build -o pdf_extractor
 cd ../..
 
-# 2. Build main Go backend server
+# 2. Build Go Knowledge Engine service (port 8002)
+echo "📦 Building Go Knowledge Engine service (port 8002)..."
+cd services/knowledge_engine
+go build -o knowledge_engine
+cd ../..
+
+# 3. Build main Go backend server
 echo "📦 Building Main Go Backend Server (port 8000)..."
 go build -o research_copilot .
 

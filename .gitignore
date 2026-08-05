@@ -5,3 +5,9 @@ research_copilot
 bin/
 pdf_extractor
 services/omnigraph
+research_papers_dump.json
+services/knowledge_engine/knowledge_engine
+.venv
+services/Understand-Anything/
+.ua/
+docs/task.md
