@@ -7,6 +7,7 @@ import (
 
 	"research_copilot/src/ingestion/arxiv"
 	"research_copilot/src/ingestion/crossref"
+	"research_copilot/src/ingestion/github"
 	"research_copilot/src/ingestion/huggingface"
 	"research_copilot/src/ingestion/kaggle"
 	"research_copilot/src/ingestion/openalex"
@@ -15,6 +16,7 @@ import (
 )
 
 var arxivClient = arxiv.NewArxivClient()
+var githubClient = github.NewGithubClient()
 var hfClient = huggingface.NewHuggingFaceClient()
 var s2Client = semanticscholar.NewS2Client()
 var kaggleClient = kaggle.NewKaggleClient()

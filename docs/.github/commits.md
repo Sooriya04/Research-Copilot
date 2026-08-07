@@ -158,3 +158,15 @@
   * Gutted noisy ML task classifications (e.g. general physics concepts) and duplicate author/dataset nodes, showing only root search topics, publication articles, ML frameworks, and linked repository nodes.
   * Added dynamic git subprocess querying in the Knowledge Engine: queries `git rev-parse HEAD` on the fly to write git commit hash metadata inside `.ua/knowledge-graph.json` to prevent freshness errors.
   * Patched `StalenessBanner.tsx` in the dashboard frontend code to return `null` immediately, disabling the uncommitted working-tree changes banner permanently.
+
+
+## Commit 12 (dev and main) : Implement GitHub Repository Ingestion and Unified Router Integration
+
+* **GitHub Ingestion Client (`src/ingestion/github`)**:
+  * Implemented a native Go client to query the GitHub REST API (`/search/repositories`) to fetch source code repositories based on unified search queries.
+  * Added environment variable support for `GITHUB_TOKEN` to allow authenticated requests and bypass the strict unauthenticated rate limits (10 req/min).
+  * Built strict data models (`models.go`) to parse `StargazersCount`, `Language`, `Topics`, and `Owner.Login`.
+* **Unified API Aggregation (`src/api/unified_router.go`)**:
+  * Added `"github"` as the 7th parallel source in the unified multi-source search controller.
+  * Mapped GitHub data models seamlessly to `UnifiedResearchPaper` (e.g. mapping repository stars to citations, and repo topics/language to ML frameworks).
+  * The unified engine automatically de-duplicates and aggregates GitHub results alongside Arxiv, PapersWithCode, and HuggingFace, storing the output in the `.ua/knowledge-graph.json` graph via background triggers.

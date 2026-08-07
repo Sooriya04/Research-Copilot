@@ -49,7 +49,7 @@ func handleSearchUnified(w http.ResponseWriter, r *http.Request) {
 	var rawPapers []UnifiedResearchPaper
 
 	// Launch searches in parallel
-	sources := []string{"arxiv", "openalex", "semanticscholar", "crossref", "huggingface", "paperswithcode"}
+	sources := []string{"arxiv", "openalex", "semanticscholar", "crossref", "huggingface", "paperswithcode", "github"}
 	for _, source := range sources {
 		wg.Add(1)
 		go func(src string) {
@@ -236,6 +236,34 @@ func handleSearchUnified(w http.ResponseWriter, r *http.Request) {
 							Frameworks:      frameworks,
 							Benchmarks:      benchmarks,
 							Hyperparameters: hparams,
+						})
+					}
+				}
+			case "github":
+				res, err := githubClient.Search(r.Context(), req.Query, req.TopK)
+				if err == nil {
+					for _, r := range res.Items {
+						var authors []string
+						if r.Owner.Login != "" {
+							authors = append(authors, r.Owner.Login)
+						}
+						
+						var frameworks []string
+						if r.Language != "" {
+							frameworks = append(frameworks, r.Language)
+						}
+						frameworks = append(frameworks, r.Topics...)
+
+						srcPapers = append(srcPapers, UnifiedResearchPaper{
+							Source:          "github",
+							ExternalID:      fmt.Sprintf("%d", r.ID),
+							Title:           r.FullName,
+							Abstract:        r.Description,
+							Authors:         authors,
+							URL:             r.HTMLURL,
+							CitationCount:   r.StargazersCount,
+							CodeRepository:  r.HTMLURL,
+							Frameworks:      frameworks,
 						})
 					}
 				}
