@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -12,6 +13,45 @@ import (
 	"github.com/google/uuid"
 	"research_copilot/src/core"
 )
+
+const queryExpansionURL = "http://localhost:8100/expand"
+
+type queryExpansionResponse struct {
+	Queries []string `json:"queries"`
+	Method  string   `json:"method"`
+}
+
+func expandQuery(query string) []string {
+	payload, _ := json.Marshal(map[string]string{
+		"query": query,
+	})
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Post(queryExpansionURL, "application/json", bytes.NewReader(payload))
+	if err != nil {
+		log.Printf("[EXPANSION] Python expansion server unreachable, using original query only: %v", err)
+		return []string{query}
+	}
+	defer resp.Body.Close()
+
+	var result queryExpansionResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		log.Printf("[EXPANSION] Failed to decode expansion response, using original query only: %v", err)
+		return []string{query}
+	}
+
+	finalQueries := []string{query}
+	for _, q := range result.Queries {
+		q = strings.TrimSpace(q)
+		if q != "" && q != query {
+			finalQueries = append(finalQueries, q)
+		}
+	}
+
+	log.Printf("[EXPANSION] Expanded '%s' using %s to: %v", query, result.Method, finalQueries)
+	return finalQueries
+}
+
 
 func handleSearchUnified(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -44,21 +84,25 @@ func handleSearchUnified(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	queriesToSearch := expandQuery(req.Query)
+	log.Printf("[API] Query expansion generated %d queries to execute.", len(queriesToSearch))
+
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var rawPapers []UnifiedResearchPaper
 
 	// Launch searches in parallel
 	sources := []string{"arxiv", "openalex", "semanticscholar", "crossref", "huggingface", "paperswithcode", "github"}
-	for _, source := range sources {
-		wg.Add(1)
-		go func(src string) {
-			defer wg.Done()
-			var srcPapers []UnifiedResearchPaper
+	for _, q := range queriesToSearch {
+		for _, source := range sources {
+			wg.Add(1)
+			go func(src string, searchQuery string) {
+				defer wg.Done()
+				var srcPapers []UnifiedResearchPaper
 
-			switch src {
-			case "arxiv":
-				res, err := arxivClient.Search(r.Context(), req.Query, req.TopK, 0, "relevance", "descending")
+				switch src {
+				case "arxiv":
+					res, err := arxivClient.Search(r.Context(), searchQuery, req.TopK, 0, "relevance", "descending")
 				if err == nil {
 					for _, p := range res.Papers {
 						var authors []string
@@ -88,7 +132,7 @@ func handleSearchUnified(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			case "openalex":
-				res, err := openAlexClient.Search(r.Context(), req.Query, req.TopK)
+				res, err := openAlexClient.Search(r.Context(), searchQuery, req.TopK)
 				if err == nil {
 					for _, p := range res.Papers {
 						var authors []string
@@ -116,7 +160,7 @@ func handleSearchUnified(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			case "semanticscholar":
-				res, err := s2Client.Search(r.Context(), req.Query, req.TopK)
+				res, err := s2Client.Search(r.Context(), searchQuery, req.TopK)
 				if err == nil {
 					for _, p := range res.Papers {
 						var authors []string
@@ -144,7 +188,7 @@ func handleSearchUnified(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			case "crossref":
-				res, err := crossrefClient.Search(r.Context(), req.Query, req.TopK)
+				res, err := crossrefClient.Search(r.Context(), searchQuery, req.TopK)
 				if err == nil {
 					for _, p := range res.Papers {
 						var authors []string
@@ -171,7 +215,7 @@ func handleSearchUnified(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			case "huggingface":
-				res, err := hfClient.Search(r.Context(), req.Query, req.TopK)
+				res, err := hfClient.Search(r.Context(), searchQuery, req.TopK)
 				if err == nil {
 					for _, p := range res.Papers {
 						repo := ""
@@ -198,7 +242,7 @@ func handleSearchUnified(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			case "paperswithcode":
-				res, err := pwcClient.Search(r.Context(), req.Query, req.TopK)
+				res, err := pwcClient.Search(r.Context(), searchQuery, req.TopK)
 				if err == nil {
 					for _, p := range res.Papers {
 						var repos []string
@@ -240,7 +284,7 @@ func handleSearchUnified(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			case "github":
-				res, err := githubClient.Search(r.Context(), req.Query, req.TopK)
+				res, err := githubClient.Search(r.Context(), searchQuery, req.TopK)
 				if err == nil {
 					for _, r := range res.Items {
 						var authors []string
@@ -272,8 +316,9 @@ func handleSearchUnified(w http.ResponseWriter, r *http.Request) {
 			mu.Lock()
 			rawPapers = append(rawPapers, srcPapers...)
 			mu.Unlock()
-		}(source)
+		}(source, q)
 	}
+}
 
 	wg.Wait()
 
@@ -314,6 +359,13 @@ func handleSearchUnified(w http.ResponseWriter, r *http.Request) {
 		p.ID = computeSHA256(p.Title)
 		p.RequestID = requestID
 
+		// Try to fetch PDF text if the paper exists in our cache from a previous run
+		var pdfText string
+		err := core.DB.QueryRowContext(r.Context(), "SELECT COALESCE(full_text, '') FROM arxiv_papers WHERE LOWER(title) = LOWER($1) LIMIT 1;", p.Title).Scan(&pdfText)
+		if err == nil && pdfText != "" {
+			p.PDFText = pdfText
+		}
+
 		authorsJSON, _ := json.Marshal(p.Authors)
 		frameworksJSON, _ := json.Marshal(p.Frameworks)
 		tasksJSON, _ := json.Marshal(p.Tasks)
@@ -341,13 +393,18 @@ func handleSearchUnified(w http.ResponseWriter, r *http.Request) {
 		finalPapers = append(finalPapers, p)
 	}
 
-	go triggerGraphGeneration(requestID)
+	// Count retrieved items by source
+	sourceCounts := make(map[string]int)
+	for _, p := range finalPapers {
+		sourceCounts[p.Source]++
+	}
 
 	response := UnifiedSearchResponse{
-		RequestID:  requestID,
-		Query:      req.Query,
-		TotalCount: len(finalPapers),
-		Papers:     finalPapers,
+		RequestID:    requestID,
+		Query:        req.Query,
+		TotalCount:   len(finalPapers),
+		SourceCounts: sourceCounts,
+		Papers:       finalPapers,
 	}
 
 	writeJSONResponse(w, http.StatusOK, response)
@@ -434,22 +491,3 @@ func handleGetPapersByRequestID(w http.ResponseWriter, r *http.Request) {
 	writeJSONResponse(w, http.StatusOK, papers)
 }
 
-func triggerGraphGeneration(requestID string) {
-	client := &http.Client{Timeout: 10 * time.Second}
-	reqURL := "http://localhost:8002/api/v1/graph/generate"
-	reqBody, _ := json.Marshal(map[string]string{"request_id": requestID})
-
-	log.Printf("[API] Triggering graph generation for request_id '%s'...", requestID)
-	resp, err := client.Post(reqURL, "application/json", strings.NewReader(string(reqBody)))
-	if err != nil {
-		log.Printf("[API] ❌ Failed to auto-trigger graph generation: %v", err)
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusOK {
-		log.Printf("[API] 🚀 Successfully triggered automatic graph generation for request_id '%s'", requestID)
-	} else {
-		log.Printf("[API] ⚠️ Graph generation service returned status: %d", resp.StatusCode)
-	}
-}

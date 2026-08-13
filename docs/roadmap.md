@@ -27,24 +27,25 @@ flowchart LR
 ## 📋 Detailed Phase Breakdown
 
 ### Phase 1: Data Collection & Ingestion Layer
-- [ ] Implement `BaseSourceClient` abstract interface.
-- [ ] Build 8 scientific source connectors:
-  - [ ] arXiv API Client
-  - [ ] Papers with Code Client
-  - [ ] Hugging Face Hub Client
-  - [ ] Kaggle API Client
-  - [ ] OpenAlex API Client
-  - [ ] Semantic Scholar Client
-  - [ ] Crossref API Client
+- [x] Implement Native Go Source Clients and unified aggregator.
+- [x] Build scientific source connectors:
+  - [x] arXiv API Client
+  - [x] Papers with Code Client
+  - [x] Hugging Face Hub Client
+  - [x] Kaggle API Client
+  - [x] OpenAlex API Client
+  - [x] Semantic Scholar Client
+  - [x] Crossref API Client
+  - [x] GitHub API Client
   - [ ] PubMed / Entrez Client
-- [ ] Define normalized schemas: `Paper`, `Dataset`, `CodeRepo`, `Benchmark`, `Author`.
+- [x] Define normalized schemas: `Paper`, `Dataset`, `CodeRepo`, `Benchmark`, `Author` (deployed to PostgreSQL).
 
 <br />
 
 ### Phase 2: Document Processing & Knowledge Graph
-- [ ] Build section-aware PDF parser and LaTeX text extractor.
-- [ ] Implement scientific entity extraction (Models, Datasets, Metrics, Hyperparameters).
-- [ ] Implement Knowledge Graph storage engine linking papers $\leftrightarrow$ authors $\leftrightarrow$ code $\leftrightarrow$ benchmarks.
+- [x] Build section-aware PDF parser and LaTeX text extractor (Stateless Go PDF Extractor).
+- [x] Implement scientific entity extraction (Models, Datasets, Metrics, Hyperparameters).
+- [x] Implement Knowledge Graph engine (In-memory JSON `.ua/knowledge-graph.json`) linking papers $\leftrightarrow$ authors $\leftrightarrow$ code $\leftrightarrow$ benchmarks.
 
 <br />
 

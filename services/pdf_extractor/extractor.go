@@ -42,6 +42,24 @@ func handleExtract(localPath string) (*ExtractResponse, error) {
 		return nil, fmt.Errorf("file not found: %w", err)
 	}
 
+	// Verify PDF signature (%PDF-)
+	f, err := os.Open(localPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open file for signature check: %w", err)
+	}
+	sig := make([]byte, 4)
+	_, readErr := f.Read(sig)
+	f.Close()
+
+	if readErr != nil {
+		return nil, fmt.Errorf("failed to read file signature: %w", readErr)
+	}
+	if string(sig) != "%PDF" {
+		// Clean up the invalid file to save space and prevent future retries of corrupted cache
+		_ = os.Remove(localPath)
+		return nil, fmt.Errorf("invalid PDF signature: got %q (likely HTML/text error page)", string(sig))
+	}
+
 	// Try pdftotext first (best quality, correct word spacing)
 	fullText, popplerErr := extractWithPopplerPdftotext(localPath)
 	if popplerErr != nil {

@@ -170,3 +170,27 @@
   * Added `"github"` as the 7th parallel source in the unified multi-source search controller.
   * Mapped GitHub data models seamlessly to `UnifiedResearchPaper` (e.g. mapping repository stars to citations, and repo topics/language to ML frameworks).
   * The unified engine automatically de-duplicates and aggregates GitHub results alongside Arxiv, PapersWithCode, and HuggingFace, storing the output in the `.ua/knowledge-graph.json` graph via background triggers.
+
+<br />
+
+## Commit 13 (dev and main) : Implement Decoupled Query Expansion, PDF Extractor Robustness, and API Schema Upgrades
+
+* **Decoupled Python Query Expansion Server (`services/query_optimizer/main.py`)**:
+  * Implemented a dedicated query expansion service in Python on port `8100`.
+  * Integrates the Google Generative Language API (`gemini-1.5-flash`) for high-fidelity query optimization, expanding prompts into 3 distinct keyword/subtopic variations.
+  * Configured a robust local fallback to `phi4-mini` via Ollama if the `GEMINI_API_KEY` is missing or the call fails, and a final fallback to returning the original query.
+  * Added manual `.env` file parser to avoid third-party library dependencies.
+* **Go Backend Unified Router Integration (`src/api/unified_router.go`)**:
+  * Refactored `handleSearchUnified` to hit `POST /expand` on the Python service at startup.
+  * Executes searches for all generated subqueries + original query in parallel across all 7 sources, merging and deduplicating results.
+  * Modified `.Search()` calls to pass the target subquery string dynamically instead of static request parameters.
+* **Robust PDF Extractor Validation (`services/pdf_extractor/extractor.go`)**:
+  * Added `%PDF-` file signature verification inside the stateless PDF extractor.
+  * Catches invalid files (e.g., HTML block/error pages saved as `.pdf`) early, cleaning them up from local disk and throwing a clean error instead of spawning corrupted `pdftotext` runs.
+* **API Schema & Cache Upgrades (`src/api/schemas.go`)**:
+  * Added `source_counts` mapping to `UnifiedSearchResponse` showing retrieved count per source in the final payload.
+  * Added `pdf_text` field to `UnifiedResearchPaper` schema, dynamically populated from the database if the paper has been previously downloaded and parsed.
+* **Reorganized Launch Scripts & Binaries**:
+  * Consolidated all side services inside `service.sh` (running PDF Extractor and the new Python Query Expansion Server).
+  * Relocated Go compiled binaries to the ignored `bin/` folder to prevent dirtying the repository root.
+  * Fixed Go startup API key caching order bug by importing `_ "github.com/joho/godotenv/autoload"` first in `main.go`.

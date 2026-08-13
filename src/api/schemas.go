@@ -60,13 +60,15 @@ type UnifiedResearchPaper struct {
 	Benchmarks      []map[string]string    `json:"benchmarks"`
 	Hyperparameters map[string]interface{} `json:"hyperparameters,omitempty"`
 	CreatedAt       string                 `json:"created_at"`
+	PDFText         string                 `json:"pdf_text,omitempty"`
 }
 
 type UnifiedSearchResponse struct {
-	RequestID  string                 `json:"request_id"`
-	Query      string                 `json:"query"`
-	TotalCount int                    `json:"total_count"`
-	Papers     []UnifiedResearchPaper `json:"papers"`
+	RequestID    string                 `json:"request_id"`
+	Query        string                 `json:"query"`
+	TotalCount   int                    `json:"total_count"`
+	SourceCounts map[string]int         `json:"source_counts"`
+	Papers       []UnifiedResearchPaper `json:"papers"`
 }
 
 
