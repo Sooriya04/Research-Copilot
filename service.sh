@@ -16,9 +16,20 @@ echo "▶️ Starting Query Expansion Server (port 8100)..."
 .venv/bin/python services/query_optimizer/main.py &
 PID_PY=$!
 
+echo "▶️ Starting Repair Agent (port 8101)..."
+.venv/bin/python agent/main.py &
+PID_AGENT=$!
+
+echo "▶️ Starting Repair Worker Queue..."
+./bin/repair_worker &
+PID_WORKER=$!
+
+echo "▶️ Starting Embedding Worker (nomic-embed-text, port 8102)..."
+.venv/bin/python services/embedding_worker/main.py &
+PID_EMBED=$!
+
 # Trap SIGINT and SIGTERM to gracefully shut down the background processes
-trap "echo '🛑 Shutting down side services...'; kill $PID_PDF $PID_PY; exit" SIGINT SIGTERM
+trap "echo '🛑 Shutting down side services...'; kill $PID_PDF $PID_PY $PID_AGENT $PID_WORKER $PID_EMBED 2>/dev/null; exit" SIGINT SIGTERM
 
 # Wait for processes so logs are printed to terminal
-wait $PID_PDF $PID_PY
-
+wait $PID_PDF $PID_PY $PID_AGENT $PID_WORKER $PID_EMBED

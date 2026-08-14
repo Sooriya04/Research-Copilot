@@ -103,35 +103,35 @@ func handleSearchUnified(w http.ResponseWriter, r *http.Request) {
 				switch src {
 				case "arxiv":
 					res, err := arxivClient.Search(r.Context(), searchQuery, req.TopK, 0, "relevance", "descending")
-				if err == nil {
-					for _, p := range res.Papers {
-						var authors []string
-						for _, a := range p.Authors {
-							authors = append(authors, a.Name)
-						}
-						// Extract repo and frameworks
-						repo := core.ExtractGitHubURL(p.Title, p.Abstract)
-						if p.Comment != nil && repo == "" {
-							repo = core.ExtractGitHubURL(*p.Comment)
-						}
-						frameworks := core.ExtractFrameworks(p.Title, p.Abstract)
-						hparams := extractHyperparameters(p.Abstract)
+					if err == nil {
+						for _, p := range res.Papers {
+							var authors []string
+							for _, a := range p.Authors {
+								authors = append(authors, a.Name)
+							}
+							// Extract repo and frameworks
+							repo := core.ExtractGitHubURL(p.Title, p.Abstract)
+							if p.Comment != nil && repo == "" {
+								repo = core.ExtractGitHubURL(*p.Comment)
+							}
+							frameworks := core.ExtractFrameworks(p.Title, p.Abstract)
+							hparams := extractHyperparameters(p.Abstract)
 
-						srcPapers = append(srcPapers, UnifiedResearchPaper{
-							Source:          "arxiv",
-							ExternalID:      p.ArxivID,
-							Title:           p.Title,
-							Abstract:        p.Abstract,
-							Authors:         authors,
-							URL:             p.EntryID,
-							PDFURL:          p.PDFURL,
-							CodeRepository:  repo,
-							Frameworks:      frameworks,
-							Hyperparameters: hparams,
-						})
+							srcPapers = append(srcPapers, UnifiedResearchPaper{
+								Source:          "arxiv",
+								ExternalID:      p.ArxivID,
+								Title:           p.Title,
+								Abstract:        p.Abstract,
+								Authors:         authors,
+								URL:             p.EntryID,
+								PDFURL:          p.PDFURL,
+								CodeRepository:  repo,
+								Frameworks:      frameworks,
+								Hyperparameters: hparams,
+							})
+						}
 					}
-				}
-			case "openalex":
+				case "openalex":
 				res, err := openAlexClient.Search(r.Context(), searchQuery, req.TopK)
 				if err == nil {
 					for _, p := range res.Papers {
@@ -388,6 +388,36 @@ func handleSearchUnified(w http.ResponseWriter, r *http.Request) {
 			p.CitationCount, p.CodeRepository, string(frameworksJSON), string(tasksJSON), string(benchmarksJSON), string(hparamsJSON))
 		if err != nil {
 			log.Printf("[API] ⚠️ Failed to insert paper '%s' into DB: %v", p.Title, err)
+		}
+
+		// Phase 8: Detection Workflow - Trigger Repair Jobs (flood-guard: skip if active job exists)
+		abstractVal := core.ValidateContent(p.Abstract, p.Title)
+		if !abstractVal.Valid {
+			_, err = core.DB.ExecContext(r.Context(), `
+				INSERT INTO content_repair_jobs (paper_id, content_type, reason, priority, status)
+				SELECT $1, 'ABSTRACT', $2, 10, 'QUEUED'
+				WHERE NOT EXISTS (
+					SELECT 1 FROM content_repair_jobs
+					WHERE paper_id = $1 AND content_type = 'ABSTRACT' AND status IN ('QUEUED','REPAIRING')
+				);
+			`, p.ID, abstractVal.Reason)
+			if err != nil {
+				log.Printf("[API] ⚠️ Failed to queue abstract repair for paper '%s': %v", p.Title, err)
+			}
+		}
+
+		if p.PDFURL == "" {
+			_, err = core.DB.ExecContext(r.Context(), `
+				INSERT INTO content_repair_jobs (paper_id, content_type, reason, priority, status)
+				SELECT $1, 'PDF', 'CONTENT_NULL', 10, 'QUEUED'
+				WHERE NOT EXISTS (
+					SELECT 1 FROM content_repair_jobs
+					WHERE paper_id = $1 AND content_type = 'PDF' AND status IN ('QUEUED','REPAIRING')
+				);
+			`, p.ID)
+			if err != nil {
+				log.Printf("[API] ⚠️ Failed to queue pdf repair for paper '%s': %v", p.Title, err)
+			}
 		}
 
 		finalPapers = append(finalPapers, p)

@@ -11,7 +11,11 @@ cd services/pdf_extractor
 go build -o ../../bin/pdf_extractor
 cd ../..
 
-
+# 2. Build Go Repair Worker service
+echo "📦 Building Go Repair Worker (queue processor)..."
+cd services/repair_worker
+go build -o ../../bin/repair_worker
+cd ../..
 
 # 3. Build main Go backend server
 echo "📦 Building Main Go Backend Server (port 8000)..."

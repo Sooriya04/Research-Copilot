@@ -194,3 +194,24 @@
   * Consolidated all side services inside `service.sh` (running PDF Extractor and the new Python Query Expansion Server).
   * Relocated Go compiled binaries to the ignored `bin/` folder to prevent dirtying the repository root.
   * Fixed Go startup API key caching order bug by importing `_ "github.com/joho/godotenv/autoload"` first in `main.go`.
+
+## Commit 14 (dev and main) : Implement Content Health & Repair Pipeline and Embedding Pipeline
+
+* **Content Health & Repair Pipeline**:
+  * **Go Backend & Detection Workflow (`src/api/unified_router.go`)**:
+    * Fixed missing brace in the `arxiv` query case.
+    * Added validation trigger for abstracts and PDFs upon saving research papers.
+    * Added queue flood-guard checking for existing active (`QUEUED`/`REPAIRING`) repair jobs.
+  * **Repair Worker (`services/repair_worker/main.go`, `pipeline.go`)**:
+    * Replaced hardcoded fallback DSN with a clean `.env` loader.
+    * Fixed fragile inline anonymous ternary function with standard `attemptStatus` variable.
+    * Fixed argument mismatch when calling `extractContent`.
+  * **Repair Agent (`agent/main.py`)**:
+    * Completely rewrote `discover_sources` with a 3-tier fallback (SearxNG, real arXiv API search, Semantic Scholar).
+    * Integrated JSON content-type validation to prevent HTML parsing crashes.
+* **Embedding Pipeline**:
+  * **Schema Integration (`src/api/setup_db.sql`)**:
+    * Added `embedding`, `embedding_model`, and `embedded_at` columns to `research_papers`.
+  * **Ollama Embedding Worker (`services/embedding_worker/main.py`)**:
+    * Implemented Python worker to generate 768-dimensional vectors using `nomic-embed-text` in batches.
+    * Configured standard health endpoint and service management integrations in `service.sh`.

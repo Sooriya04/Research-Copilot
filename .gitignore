@@ -11,3 +11,8 @@ services/knowledge_engine/knowledge_engine
 services/Understand-Anything/
 .ua/
 docs/task.md
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/

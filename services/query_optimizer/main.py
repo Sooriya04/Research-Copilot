@@ -57,17 +57,40 @@ class ExpandResponse(BaseModel):
     original_query: str
 
 # ---------------------------------------------------------------------------
+# In-Memory Cache
+# ---------------------------------------------------------------------------
+CACHE: dict[str, tuple[list[str], str]] = {}
+MAX_CACHE_SIZE = 500
+
+def get_cached_expansion(query: str) -> tuple[list[str], str] | None:
+    norm = query.lower().strip()
+    return CACHE.get(norm)
+
+def set_cached_expansion(query: str, queries: list[str], method: str):
+    norm = query.lower().strip()
+    if len(CACHE) >= MAX_CACHE_SIZE:
+        # Simple FIFO evict 100 items if cache reaches limit
+        keys_to_remove = list(CACHE.keys())[:100]
+        for k in keys_to_remove:
+            CACHE.pop(k, None)
+    CACHE[norm] = (queries, method)
+
+# ---------------------------------------------------------------------------
 # LLM Providers Logic
 # ---------------------------------------------------------------------------
+EXPANSION_PROMPT_TEMPLATE = (
+    "You are a scientific research assistant. Analyze this research query: '{query}'. "
+    "Generate exactly 3 diverse, highly structured search variations to find scientific papers, code, and benchmarks. "
+    "1. Conceptual / Synonym variation (core domain terminology and theory)\n"
+    "2. Benchmark / Dataset variation (relevant evaluation metrics, SOTA benchmarks, datasets)\n"
+    "3. Code / Implementation variation (frameworks, GitHub repositories, baseline architectures)\n"
+    "Return the output strictly as a single valid JSON object in this format: {\"queries\": [\"query1\", \"query2\", \"query3\"]}"
+)
+
 def expand_query_gemini(query: str, api_key: str) -> list[str]:
     """Expand query using Gemini API."""
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
-    prompt = (
-        f"Analyze this research query: '{query}'. "
-        "Generate exactly 3 diverse, highly optimized search queries/variations of this topic. "
-        "Focus on synonyms, subtopics, and relevant keywords that will maximize paper/code retrieval. "
-        "Return the output strictly in the following JSON format: {\"queries\": [\"query1\", \"query2\", \"query3\"]}"
-    )
+    prompt = EXPANSION_PROMPT_TEMPLATE.format(query=query)
     
     payload = json.dumps({
         "contents": [{"parts": [{"text": prompt}]}],
@@ -90,12 +113,7 @@ def expand_query_gemini(query: str, api_key: str) -> list[str]:
 
 def expand_query_ollama(query: str) -> list[str]:
     """Expand query using local Ollama model."""
-    prompt = (
-        f"Analyze this research query: '{query}'. "
-        "Generate exactly 3 diverse, highly optimized search queries/variations of this topic. "
-        "Focus on synonyms, subtopics, and relevant keywords that will maximize paper/code retrieval. "
-        "Return the output strictly in the following JSON format: {\"queries\": [\"query1\", \"query2\", \"query3\"]}"
-    )
+    prompt = EXPANSION_PROMPT_TEMPLATE.format(query=query)
     
     payload = json.dumps({
         "model": OLLAMA_MODEL,
@@ -123,11 +141,18 @@ def expand_query_ollama(query: str) -> list[str]:
 async def expand_query(req: ExpandRequest):
     """
     Expansion endpoint. Generates 3 query variations using Gemini (primary) 
-    or local Ollama phi4-mini (fallback).
+    or local Ollama phi4-mini (fallback), with in-memory caching.
     """
     query = req.query.strip()
     if not query:
         raise HTTPException(status_code=400, detail="Query cannot be empty")
+
+    # Check cache
+    cached_result = get_cached_expansion(query)
+    if cached_result:
+        cached_queries, cached_method = cached_result
+        logger.info(f"Cache hit for query: '{query}' -> method: {cached_method}")
+        return ExpandResponse(queries=cached_queries, method=f"{cached_method} (cached)", original_query=query)
 
     gemini_key = os.environ.get("GEMINI_API_KEY")
     
@@ -137,6 +162,7 @@ async def expand_query(req: ExpandRequest):
             logger.info("Attempting query expansion via Gemini...")
             queries = expand_query_gemini(query, gemini_key)
             logger.info(f"Gemini expanded queries: {queries}")
+            set_cached_expansion(query, queries, "gemini")
             return ExpandResponse(queries=queries, method="gemini", original_query=query)
         except Exception as e:
             logger.warning(f"Gemini expansion failed, falling back to Ollama: {e}")
@@ -146,6 +172,7 @@ async def expand_query(req: ExpandRequest):
         logger.info(f"Attempting query expansion via Ollama ({OLLAMA_MODEL})...")
         queries = expand_query_ollama(query)
         logger.info(f"Ollama expanded queries: {queries}")
+        set_cached_expansion(query, queries, "ollama")
         return ExpandResponse(queries=queries, method="ollama", original_query=query)
     except Exception as e:
         logger.error(f"Ollama expansion also failed: {e}")
@@ -156,7 +183,7 @@ async def expand_query(req: ExpandRequest):
 async def health():
     gemini_key = os.environ.get("GEMINI_API_KEY")
     method = "gemini_preferred" if gemini_key else "ollama_only"
-    return {"status": "ok", "method": method}
+    return {"status": "ok", "method": method, "cache_entries": len(CACHE)}
 
 if __name__ == "__main__":
     import uvicorn
