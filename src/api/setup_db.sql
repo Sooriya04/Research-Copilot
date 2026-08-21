@@ -337,7 +337,7 @@ CREATE TABLE IF NOT EXISTS paper_content_versions (
 -- 3. Recreate paper_paragraphs pointing to research_papers and paper_content_versions
 CREATE TABLE IF NOT EXISTS paper_paragraphs (
     id SERIAL PRIMARY KEY,
-    paper_id VARCHAR(255) REFERENCES research_papers(id) ON DELETE CASCADE,
+    paper_id VARCHAR(255) REFERENCES arxiv_papers(paper_id) ON DELETE CASCADE,
     content_version_id INTEGER REFERENCES paper_content_versions(id) ON DELETE CASCADE,
     paragraph_index INTEGER NOT NULL,
     page_number INTEGER NOT NULL,
@@ -347,6 +347,30 @@ CREATE TABLE IF NOT EXISTS paper_paragraphs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_paper_paragraphs_paper_id ON paper_paragraphs(paper_id);
+
+-- 3b. Create paper_chunks pointing to research_papers and paper_content_versions for Agentic RAG
+CREATE TABLE IF NOT EXISTS paper_chunks (
+    id SERIAL PRIMARY KEY,
+    paper_id VARCHAR(255) REFERENCES research_papers(id) ON DELETE CASCADE,
+    content_version_id INTEGER REFERENCES paper_content_versions(id) ON DELETE CASCADE,
+    chunk_index INTEGER NOT NULL,
+    content TEXT NOT NULL,
+    section_name VARCHAR(100),
+    page_start INTEGER,
+    page_end INTEGER,
+    word_count INTEGER,
+    token_count INTEGER,
+    chunk_type VARCHAR(50) DEFAULT 'PARAGRAPH',
+    embedding double precision[],
+    embedding_status VARCHAR(50) DEFAULT 'PENDING',
+    embedding_model VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(content_version_id, chunk_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_paper_chunks_paper_id ON paper_chunks(paper_id);
+CREATE INDEX IF NOT EXISTS idx_paper_chunks_status ON paper_chunks(embedding_status);
 
 -- 4. Create content_repair_jobs (PostgreSQL Persistent Queue)
 CREATE TABLE IF NOT EXISTS content_repair_jobs (
@@ -363,7 +387,7 @@ CREATE TABLE IF NOT EXISTS content_repair_jobs (
     last_error TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(paper_id, content_type, status) DEFERRABLE INITIALLY DEFERRED -- Prevent duplicate active jobs
+    UNIQUE(paper_id, content_type) -- Prevent duplicate repair jobs per paper/type
 );
 
 -- 5. Create repair_attempts (History/Provenance)

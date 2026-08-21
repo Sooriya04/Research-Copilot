@@ -10,14 +10,17 @@ and stores them back in the DB.
 import json
 import logging
 import os
+import sys
 import time
 import urllib.request
 import psycopg2
 import psycopg2.extras
 from typing import List, Optional
 
-logging.basicConfig(level=logging.INFO, format="[EMBED-WORKER] %(message)s")
-logger = logging.getLogger(__name__)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from shared.logger import get_logger, log_info, log_success, log_warn, log_error
+
+logger = get_logger("EMBED-WORKER")
 
 OLLAMA_URL = "http://127.0.0.1:11434/api/embeddings"
 EMBED_MODEL = "nomic-embed-text:latest"
@@ -43,7 +46,9 @@ def get_db_conn():
     db_url = os.environ.get("DATABASE_URL", "")
     if not db_url:
         raise RuntimeError("DATABASE_URL not set")
-    return psycopg2.connect(db_url)
+    conn = psycopg2.connect(db_url)
+    conn.autocommit = True
+    return conn
 
 
 def embed_text(text: str) -> Optional[List[float]]:
@@ -64,7 +69,11 @@ def embed_text(text: str) -> Optional[List[float]]:
         return None
 
 
-def process_batch(conn):
+def process_batch(conn) -> int:
+    """Processes both research_papers (paper-level) and paper_chunks (chunk-level)."""
+    processed = 0
+
+    # 1. Process paper-level embeddings
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute("""
             SELECT id, title, abstract
@@ -74,44 +83,97 @@ def process_batch(conn):
         """, (BATCH_SIZE,))
         rows = cur.fetchall()
 
-    if not rows:
-        return 0
+    if rows:
+        for row in rows:
+            paper_id = row["id"]
+            title = row["title"] or ""
+            abstract = row["abstract"] or ""
+            text_to_embed = f"{title}. {abstract}".strip()
+            if not text_to_embed or text_to_embed == ".":
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        UPDATE research_papers
+                        SET embedding_model = 'skipped-empty', embedded_at = NOW()
+                        WHERE id = %s
+                    """, (paper_id,))
+                conn.commit()
+                continue
 
-    processed = 0
-    for row in rows:
-        paper_id = row["id"]
-        title = row["title"] or ""
-        abstract = row["abstract"] or ""
-        # Combine title + abstract for richer embedding
-        text_to_embed = f"{title}. {abstract}".strip()
-        if not text_to_embed or text_to_embed == ".":
-            # Mark as skipped with a sentinel — avoid re-processing empty papers
+            vector = embed_text(text_to_embed)
+            if vector is None:
+                logger.warning(f"Failed to embed paper {paper_id}, will retry next cycle")
+                continue
+
             with conn.cursor() as cur:
                 cur.execute("""
                     UPDATE research_papers
-                    SET embedding_model = 'skipped-empty', embedded_at = NOW()
+                    SET embedding = %s::float[],
+                        embedding_model = %s,
+                        embedded_at = NOW()
                     WHERE id = %s
-                """, (paper_id,))
+                """, (vector, EMBED_MODEL, paper_id))
             conn.commit()
-            continue
+            processed += 1
+            logger.info(f"Embedded paper {paper_id[:16]}... ({len(vector)}-dim)")
 
-        vector = embed_text(text_to_embed)
-        if vector is None:
-            logger.warning(f"Failed to embed paper {paper_id}, will retry next cycle")
-            continue
+        return processed
 
-        # Store as JSON array (FLOAT[] column) — works without pgvector
-        with conn.cursor() as cur:
-            cur.execute("""
-                UPDATE research_papers
-                SET embedding = %s::float[],
-                    embedding_model = %s,
-                    embedded_at = NOW()
-                WHERE id = %s
-            """, (vector, EMBED_MODEL, paper_id))
-        conn.commit()
-        processed += 1
-        logger.info(f"Embedded paper {paper_id[:16]}... ({len(vector)}-dim)")
+    # 2. Process chunk-level embeddings (Agentic RAG Chunks)
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        # Claim chunks atomically to avoid concurrent worker conflicts
+        cur.execute("""
+            UPDATE paper_chunks
+            SET embedding_status = 'PROCESSING', updated_at = NOW()
+            WHERE id IN (
+                SELECT id FROM paper_chunks
+                WHERE embedding_status = 'PENDING'
+                LIMIT %s
+                FOR UPDATE SKIP LOCKED
+            )
+            RETURNING id, content, paper_id;
+        """, (BATCH_SIZE,))
+        chunks = cur.fetchall()
+
+    if chunks:
+        for chunk in chunks:
+            chunk_id = chunk["id"]
+            content = chunk["content"] or ""
+            paper_id = chunk["paper_id"]
+
+            if not content.strip():
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        UPDATE paper_chunks
+                        SET embedding_status = 'FAILED', updated_at = NOW()
+                        WHERE id = %s
+                    """, (chunk_id,))
+                conn.commit()
+                continue
+
+            vector = embed_text(content)
+            if vector is None:
+                logger.warning(f"Failed to embed chunk {chunk_id} of paper {paper_id[:16]}, setting to FAILED")
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        UPDATE paper_chunks
+                        SET embedding_status = 'FAILED', updated_at = NOW()
+                        WHERE id = %s
+                    """, (chunk_id,))
+                conn.commit()
+                continue
+
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE paper_chunks
+                    SET embedding = %s::float[],
+                        embedding_model = %s,
+                        embedding_status = 'COMPLETED',
+                        updated_at = NOW()
+                    WHERE id = %s
+                """, (vector, EMBED_MODEL, chunk_id))
+            conn.commit()
+            processed += 1
+            logger.info(f"Embedded chunk {chunk_id} of paper {paper_id[:16]} ({len(vector)}-dim)")
 
     return processed
 

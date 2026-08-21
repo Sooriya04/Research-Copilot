@@ -11,6 +11,7 @@ Search chain:
 import json
 import logging
 import os
+import sys
 import urllib.request
 import urllib.parse
 import urllib.error
@@ -20,8 +21,10 @@ from typing import List, Dict, Optional
 from fastapi import FastAPI
 from pydantic import BaseModel
 
-logging.basicConfig(level=logging.INFO, format="[REPAIR-AGENT] %(message)s")
-logger = logging.getLogger(__name__)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from services.shared.logger import get_logger, log_info, log_success, log_warn, log_error
+
+logger = get_logger("REPAIR-AGENT")
 
 app = FastAPI(title="Research Copilot - Repair Agent", version="2.0.0")
 
@@ -49,8 +52,8 @@ class RepairRequest(BaseModel):
     title: str
     content_type: str
     failure_reason: str
-    existing_urls: List[str] = []
-    authors: List[str] = []
+    existing_urls: Optional[List[str]] = []
+    authors: Optional[List[str]] = []
 
 
 class RankedSource(BaseModel):
@@ -160,12 +163,26 @@ SCORE_TABLE = {
 }
 
 
-def rank_sources(candidates: List[Dict]) -> List[RankedSource]:
+def rank_sources(candidates: List[Dict], blacklist: List[str]) -> List[RankedSource]:
     seen = set()
+    for b_url in blacklist:
+        if b_url:
+            # Normalize blacklist URLs so they match candidate normalization rules
+            if "arxiv.org/abs/" in b_url:
+                b_url = b_url.replace("arxiv.org/abs/", "arxiv.org/pdf/")
+            seen.add(b_url.strip())
+
     ranked = []
     for c in candidates:
         url = c.get("url", "")
-        if not url or url in seen:
+        if not url:
+            continue
+        
+        # Normalize arXiv abstract URLs to direct PDF URLs
+        if "arxiv.org/abs/" in url:
+            url = url.replace("arxiv.org/abs/", "arxiv.org/pdf/")
+            
+        if url in seen:
             continue
         seen.add(url)
         stype = c.get("type", "other")
@@ -185,11 +202,14 @@ async def discover_repair_source(req: RepairRequest):
     logger.info(f"Repair: paper={req.paper_id} title='{req.title}' reason={req.failure_reason}")
     candidates: List[Dict] = []
 
-    searxng_results = search_searxng(req.title, req.authors)
+    req_authors = req.authors or []
+    req_existing_urls = req.existing_urls or []
+
+    searxng_results = search_searxng(req.title, req_authors)
     candidates.extend(searxng_results)
     logger.info(f"SearxNG: {len(searxng_results)} candidates")
 
-    arxiv_results = search_arxiv_api(req.title, req.authors)
+    arxiv_results = search_arxiv_api(req.title, req_authors)
     candidates.extend(arxiv_results)
     logger.info(f"arXiv API: {len(arxiv_results)} candidates")
 
@@ -198,11 +218,7 @@ async def discover_repair_source(req: RepairRequest):
         candidates.extend(s2_results)
         logger.info(f"S2: {len(s2_results)} candidates")
 
-    for url in req.existing_urls:
-        if url:
-            candidates.append({"url": url, "type": "other"})
-
-    ranked = rank_sources(candidates)
+    ranked = rank_sources(candidates, req_existing_urls)
     top = ranked[0] if ranked else None
 
     if top:

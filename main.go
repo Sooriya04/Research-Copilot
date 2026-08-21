@@ -81,6 +81,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 }
 
 func main() {
+	core.SetupGlobalLogger()
 	log.Println("Initializing Research Copilot server logging...")
 
 	// 1. Initialize core PostgreSQL connection pool

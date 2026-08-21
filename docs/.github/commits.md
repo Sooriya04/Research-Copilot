@@ -215,3 +215,24 @@
   * **Ollama Embedding Worker (`services/embedding_worker/main.py`)**:
     * Implemented Python worker to generate 768-dimensional vectors using `nomic-embed-text` in batches.
     * Configured standard health endpoint and service management integrations in `service.sh`.
+
+<br />
+
+## Commit 15 (dev and main) : Implement Universal Color-Coded Logging, Fix Worker/Agent Timeout Deadlines, Blacklist Attempted URLs, and Prevent Search Polling Resets
+
+* **Universal Color-Coded Log Interception (`services/repair_worker/logger.go`)**:
+  * Designed a thread-safe `ColorWriter` wrapping `os.Stderr`/`os.Stdout` to dynamically format standard log lines using ANSI escape codes.
+  * Colors errors and critical failures in bold red (`\033[1;31m`) and warnings in yellow/amber (`\033[33m`) with prominent visual symbols (🛑, ⚠️) to improve terminal readability.
+  * Deployed color-coded logging globally across the Go repair worker service.
+* **Worker & Agent Timeout Mismatch Fix (`services/repair_worker/pipeline.go`)**:
+  * Resolved a deadline deadlock where the Go worker aborted agent requests after 10 seconds, which was shorter than the Python agent's search APIs sequential timeouts (up to 22 seconds).
+  * Increased the Go HTTP client-side timeout to **35 seconds** to safely accommodate multi-stage search queries.
+* **Attempt Exclusion & Blacklist (`agent/main.py` and `services/repair_worker/pipeline.go`)**:
+  * Patched the Python agent's `discover-repair-source` endpoint to normalize and filter out previously attempted URLs.
+  * Updated the Go worker to query the `repair_attempts` table and populate the `ExistingURLs` field in its request payload, allowing the agent to blacklist failed URLs and preventing infinite repair loops on wrong candidate selections.
+* **Non-Retryable Failure Optimizations (`services/repair_worker/pipeline.go`)**:
+  * Configured the worker to skip retry loops entirely when a document is validated as `WRONG_DOCUMENT` (meaning the wrong title was matched), marking the job as `FAILED` immediately instead of exhausting 3 attempts.
+* **Search Polling Ingestion Decoupling (`src/api/unified_router.go`)**:
+  * Refactored `handleSearchUnified` to use `ON CONFLICT DO NOTHING` when queueing missing PDF or abstract repairs.
+  * This prevents background UI polling from resetting failed or active jobs back to `QUEUED` with `attempts = 0`, keeping the persistent repair queue stable and predictable.
+

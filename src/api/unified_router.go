@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -372,7 +373,7 @@ func handleSearchUnified(w http.ResponseWriter, r *http.Request) {
 		benchmarksJSON, _ := json.Marshal(p.Benchmarks)
 		hparamsJSON, _ := json.Marshal(p.Hyperparameters)
 
-		_, err = core.DB.ExecContext(r.Context(), `
+		_, err = core.DB.ExecContext(context.Background(), `
 			INSERT INTO research_papers (
 				id, request_id, source, external_id, title, abstract, authors, url, pdf_url, 
 				citation_count, code_repository, frameworks, tasks, benchmarks, hyperparameters, created_at
@@ -393,13 +394,10 @@ func handleSearchUnified(w http.ResponseWriter, r *http.Request) {
 		// Phase 8: Detection Workflow - Trigger Repair Jobs (flood-guard: skip if active job exists)
 		abstractVal := core.ValidateContent(p.Abstract, p.Title)
 		if !abstractVal.Valid {
-			_, err = core.DB.ExecContext(r.Context(), `
-				INSERT INTO content_repair_jobs (paper_id, content_type, reason, priority, status)
-				SELECT $1, 'ABSTRACT', $2, 10, 'QUEUED'
-				WHERE NOT EXISTS (
-					SELECT 1 FROM content_repair_jobs
-					WHERE paper_id = $1 AND content_type = 'ABSTRACT' AND status IN ('QUEUED','REPAIRING')
-				);
+			_, err = core.DB.ExecContext(context.Background(), `
+				INSERT INTO content_repair_jobs (paper_id, content_type, reason, priority, status, attempts)
+				VALUES ($1::VARCHAR(255), 'ABSTRACT', $2, 10, 'QUEUED', 0)
+				ON CONFLICT (paper_id, content_type) DO NOTHING;
 			`, p.ID, abstractVal.Reason)
 			if err != nil {
 				log.Printf("[API] ⚠️ Failed to queue abstract repair for paper '%s': %v", p.Title, err)
@@ -407,13 +405,10 @@ func handleSearchUnified(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if p.PDFURL == "" {
-			_, err = core.DB.ExecContext(r.Context(), `
-				INSERT INTO content_repair_jobs (paper_id, content_type, reason, priority, status)
-				SELECT $1, 'PDF', 'CONTENT_NULL', 10, 'QUEUED'
-				WHERE NOT EXISTS (
-					SELECT 1 FROM content_repair_jobs
-					WHERE paper_id = $1 AND content_type = 'PDF' AND status IN ('QUEUED','REPAIRING')
-				);
+			_, err = core.DB.ExecContext(context.Background(), `
+				INSERT INTO content_repair_jobs (paper_id, content_type, reason, priority, status, attempts)
+				VALUES ($1::VARCHAR(255), 'PDF', 'CONTENT_NULL', 10, 'QUEUED', 0)
+				ON CONFLICT (paper_id, content_type) DO NOTHING;
 			`, p.ID)
 			if err != nil {
 				log.Printf("[API] ⚠️ Failed to queue pdf repair for paper '%s': %v", p.Title, err)

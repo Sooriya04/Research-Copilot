@@ -7,8 +7,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
+	"strings"
 	"time"
 	"research_copilot/src/core"
 )
@@ -43,16 +43,29 @@ func getPaperTitle(ctx context.Context, paperID string) string {
 }
 
 func discoverSource(ctx context.Context, job *RepairJob, title string) (*RankedSource, error) {
+	var attemptedURLs []string
+	rows, err := db.QueryContext(ctx, "SELECT source_url FROM repair_attempts WHERE job_id = $1", job.ID)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var u string
+			if err := rows.Scan(&u); err == nil && u != "" {
+				attemptedURLs = append(attemptedURLs, u)
+			}
+		}
+	}
+
 	reqBody := DiscoverRequest{
 		PaperID:       job.PaperID,
 		Title:         title,
 		ContentType:   job.ContentType,
 		FailureReason: job.Reason,
+		ExistingURLs:  attemptedURLs,
 	}
 	
 	payload, _ := json.Marshal(reqBody)
 	
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{Timeout: 35 * time.Second}
 	resp, err := client.Post("http://localhost:8101/discover-repair-source", "application/json", bytes.NewReader(payload))
 	if err != nil {
 		return nil, fmt.Errorf("failed to call repair agent: %w", err)
@@ -72,7 +85,7 @@ func discoverSource(ctx context.Context, job *RepairJob, title string) (*RankedS
 }
 
 func extractContent(sourceURL string, sourceType string, paperID string) (string, error) {
-	log.Printf("[WORKER] Scraping from %s using pdf_extractor...", sourceURL)
+	core.LogInfo("[WORKER] Scraping from %s using pdf_extractor...", sourceURL)
 	
 	// 1. Download
 	downReq := map[string]string{"id": paperID, "pdf_url": sourceURL}
@@ -108,12 +121,29 @@ func extractContent(sourceURL string, sourceType string, paperID string) (string
 		return "", fmt.Errorf("extract API returned status %d", resp2.StatusCode)
 	}
 	
-	var extRes struct{ Text string `json:"text"` }
+	var extRes struct {
+		Status     string `json:"status"`
+		WordCount  int    `json:"word_count"`
+		Paragraphs []struct {
+			Text string `json:"text"`
+		} `json:"paragraphs"`
+	}
 	if err := json.NewDecoder(resp2.Body).Decode(&extRes); err != nil {
 		return "", fmt.Errorf("failed to decode extract response: %v", err)
 	}
 	
-	return extRes.Text, nil
+	if extRes.Status != "success" || len(extRes.Paragraphs) == 0 {
+		return "", fmt.Errorf("extractor returned no paragraphs (status=%s, words=%d)", extRes.Status, extRes.WordCount)
+	}
+	
+	// Join all paragraphs into a single content string
+	var parts []string
+	for _, p := range extRes.Paragraphs {
+		if p.Text != "" {
+			parts = append(parts, p.Text)
+		}
+	}
+	return strings.Join(parts, "\n\n"), nil
 }
 
 func generateHash(content string) string {
@@ -123,7 +153,7 @@ func generateHash(content string) string {
 }
 
 func executePipeline(ctx context.Context, job *RepairJob) error {
-	log.Printf("[PIPELINE] Starting pipeline for Job %d (Paper: %s)", job.ID, job.PaperID)
+	core.LogPipeline("[PIPELINE] Starting pipeline for Job %d (Paper: %s)", job.ID, job.PaperID)
 	
 	title := getPaperTitle(ctx, job.PaperID)
 	if title == "" {
@@ -131,13 +161,19 @@ func executePipeline(ctx context.Context, job *RepairJob) error {
 	}
 	
 	// 1. Discover Source
+	// NOTE: nextAttempts is what the DB will hold after completeJob increments it.
+	nextAttempts := job.Attempts + 1
+
 	source, err := discoverSource(ctx, job, title)
 	if err != nil {
+		if nextAttempts >= job.MaxAttempts {
+			return completeJob(ctx, job.ID, "FAILED", fmt.Sprintf("Source discovery failed after %d attempts: %v", nextAttempts, err))
+		}
 		return completeJob(ctx, job.ID, "QUEUED", fmt.Sprintf("Source discovery failed: %v", err))
 	}
 	
 	if source == nil {
-		if job.Attempts >= job.MaxAttempts {
+		if nextAttempts >= job.MaxAttempts {
 			return completeJob(ctx, job.ID, "FAILED", "No viable sources found after max attempts")
 		}
 		return completeJob(ctx, job.ID, "QUEUED", "No viable sources found")
@@ -146,8 +182,8 @@ func executePipeline(ctx context.Context, job *RepairJob) error {
 	// 2. Extract
 	content, err := extractContent(source.URL, source.SourceType, job.PaperID)
 	if err != nil {
-		if job.Attempts >= job.MaxAttempts {
-			return completeJob(ctx, job.ID, "FAILED", fmt.Sprintf("Extraction failed: %v", err))
+		if nextAttempts >= job.MaxAttempts {
+			return completeJob(ctx, job.ID, "FAILED", fmt.Sprintf("Extraction failed after %d attempts: %v", nextAttempts, err))
 		}
 		return completeJob(ctx, job.ID, "QUEUED", fmt.Sprintf("Extraction error: %v", err))
 	}
@@ -168,8 +204,8 @@ func executePipeline(ctx context.Context, job *RepairJob) error {
 		valResult.QualityScore, valResult.Reason)
 	
 	if !valResult.Valid {
-		if job.Attempts >= job.MaxAttempts {
-			return completeJob(ctx, job.ID, "FAILED", fmt.Sprintf("Validation failed: %s", valResult.Reason))
+		if nextAttempts >= job.MaxAttempts || valResult.Reason == core.ReasonWrongDocument {
+			return completeJob(ctx, job.ID, "FAILED", fmt.Sprintf("Validation failed: %s (non-retryable or max attempts reached)", valResult.Reason))
 		}
 		return completeJob(ctx, job.ID, "QUEUED", fmt.Sprintf("Validation failed: %s", valResult.Reason))
 	}
@@ -192,6 +228,10 @@ func executePipeline(ctx context.Context, job *RepairJob) error {
 	`, job.PaperID, job.ContentType, source.URL, source.SourceType, "default_extractor", content, hash, valResult.QualityScore, "VALID").Scan(&versionID)
 	
 	if err != nil {
+		tx.Rollback()
+		if nextAttempts >= job.MaxAttempts {
+			return completeJob(ctx, job.ID, "FAILED", fmt.Sprintf("DB version insertion failed: %v", err))
+		}
 		return completeJob(ctx, job.ID, "QUEUED", fmt.Sprintf("DB version insertion failed: %v", err))
 	}
 	

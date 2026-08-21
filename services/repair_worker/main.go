@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"research_copilot/src/core"
 	"strings"
 	"sync"
 	"syscall"
@@ -30,13 +31,18 @@ type RepairJob struct {
 func initDB() {
 	connStr := os.Getenv("DATABASE_URL")
 	if connStr == "" {
-		// Try loading .env from project root (two levels up from services/repair_worker/)
-		envPath := "../../.env"
-		if data, err := os.ReadFile(envPath); err == nil {
-			for _, line := range strings.Split(string(data), "\n") {
-				line = strings.TrimSpace(line)
-				if strings.HasPrefix(line, "DATABASE_URL=") {
-					connStr = strings.Trim(strings.TrimPrefix(line, "DATABASE_URL="), `"'`)
+		// Try loading .env from current directory first, then fallback to relative paths
+		paths := []string{".env", "../../.env"}
+		for _, path := range paths {
+			if data, err := os.ReadFile(path); err == nil {
+				for _, line := range strings.Split(string(data), "\n") {
+					line = strings.TrimSpace(line)
+					if strings.HasPrefix(line, "DATABASE_URL=") {
+						connStr = strings.Trim(strings.TrimPrefix(line, "DATABASE_URL="), `"'`)
+					}
+				}
+				if connStr != "" {
+					break
 				}
 			}
 		}
@@ -52,9 +58,10 @@ func initDB() {
 	}
 
 	if err = db.Ping(); err != nil {
-		log.Fatalf("[WORKER] Failed to ping DB: %v", err)
+		core.LogError("[WORKER] Failed to ping DB: %v", err)
+		os.Exit(1)
 	}
-	log.Println("[WORKER] Connected to PostgreSQL DB.")
+	core.LogSuccess("[WORKER] Connected to PostgreSQL DB.")
 }
 
 func claimJob(ctx context.Context, workerID string) (*RepairJob, error) {
@@ -71,7 +78,7 @@ func claimJob(ctx context.Context, workerID string) (*RepairJob, error) {
 		)
 		RETURNING id, paper_id, content_type, reason, priority, attempts, max_attempts;
 	`
-	
+
 	row := db.QueryRowContext(ctx, query, workerID)
 	var job RepairJob
 	err := row.Scan(
@@ -83,13 +90,13 @@ func claimJob(ctx context.Context, workerID string) (*RepairJob, error) {
 		&job.Attempts,
 		&job.MaxAttempts,
 	)
-	
+
 	if err == sql.ErrNoRows {
 		return nil, nil // No jobs available
 	} else if err != nil {
 		return nil, err
 	}
-	
+
 	return &job, nil
 }
 
@@ -112,25 +119,25 @@ func recoverStaleJobs(ctx context.Context) {
 	`
 	res, err := db.ExecContext(ctx, query)
 	if err != nil {
-		log.Printf("[WORKER] Error recovering stale jobs: %v", err)
+		core.LogError("[WORKER] Error recovering stale jobs: %v", err)
 		return
 	}
 	affected, _ := res.RowsAffected()
 	if affected > 0 {
-		log.Printf("[WORKER] Recovered %d stale jobs.", affected)
+		core.LogWarn("[WORKER] Recovered %d stale jobs.", affected)
 	}
 }
 
 func processJob(ctx context.Context, job *RepairJob) {
 	err := executePipeline(ctx, job)
 	if err != nil {
-		log.Printf("[WORKER] Error in pipeline for job %d: %v", job.ID, err)
+		core.LogError("[WORKER] Error in pipeline for job %d: %v", job.ID, err)
 	}
 }
 
 func workerLoop(ctx context.Context, workerID string, wg *sync.WaitGroup) {
 	defer wg.Done()
-	log.Printf("[WORKER] %s started.", workerID)
+	core.LogInfo("[WORKER] %s started.", workerID)
 
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
@@ -141,14 +148,14 @@ func workerLoop(ctx context.Context, workerID string, wg *sync.WaitGroup) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Printf("[WORKER] %s shutting down...", workerID)
+			core.LogWarn("[WORKER] %s shutting down...", workerID)
 			return
 		case <-staleTicker.C:
 			recoverStaleJobs(ctx)
 		case <-ticker.C:
 			job, err := claimJob(ctx, workerID)
 			if err != nil {
-				log.Printf("[WORKER] %s failed to claim job: %v", workerID, err)
+				core.LogError("[WORKER] %s failed to claim job: %v", workerID, err)
 				continue
 			}
 			if job != nil {
@@ -178,7 +185,7 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	<-sigChan
-	
+
 	log.Println("[WORKER] Received shutdown signal. Waiting for workers to finish...")
 	cancel()
 	wg.Wait()

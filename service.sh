@@ -28,8 +28,12 @@ echo "▶️ Starting Embedding Worker (nomic-embed-text, port 8102)..."
 .venv/bin/python services/embedding_worker/main.py &
 PID_EMBED=$!
 
+echo "▶️ Starting Chunker Worker (port 8103)..."
+.venv/bin/python services/chunker/main.py &
+PID_CHUNKER=$!
+
 # Trap SIGINT and SIGTERM to gracefully shut down the background processes
-trap "echo '🛑 Shutting down side services...'; kill $PID_PDF $PID_PY $PID_AGENT $PID_WORKER $PID_EMBED 2>/dev/null; exit" SIGINT SIGTERM
+trap "echo '🛑 Shutting down side services...'; kill $PID_PDF $PID_PY $PID_AGENT $PID_WORKER $PID_EMBED $PID_CHUNKER 2>/dev/null; exit" SIGINT SIGTERM
 
 # Wait for processes so logs are printed to terminal
-wait $PID_PDF $PID_PY $PID_AGENT $PID_WORKER $PID_EMBED
+wait $PID_PDF $PID_PY $PID_AGENT $PID_WORKER $PID_EMBED $PID_CHUNKER

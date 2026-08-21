@@ -21,6 +21,7 @@ func writeJSONError(w http.ResponseWriter, status int, errMsg string, detail str
 }
 
 func main() {
+	SetupGlobalLogger()
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/api/v1/download", func(w http.ResponseWriter, r *http.Request) {
