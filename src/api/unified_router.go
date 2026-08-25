@@ -94,6 +94,21 @@ func handleSearchUnified(w http.ResponseWriter, r *http.Request) {
 
 	// Launch searches in parallel
 	sources := []string{"arxiv", "openalex", "semanticscholar", "crossref", "huggingface", "paperswithcode", "github"}
+	if len(req.Sources) > 0 {
+		var active []string
+		reqSet := make(map[string]bool)
+		for _, s := range req.Sources {
+			reqSet[strings.ToLower(strings.TrimSpace(s))] = true
+		}
+		for _, s := range sources {
+			if reqSet[s] {
+				active = append(active, s)
+			}
+		}
+		if len(active) > 0 {
+			sources = active
+		}
+	}
 	for _, q := range queriesToSearch {
 		for _, source := range sources {
 			wg.Add(1)

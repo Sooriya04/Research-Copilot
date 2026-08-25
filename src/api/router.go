@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 
 	"research_copilot/src/ingestion/arxiv"
 	"research_copilot/src/ingestion/crossref"
@@ -38,6 +39,11 @@ func RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/search/unified", handleSearchUnified)
 	mux.HandleFunc("/api/v1/search/sessions", handleGetSearchSessions)
 	mux.HandleFunc("/api/v1/papers/by-request/", handleGetPapersByRequestID)
+	mux.HandleFunc("/api/v1/knowledge-graph", handleGetKnowledgeGraph)
+
+	// Serve static files from public/ directory on root URL
+	fs := http.FileServer(http.Dir("./public"))
+	mux.Handle("/", fs)
 }
 
 func writeJSONResponse(w http.ResponseWriter, status int, data interface{}) {
@@ -58,3 +64,22 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	log.Println("[API] Health check endpoint queried")
 	writeJSONResponse(w, http.StatusOK, HealthResponse{Status: "healthy"})
 }
+
+func handleGetKnowledgeGraph(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method Not Allowed")
+		return
+	}
+
+	kgPath := ".ua/knowledge-graph.json"
+	data, err := os.ReadFile(kgPath)
+	if err != nil {
+		writeJSONError(w, http.StatusNotFound, "Knowledge graph file not found")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
+}
+

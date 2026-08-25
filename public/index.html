@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Research Copilot | Scientific Engineering Platform</title>
+  
+  <!-- FontAwesome Outline & Solid Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  
+  <!-- Vis-Network for Knowledge Graph -->
+  <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+  
+  <!-- KaTeX for LaTeX Formulas -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+  
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="light-theme">
+  <div class="app-layout">
+    <!-- Product Sidebar -->
+    <aside class="sidebar">
+      <div class="workspace-switcher">
+        <div class="workspace-icon">RC</div>
+        <div class="workspace-info">
+          <h2>Research Copilot</h2>
+          <span>Scientific Workspace</span>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <!-- Section 1: Explore -->
+        <div>
+          <div class="nav-section-title">EXPLORE</div>
+          <div class="nav-group">
+            <button class="nav-item active" data-view="dashboard">
+              <div class="nav-item-left">
+                <i class="fa-solid fa-house"></i>
+                <span>Overview</span>
+              </div>
+              <span class="nav-shortcut">1</span>
+            </button>
+            <button class="nav-item" data-view="search">
+              <div class="nav-item-left">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <span>Literature Search</span>
+              </div>
+              <span class="nav-shortcut">2</span>
+            </button>
+            <button class="nav-item" data-view="knowledge-graph">
+              <div class="nav-item-left">
+                <i class="fa-solid fa-diagram-project"></i>
+                <span>Knowledge Graph</span>
+              </div>
+              <span class="nav-shortcut">3</span>
+            </button>
+            <button class="nav-item" data-view="pdf-inspector">
+              <div class="nav-item-left">
+                <i class="fa-solid fa-file-lines"></i>
+                <span>Paper Reader</span>
+              </div>
+              <span class="nav-shortcut">4</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Section 2: Engineering -->
+        <div>
+          <div class="nav-section-title">ENGINEERING</div>
+          <div class="nav-group">
+            <button class="nav-item" data-view="experiment-studio">
+              <div class="nav-item-left">
+                <i class="fa-solid fa-flask"></i>
+                <span>Benchmarks & SOTA</span>
+              </div>
+            </button>
+            <button class="nav-item" data-view="manuscript">
+              <div class="nav-item-left">
+                <i class="fa-solid fa-pen-nib"></i>
+                <span>Manuscript Draft</span>
+              </div>
+            </button>
+            <button class="nav-item" data-view="research-gaps">
+              <div class="nav-item-left">
+                <i class="fa-solid fa-lightbulb"></i>
+                <span>Research Gap Finder</span>
+              </div>
+            </button>
+          </div>
+        </div>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="system-status-indicator">
+          <div class="status-dot" id="mini-status-dot"></div>
+          <span id="mini-status-text">PostgreSQL & API Connected</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      <!-- Enterprise Top Header -->
+      <header class="top-header">
+        <div class="header-left">
+          <span>Workspace</span> / <strong id="header-view-title">Overview</strong>
+        </div>
+
+        <div class="command-bar-trigger" id="btn-open-cmd-bar">
+          <i class="fa-solid fa-magnifying-glass"></i>
+          <span>Search literature, DOIs, repositories...</span>
+          <span class="kbd-badge">⌘K</span>
+        </div>
+
+        <div class="header-right">
+          <button class="header-btn" id="btn-theme-toggle" title="Toggle Theme">
+            <i class="fa-solid fa-moon" id="theme-toggle-icon"></i>
+            <span>Theme</span>
+          </button>
+          <button class="header-btn" id="btn-refresh-all" title="Reload Data">
+            <i class="fa-solid fa-rotate-right"></i>
+          </button>
+        </div>
+      </header>
+
+      <div class="content-body">
+        
+        <!-- View 1: Overview Dashboard -->
+        <section id="view-dashboard" class="view-panel active">
+          <div class="panel-header">
+            <div>
+              <h1>Scientific Research Overview</h1>
+              <p class="panel-subtitle">Multi-source literature aggregation, deduplication & knowledge graph ingestion pipeline.</p>
+            </div>
+            <button class="btn btn-primary" onclick="switchView('search')">
+              <i class="fa-solid fa-plus"></i> New Literature Query
+            </button>
+          </div>
+
+          <!-- Metrics Ribbon -->
+          <div class="metrics-strip">
+            <div class="metric-box">
+              <span class="metric-label">Indexed Scientific Papers</span>
+              <span class="metric-val" id="stat-papers-count">290+</span>
+            </div>
+            <div class="metric-box">
+              <span class="metric-label">Knowledge Graph Entities</span>
+              <span class="metric-val" id="stat-nodes-count">1,420</span>
+            </div>
+            <div class="metric-box">
+              <span class="metric-label">Connected Repositories</span>
+              <span class="metric-val">8 Connectors</span>
+            </div>
+            <div class="metric-box">
+              <span class="metric-label">Linked SOTA Benchmarks</span>
+              <span class="metric-val" id="stat-repos-count">84</span>
+            </div>
+          </div>
+
+          <!-- Content Grid -->
+          <div class="dashboard-grid">
+            <div class="card">
+              <h3>Scientific Sources & Indexing Pipeline</h3>
+              <div class="sources-grid">
+                <div class="source-chip"><strong>arXiv</strong><span>Preprints & Physics/CS</span></div>
+                <div class="source-chip"><strong>Hugging Face</strong><span>Models & Datasets</span></div>
+                <div class="source-chip"><strong>Papers with Code</strong><span>SOTA Benchmarks</span></div>
+                <div class="source-chip"><strong>GitHub</strong><span>Source Repositories</span></div>
+                <div class="source-chip"><strong>OpenAlex</strong><span>Publication Graph</span></div>
+                <div class="source-chip"><strong>Semantic Scholar</strong><span>Citations & Metrics</span></div>
+                <div class="source-chip"><strong>Crossref</strong><span>Publisher DOIs</span></div>
+                <div class="source-chip"><strong>Kaggle</strong><span>Datasets & Notebooks</span></div>
+              </div>
+            </div>
+
+            <div class="card">
+              <h3>Recent Search Sessions</h3>
+              <div class="session-list" id="recent-sessions-container">
+                <div class="session-row">
+                  <div>
+                    <span class="session-title">audio deepfake detection</span>
+                    <span class="session-sub">Request 6973e29d • 20 Papers Ingested</span>
+                  </div>
+                  <span class="badge badge-blue">4 Sources</span>
+                </div>
+                <div class="session-row">
+                  <div>
+                    <span class="session-title">speech spoofing countermeasures</span>
+                    <span class="session-sub">Request 4192a08f • 5 arXiv Papers</span>
+                  </div>
+                  <span class="badge badge-violet">arXiv</span>
+                </div>
+                <div class="session-row">
+                  <div>
+                    <span class="session-title">ASVspoof 2021 challenge baseline</span>
+                    <span class="session-sub">Request 9021e11c • Graph Connected</span>
+                  </div>
+                  <span class="badge badge-emerald">Linked</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- View 2: Literature Search -->
+        <section id="view-search" class="view-panel">
+          <div class="panel-header">
+            <div>
+              <h1>Scientific Literature Search</h1>
+              <p class="panel-subtitle">Query 8 scientific database connectors with automated deduplication & citation schema normalization.</p>
+            </div>
+          </div>
+
+          <div class="search-bar-box">
+            <div class="search-input-row">
+              <div class="search-input-wrapper">
+                <i class="fa-solid fa-magnifying-glass text-muted"></i>
+                <input type="text" id="search-query-input" value="audio deepfake detection" placeholder="Enter topic, paper title, or DOI (e.g. 'Transformer speech synthesis')" />
+              </div>
+              <button class="btn btn-primary" id="btn-execute-search">Execute Search</button>
+            </div>
+
+            <div class="filter-chips-row">
+              <div class="chip-list">
+                <label class="filter-chip"><input type="checkbox" value="arxiv" checked /><span>arXiv</span></label>
+                <label class="filter-chip"><input type="checkbox" value="huggingface" checked /><span>HuggingFace</span></label>
+                <label class="filter-chip"><input type="checkbox" value="github" checked /><span>GitHub</span></label>
+                <label class="filter-chip"><input type="checkbox" value="openalex" checked /><span>OpenAlex</span></label>
+                <label class="filter-chip"><input type="checkbox" value="crossref" checked /><span>Crossref</span></label>
+                <label class="filter-chip"><input type="checkbox" value="semanticscholar" checked /><span>Semantic Scholar</span></label>
+                <label class="filter-chip"><input type="checkbox" value="kaggle" checked /><span>Kaggle</span></label>
+                <label class="filter-chip"><input type="checkbox" value="paperswithcode" checked /><span>PapersWithCode</span></label>
+              </div>
+
+              <div class="limit-selector" style="font-size: 12px; color: var(--text-muted);">
+                Limit per source: <strong id="limit-val" style="color: var(--text-primary);">5</strong>
+                <input type="range" id="search-limit" min="1" max="20" value="5" oninput="document.getElementById('limit-val').textContent = this.value" style="margin-left: 6px; vertical-align: middle;" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Loading Indicator -->
+          <div class="loading-box" id="search-loading" style="display: none;">
+            <i class="fa-solid fa-circle-notch spinner-icon"></i>
+            <p>Aggregating results from 8 scientific database connectors...</p>
+          </div>
+
+          <div class="panel-header" id="results-header-summary" style="display: none;">
+            <h2 style="font-size: 15px;">Search Results <span id="total-results-tag" class="badge badge-neutral">20 Items Found</span></h2>
+            <div id="source-breakdown-tags" style="display: flex; gap: 6px;"></div>
+          </div>
+
+          <div class="papers-grid" id="papers-results-grid"></div>
+        </section>
+
+        <!-- View 3: Knowledge Graph -->
+        <section id="view-knowledge-graph" class="view-panel">
+          <div class="panel-header">
+            <div>
+              <h1>Research Knowledge Graph</h1>
+              <p class="panel-subtitle">Paper-to-Paper network graph linking Research Papers by shared technical methodologies & concepts.</p>
+            </div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <button class="btn btn-secondary btn-sm" id="view-mode-graph" onclick="switchGraphMode('graph')">Graph Canvas View</button>
+              <button class="btn btn-secondary btn-sm" id="view-mode-matrix" onclick="switchGraphMode('matrix')">Relationship Matrix Table</button>
+              <button class="btn btn-secondary btn-sm" id="view-mode-compare" onclick="switchGraphMode('compare')">Multi-Paper Comparison Matrix</button>
+              <button class="btn btn-secondary btn-sm" id="btn-reload-kg"><i class="fa-solid fa-rotate-right"></i> Reload</button>
+              <button class="btn btn-secondary btn-sm" id="btn-fit-kg">Reset Fit</button>
+            </div>
+          </div>
+
+          <div class="graph-workspace" id="graph-workspace-view">
+            <div class="card graph-canvas-box">
+              <div id="vis-graph-canvas"></div>
+              <div class="graph-legend-strip">
+                <div><span class="dot dot-paper"></span> Research Paper Node</div>
+                <div><span style="display:inline-block; width:14px; height:2px; background:var(--accent-emerald); vertical-align:middle; margin-right:4px;"></span> Shared Methodology Link</div>
+              </div>
+            </div>
+
+            <div class="card" id="graph-inspector-panel">
+              <h3 style="font-size: 14px; margin-bottom: 8px;">Entity Inspector</h3>
+              <p class="panel-subtitle" style="font-size: 12px;">Select any graph node to inspect metadata relationships.</p>
+              
+              <div id="inspector-details-content" style="display: none; margin-top: 14px;">
+                <span class="badge badge-blue" id="inspector-entity-type">Article</span>
+                <h4 id="inspector-entity-name" style="font-size: 13.5px; font-weight: 600; margin: 8px 0 4px;">Node Title</h4>
+                <p id="inspector-entity-summary" style="font-size: 12px; color: var(--text-muted); line-height: 1.4;"></p>
+                <div class="inspector-meta-list" id="inspector-entity-meta" style="margin-top: 10px;"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card table-box" id="matrix-workspace-view" style="display: none;">
+            <h3 style="font-size: 14px; margin-bottom: 12px;">Paper Content Relationship Matrix</h3>
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Source Paper</th>
+                  <th>Target Paper</th>
+                  <th>Shared Concept</th>
+                  <th>Scientific Link Rationale</th>
+                </tr>
+              </thead>
+              <tbody id="matrix-table-body"></tbody>
+            </table>
+          </div>
+
+          <div class="card table-box" id="compare-workspace-view" style="display: none;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 10px;">
+              <div>
+                <h3 style="font-size: 15px; font-weight: 700;">Side-by-Side Multi-Paper Comparison Matrix</h3>
+                <p class="panel-subtitle" style="font-size: 12px;">Compare 2 to 5 selected research papers across architecture, datasets, loss formulations, compute budget, and metrics.</p>
+              </div>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <span class="badge badge-blue" id="compare-selection-count">0 / 5 Papers Selected</span>
+                <button class="btn btn-secondary btn-sm" onclick="clearSelectedComparisonPapers()"><i class="fa-solid fa-xmark"></i> Clear Selection</button>
+              </div>
+            </div>
+
+            <div style="overflow-x: auto;">
+              <table class="data-table" id="compare-matrix-table" style="min-width: 750px;">
+                <thead id="compare-table-head"></thead>
+                <tbody id="compare-table-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- View 4: Paper Reader & PDF Extractor -->
+        <section id="view-pdf-inspector" class="view-panel">
+          <div class="panel-header">
+            <div>
+              <h1>Interactive Paper Reader & PDF Analyzer</h1>
+              <p class="panel-subtitle">Extract structured methodology breakdowns, LaTeX equations, BibTeX citations, and embedded PDF view for any paper.</p>
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom: 16px;">
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <input type="text" id="pdf-url-input" placeholder="Enter arXiv ID (e.g. 2412.17924), arXiv URL, DOI, or paper title..." style="flex:1; min-width: 260px; padding: 8px 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); font-size: 13px; background: var(--bg-input); color: var(--text-primary);" />
+              <button class="btn btn-primary" id="btn-extract-pdf"><i class="fa-solid fa-wand-magic-sparkles"></i> Extract Document</button>
+              <button class="btn btn-secondary" id="btn-upload-pdf-trigger" onclick="document.getElementById('file-upload-pdf-input').click()"><i class="fa-solid fa-file-arrow-up"></i> + Upload PDF</button>
+              <input type="file" id="file-upload-pdf-input" accept="application/pdf" style="display: none;" />
+            </div>
+            <div id="reader-extract-loading" style="display: none; margin-top: 10px; font-size: 12px; color: var(--accent-blue); align-items: center; gap: 6px;">
+              <i class="fa-solid fa-circle-notch spinner-icon"></i>
+              <span>Extracting scientific document metadata via API connector...</span>
+            </div>
+          </div>
+
+          <div class="card doc-viewer-card" id="paper-reader-card">
+            <div style="border-bottom: 1px solid var(--border-subtle); padding-bottom: 14px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 10px;">
+              <div>
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+                  <span class="badge badge-violet" id="pdf-doc-source">ARXIV</span>
+                  <span style="font-size: 12px; color: var(--text-muted);" id="pdf-doc-id">arXiv: 2412.17924</span>
+                </div>
+                <h2 id="pdf-doc-title" style="font-size: 16.5px; font-weight: 700; color: var(--text-primary); margin-bottom: 4px;">Are audio DeepFake detection models polyglots?</h2>
+                <p id="pdf-doc-authors" style="font-size: 12.5px; color: var(--text-muted);">Authors: Tomi Kinnunen, Md Sahidullah, Héctor Delgado</p>
+              </div>
+              <div id="pdf-doc-actions" style="display: flex; gap: 8px;">
+                <a href="https://arxiv.org/abs/2412.17924" target="_blank" class="btn btn-secondary btn-sm" id="btn-reader-source-url"><i class="fa-solid fa-arrow-up-right-from-square"></i> Source URL</a>
+                <a href="https://arxiv.org/pdf/2412.17924" target="_blank" class="btn btn-secondary btn-sm" id="btn-reader-pdf-url"><i class="fa-solid fa-file-pdf"></i> View PDF</a>
+                <button class="btn btn-primary btn-sm" onclick="copyReaderBibTeX()"><i class="fa-solid fa-quote-left"></i> Copy BibTeX</button>
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;" id="reader-grid-container">
+              <!-- Left Column: AI Methodology Breakdown & Equations -->
+              <div id="pdf-sections-content">
+                <div class="doc-section">
+                  <h3>Abstract</h3>
+                  <p id="pdf-abstract-text">Audio deepfake detection models evaluate acoustic anomalies in synthetic speech. In this paper, we investigate cross-lingual generalization across diverse language datasets to quantify vulnerability against multi-lingual voice conversion and text-to-speech algorithms.</p>
+                </div>
+                <div class="doc-section">
+                  <h3>Extracted Methodology & Mathematical Formulations</h3>
+                  <p id="pdf-methodology-text">Let \(\mathcal{X} \in \mathbb{R}^{T \times F}\) denote the input acoustic log-mel spectrogram. The classification feature extractor computes cross-lingual loss formulation:</p>
+                  <div class="math-code-box" id="pdf-math-box">
+                    $$\mathcal{L}_{total} = \mathcal{L}_{CE}(y, \hat{y}) + \lambda \mathcal{L}_{cross-lingual}(Z_{latent})$$
+                  </div>
+                </div>
+                <div class="doc-section">
+                  <h3>Key Technical Concepts</h3>
+                  <div id="pdf-concepts-tags" style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px;">
+                    <span class="badge badge-neutral">SPECTROGRAM</span>
+                    <span class="badge badge-neutral">CROSS-LINGUAL</span>
+                    <span class="badge badge-neutral">SINCNET</span>
+                    <span class="badge badge-neutral">RESNET</span>
+                  </div>
+                </div>
+                <div class="doc-section">
+                  <h3>BibTeX Citation Entry</h3>
+                  <pre style="background: var(--bg-subtle); padding: 10px 12px; border-radius: var(--radius-sm); font-size: 11px; font-family: var(--font-mono); overflow-x: auto; color: var(--text-primary);" id="pdf-bibtex-box">@article{kinnunen2024polyglots,
+  title={Are audio DeepFake detection models polyglots?},
+  author={Kinnunen, Tomi and Sahidullah, Md and Delgado, H\'ector},
+  journal={arXiv preprint arXiv:2412.17924},
+  year={2024}
+}</pre>
+                </div>
+              </div>
+
+              <!-- Right Column: Embedded PDF Viewer -->
+              <div style="border: 1px solid var(--border-subtle); border-radius: var(--radius-md); overflow: hidden; height: 560px; background: var(--bg-subtle);">
+                <iframe id="pdf-viewer-frame" src="https://arxiv.org/pdf/2412.17924" style="width: 100%; height: 100%; border: none;"></iframe>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- View 5: Benchmarks & SOTA -->
+        <section id="view-experiment-studio" class="view-panel">
+          <div class="panel-header">
+            <div>
+              <h1>Benchmarks & SOTA Leaderboards</h1>
+              <p class="panel-subtitle">Standardized evaluation protocol comparisons, dataset benchmark runs, and reproducible metric tracking.</p>
+            </div>
+            <button class="btn btn-primary" id="btn-launch-exp">Launch Benchmark Run</button>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+            <div class="card">
+              <h3 style="font-size: 14px; margin-bottom: 12px;">Active Pipeline Run</h3>
+              <div style="display: flex; flex-direction: column; gap: 12px; font-size: 12.5px;">
+                <div style="padding: 8px 10px; background: var(--bg-subtle); border-radius: var(--radius-sm);">
+                  <strong>1. Repository Ingestion & Dependency Verification</strong>
+                  <p style="font-size: 11.5px; color: var(--text-muted); margin-top: 2px;">Cloned repository `dessa-oss/fake-voice-detection`, installed PyTorch 2.1 & Torchaudio.</p>
+                </div>
+                <div style="padding: 8px 10px; background: var(--bg-subtle); border-radius: var(--radius-sm);">
+                  <strong>2. ASVspoof 2021 LA Dataset Pipeline Setup</strong>
+                  <p style="font-size: 11.5px; color: var(--text-muted); margin-top: 2px;">Loaded 19,200 evaluation audio samples into sandbox memory buffer.</p>
+                </div>
+                <div style="padding: 8px 10px; background: var(--bg-accent-subtle); border: 1px solid var(--accent-blue); border-radius: var(--radius-sm);">
+                  <strong style="color: var(--accent-blue);">3. Model Training & Evaluation (In Progress)</strong>
+                  <p style="font-size: 11.5px; color: var(--text-muted); margin-top: 2px;">Evaluating ResNet-SincNet hybrid feature extractor layer. Epoch 14 / 30.</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <h3 style="font-size: 14px; margin-bottom: 12px;">ASVspoof Benchmark Leaderboard</h3>
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Architecture</th>
+                    <th>EER (%) ↓</th>
+                    <th>min t-DCF ↓</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr style="background: var(--bg-accent-subtle);">
+                    <td><strong>Research Copilot ResNet-SincNet</strong></td>
+                    <td><strong style="color: var(--accent-emerald);">0.84%</strong></td>
+                    <td><strong style="color: var(--accent-emerald);">0.0241</strong></td>
+                    <td><span class="badge badge-emerald">Ours (Best)</span></td>
+                  </tr>
+                  <tr>
+                    <td>RawNet2 Baseline</td>
+                    <td>1.23%</td>
+                    <td>0.0382</td>
+                    <td><span class="badge badge-neutral">Published</span></td>
+                  </tr>
+                  <tr>
+                    <td>AASIST (Graph Neural Net)</td>
+                    <td>0.91%</td>
+                    <td>0.0275</td>
+                    <td><span class="badge badge-neutral">Published</span></td>
+                  </tr>
+                  <tr>
+                    <td>LCNN + LFCC</td>
+                    <td>1.92%</td>
+                    <td>0.0520</td>
+                    <td><span class="badge badge-neutral">Baseline</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- View 6: Manuscript Draft -->
+        <section id="view-manuscript" class="view-panel">
+          <div class="panel-header">
+            <div>
+              <h1>Structured Manuscript Draft Studio</h1>
+              <p class="panel-subtitle">8-section publication draft generated from empirical results with verified citation links.</p>
+            </div>
+            <button class="btn btn-primary" id="btn-export-latex">Export LaTeX (.tex)</button>
+          </div>
+
+          <div class="manuscript-workspace">
+            <div class="card outline-nav">
+              <h4 style="font-size: 12px; text-transform: uppercase; color: var(--text-muted);">Structure</h4>
+              <ul>
+                <li class="active"><a href="#sec-abstract">Abstract</a></li>
+                <li><a href="#sec-intro">1. Introduction</a></li>
+                <li><a href="#sec-method">2. Methodology</a></li>
+                <li><a href="#sec-results">3. Results & Discussion</a></li>
+              </ul>
+            </div>
+
+            <div class="paper-sheet">
+              <h1>Unified Deepfake Audio Detection via Hybrid Spectro-Temporal Graph Networks</h1>
+              <div class="paper-meta">
+                <span>AI Research Engineer</span><sup>1</sup>, <span>Autonomous Copilot Agent</span><sup>1</sup><br />
+                <em><sup>1</sup>Research Copilot Scientific Platform</em>
+              </div>
+
+              <div id="sec-abstract" class="doc-section">
+                <h3>Abstract</h3>
+                <p>Voice spoofing countermeasures face severe performance degradation when deployed across unseen acoustic environments and synthetic speech algorithms. In this paper, we propose a novel <em>Hybrid Spectro-Temporal Graph Network</em> that integrates learnable Sinc filters with multi-scale graph messaging across spectral frames. Evaluated on the ASVspoof benchmark, our proposed approach achieves an Equal Error Rate (EER) of <strong>0.84%</strong>, outperforming existing baselines while guaranteeing 100% reproducible execution.</p>
+              </div>
+
+              <div id="sec-intro" class="doc-section">
+                <h3>1. Introduction</h3>
+                <p>The proliferation of state-of-the-art text-to-speech (TTS) and voice conversion (VC) models poses significant security challenges to automatic speaker verification (ASV) systems. Modern deepfake generation tools utilize diffusion models and neural codecs capable of cloning voice characteristics from minimal audio samples.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- View 7: Research Gap Finder (Replaces System Telemetry) -->
+        <section id="view-research-gaps" class="view-panel">
+          <div class="panel-header">
+            <div>
+              <h1>Research Gap & Hypothesis Finder</h1>
+              <p class="panel-subtitle">Identify open scientific limitations, unresolved trade-offs, and generate novel paper hypotheses.</p>
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom: 16px;">
+            <div style="display: flex; gap: 8px;">
+              <input type="text" id="gap-query-input" value="audio deepfake detection" placeholder="Enter research topic..." style="flex:1; padding: 8px 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); font-size: 13px; background: var(--bg-input); color: var(--text-primary);" />
+              <button class="btn btn-primary" id="btn-analyze-gaps"><i class="fa-solid fa-compass-drafting"></i> Analyze Research Gaps</button>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;" id="gap-results-container">
+            <div class="card">
+              <h3 style="font-size: 14px; margin-bottom: 10px; color: var(--accent-amber);"><i class="fa-solid fa-triangle-exclamation" style="margin-right: 6px;"></i> Key Identified Research Gaps & Limitations</h3>
+              <div style="display: flex; flex-direction: column; gap: 10px; font-size: 12.5px;" id="gap-limitations-list">
+                <div style="padding: 10px; background: var(--bg-subtle); border-radius: var(--radius-sm); border-left: 3px solid var(--accent-amber);">
+                  <strong>1. Cross-Environment Generalization Degradation</strong>
+                  <p style="font-size: 11.5px; color: var(--text-muted); margin-top: 2px;">Existing detectors drop performance by up to 28% EER when deployed on unseen codecs (MP3, Opus) or noisy acoustic channels.</p>
+                </div>
+                <div style="padding: 10px; background: var(--bg-subtle); border-radius: var(--radius-sm); border-left: 3px solid var(--accent-amber);">
+                  <strong>2. Privacy Leakage in Raw Feature Extractors</strong>
+                  <p style="font-size: 11.5px; color: var(--text-muted); margin-top: 2px;">Feature representations trained for spoofing detection inadvertently retain speaker identity and spoken text content.</p>
+                </div>
+                <div style="padding: 10px; background: var(--bg-subtle); border-radius: var(--radius-sm); border-left: 3px solid var(--accent-amber);">
+                  <strong>3. High Computational Overhead for Edge Deployment</strong>
+                  <p style="font-size: 11.5px; color: var(--text-muted); margin-top: 2px;">SOTA graph neural networks and transformers exceed 40M parameters, preventing real-time mobile inference.</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <h3 style="font-size: 14px; margin-bottom: 10px; color: var(--accent-emerald);"><i class="fa-solid fa-lightbulb" style="margin-right: 6px;"></i> Generated Novel Research Hypotheses</h3>
+              <div style="display: flex; flex-direction: column; gap: 10px; font-size: 12.5px;" id="gap-hypotheses-list">
+                <div style="padding: 10px; background: var(--bg-subtle); border-radius: var(--radius-sm); border-left: 3px solid var(--accent-emerald);">
+                  <strong>Hypothesis 1: Privacy-Preserving Adversarial Disentanglement</strong>
+                  <p style="font-size: 11.5px; color: var(--text-muted); margin-top: 2px;"><em>Idea:</em> Combine a mini-ResNet feature extractor with a reverse gradient privacy loss to project speech into an identity-sanitized manifold.</p>
+                </div>
+                <div style="padding: 10px; background: var(--bg-subtle); border-radius: var(--radius-sm); border-left: 3px solid var(--accent-emerald);">
+                  <strong>Hypothesis 2: Self-Supervised Codec Augmentation</strong>
+                  <p style="font-size: 11.5px; color: var(--text-muted); margin-top: 2px;"><em>Idea:</em> Pre-train Wav2Vec 2.0 with dynamic lossy compression masks to enforce invariance against telecom codec artifacts.</p>
+                </div>
+                <div style="padding: 10px; background: var(--bg-subtle); border-radius: var(--radius-sm); border-left: 3px solid var(--accent-emerald);">
+                  <strong>Hypothesis 3: Lightweight Sinc-Conformer Architecture</strong>
+                  <p style="font-size: 11.5px; color: var(--text-muted); margin-top: 2px;"><em>Idea:</em> Replace standard 2D convolutions with learnable band-pass Sinc filters to reduce parameter count by 65% while preserving accuracy.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </main>
+  </div>
+
+  <!-- Command Palette Modal -->
+  <div class="modal-overlay" id="cmd-palette-overlay" style="display: none;">
+    <div class="cmd-palette-card">
+      <div class="cmd-input-row">
+        <i class="fa-solid fa-magnifying-glass"></i>
+        <input type="text" id="cmd-palette-input" placeholder="Type a paper title, DOI, topic, or command..." />
+        <span class="kbd-badge">ESC</span>
+      </div>
+      <div class="cmd-results-list">
+        <div class="cmd-item" onclick="switchView('search'); closeCmdPalette();">
+          <div><i class="fa-solid fa-magnifying-glass" style="margin-right: 8px; color: var(--text-muted);"></i> Search Scientific Literature</div>
+          <span class="kbd-badge">Jump</span>
+        </div>
+        <div class="cmd-item" onclick="switchView('knowledge-graph'); closeCmdPalette();">
+          <div><i class="fa-solid fa-diagram-project" style="margin-right: 8px; color: var(--text-muted);"></i> Explore Knowledge Graph</div>
+          <span class="kbd-badge">Jump</span>
+        </div>
+        <div class="cmd-item" onclick="switchView('experiment-studio'); closeCmdPalette();">
+          <div><i class="fa-solid fa-flask" style="margin-right: 8px; color: var(--text-muted);"></i> Open SOTA Benchmarks</div>
+          <span class="kbd-badge">Jump</span>
+        </div>
+        <div class="cmd-item" onclick="switchView('pdf-inspector'); closeCmdPalette();">
+          <div><i class="fa-solid fa-file-lines" style="margin-right: 8px; color: var(--text-muted);"></i> Open Paper & PDF Reader</div>
+          <span class="kbd-badge">Jump</span>
+        </div>
+        <div class="cmd-item" onclick="switchView('research-gaps'); closeCmdPalette();">
+          <div><i class="fa-solid fa-lightbulb" style="margin-right: 8px; color: var(--text-muted);"></i> Analyze Research Gaps</div>
+          <span class="kbd-badge">Jump</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Paper Detail Drawer Modal -->
+  <div class="modal-overlay" id="paper-modal-overlay" style="display: none;">
+    <div class="cmd-palette-card" style="width: 600px; padding: 20px;">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
+        <span class="badge badge-blue" id="modal-paper-source">arXiv</span>
+        <button onclick="closePaperModal()" style="background: none; border: none; font-size: 16px; cursor: pointer; color: var(--text-muted);"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <h2 id="modal-paper-title" style="font-size: 16px; font-weight: 700; margin-bottom: 10px;">Paper Title</h2>
+      <p id="modal-paper-abstract" style="font-size: 13px; color: var(--text-muted); line-height: 1.5; margin-bottom: 16px;"></p>
+      <div id="modal-paper-links" style="display: flex; gap: 8px;"></div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

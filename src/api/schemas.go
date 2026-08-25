@@ -38,8 +38,9 @@ type CrossrefSearchRequest struct {
 }
 
 type UnifiedSearchRequest struct {
-	Query string `json:"query"`
-	TopK  int    `json:"top_k"`
+	Query   string   `json:"query"`
+	TopK    int      `json:"top_k"`
+	Sources []string `json:"sources,omitempty"`
 }
 
 type UnifiedResearchPaper struct {

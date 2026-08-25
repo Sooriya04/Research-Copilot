@@ -2,6 +2,7 @@ graphify-out
 .env
 *.log
 research_copilot
+*.exe
 bin/
 pdf_extractor
 services/omnigraph
