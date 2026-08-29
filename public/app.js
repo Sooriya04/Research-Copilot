@@ -343,6 +343,13 @@ async function executeUnifiedSearch(query) {
 
     totalTag.textContent = `${currentPapers.length} Items Aggregated`;
     
+    // 🎯 Clear old stuck comparison selection and auto-select top 3 from NEW search results
+    selectedComparisonPaperIds.clear();
+    if (currentPapers.length > 0) {
+      currentPapers.slice(0, 3).forEach(p => selectedComparisonPaperIds.add(p.id || p.external_id || p.title));
+    }
+    renderMultiPaperComparisonMatrix();
+    
     // 🎯 Source breakdown tags reflecting exact active filters
     breakdownTags.innerHTML = Object.entries(sourceCounts)
       .filter(([_, count]) => count > 0)
@@ -801,94 +808,203 @@ function renderMultiPaperComparisonMatrix() {
     return;
   }
 
+  const unescapeHTML = (str) => {
+    if (!str) return '';
+    const txt = document.createElement('textarea');
+    txt.innerHTML = str;
+    let res = txt.value;
+    if (res.includes('&amp;')) {
+      txt.innerHTML = res;
+      res = txt.value;
+    }
+    return res;
+  };
+
   headEl.innerHTML = `
     <tr>
       <th style="width: 180px; min-width: 160px; background: var(--bg-subtle);">Dimension</th>
-      ${papersToCompare.map((p) => `
-        <th style="min-width: 220px; vertical-align: top;">
+      ${papersToCompare.map((p) => {
+        const cleanTitle = unescapeHTML(p.title || '');
+        const authorName = Array.isArray(p.authors) ? (p.authors[0] || 'Authors') : (p.authors || 'Authors');
+        return `
+        <th style="min-width: 240px; vertical-align: top;">
           <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 6px;">
             <div>
               <span class="badge ${getSourceBadgeClass(p.source)}">${(p.source || 'ARXIV').toUpperCase()}</span>
-              <div style="font-weight: 700; font-size: 13px; margin-top: 4px; color: var(--text-primary);">${escapeHTML(p.title)}</div>
-              <div style="font-size: 11px; color: var(--text-muted); font-weight: normal; margin-top: 2px;">${escapeHTML((p.authors || ['Authors'])[0])} et al.</div>
+              <div style="font-weight: 700; font-size: 13px; margin-top: 4px; color: var(--text-primary); line-height: 1.35;">${escapeHTML(cleanTitle)}</div>
+              <div style="font-size: 11px; color: var(--text-muted); font-weight: normal; margin-top: 3px;">${escapeHTML(authorName)} et al.</div>
             </div>
             <button onclick="togglePaperForComparison('${p.id || p.external_id || p.title}')" style="background: none; border: none; cursor: pointer; color: var(--text-muted); font-size: 14px;" title="Remove Paper"><i class="fa-solid fa-xmark"></i></button>
           </div>
         </th>
-      `).join('')}
+      `;}).join('')}
     </tr>
   `;
 
-  const getArchitecture = (p) => {
-    const title = (p.title || '').toLowerCase();
-    if (title.includes('sinc') || title.includes('resnet')) return 'ResNet-SincNet Hybrid Feature Extractor';
-    if (title.includes('polyglot') || title.includes('cross')) return 'Cross-Lingual Conformer GNN';
-    if (title.includes('privacy') || title.includes('safeear')) return 'Privacy-Preserving Adversarial Encoder';
-    if (title.includes('score') || title.includes('fusion')) return 'Multi-Score Fusion Graph Network';
-    return 'Spectro-Temporal Convolutional Network';
+  const parseTitleTerms = (title) => {
+    if (!title) return '';
+    const clean = unescapeHTML(title).toLowerCase().replace(/[^a-z0-9 ]/g, ' ');
+    const stopWords = new Set(['a', 'an', 'the', 'for', 'of', 'in', 'on', 'with', 'by', 'and', 'to', 'using', 'based', 'towards', 'review', 'system', 'study', 'defining', 'exploring', 'significance']);
+    const words = clean.split(/\s+/).filter(w => w.length > 2 && !stopWords.has(w));
+    return words.slice(0, 4).join(' ').replace(/\b\w/g, l => l.toUpperCase());
   };
 
-  const getDatasets = (p) => {
-    const text = (p.title + ' ' + (p.abstract || '')).toLowerCase();
-    if (text.includes('asvspoof')) return 'ASVspoof 2019 LA & 2021 DF';
-    if (text.includes('add') || text.includes('challenge')) return 'ADD 2022 Challenge Dataset';
-    if (text.includes('multimodal') || text.includes('video')) return 'AV-Deepfake Multimodal Corpus';
-    return 'ASVspoof 2021 Evaluation Corpus';
+  const getResearchGoal = (p) => {
+    const abstract = (p.abstract || '').trim();
+    if (abstract && abstract.length > 30) {
+      const sentences = abstract.split(/(?<=[.!?])\s+/);
+      const goalText = sentences.slice(0, 2).join(' ').trim();
+      return goalText.length > 140 ? goalText.substring(0, 140) + '...' : goalText;
+    }
+    const terms = parseTitleTerms(p.title);
+    if (p.source === 'github') return `Open-source software implementation and developer tools for ${terms || 'machine learning'}.`;
+    return `Investigating novel methodologies, formulations, and evaluation baselines for ${terms || 'this research domain'}.`;
   };
 
-  const getLossFormulation = (p) => {
-    const text = (p.title + ' ' + (p.abstract || '')).toLowerCase();
-    if (text.includes('privacy')) return '\\(\\mathcal{L}_{CE} + \\lambda \\mathcal{L}_{privacy}\\)';
-    if (text.includes('fusion') || text.includes('score')) return '\\(\\mathcal{L}_{fusion} = \\sum w_i \\mathcal{L}_i\\)';
-    return '\\(\\mathcal{L}_{total} = \\mathcal{L}_{CE} + \\gamma \\mathcal{L}_{focal}\\)';
+  const getProposedApproach = (p) => {
+    const title = unescapeHTML(p.title || '').toLowerCase();
+    const abstract = (p.abstract || '').toLowerCase();
+    const text = title + ' ' + abstract;
+
+    if (p.frameworks && p.frameworks.length > 0) return p.frameworks.join(', ');
+
+    let modelType = '';
+    if (text.includes('grad-cam') || text.includes('cam')) modelType = 'Grad-CAM Visual Explainability';
+    else if (text.includes('transformer') || text.includes('attention')) modelType = 'Transformer Architecture';
+    else if (text.includes('conformer')) modelType = 'Conformer Model';
+    else if (text.includes('resnet')) modelType = 'Deep Residual Network (ResNet)';
+    else if (text.includes('cnn') || text.includes('convolution')) modelType = 'Convolutional Neural Network (CNN)';
+    else if (text.includes('feature space')) modelType = 'Feature Space Manifold Projection';
+    else if (text.includes('graph') || text.includes('gnn')) modelType = 'Graph Neural Network (GNN)';
+    else if (text.includes('diffusion')) modelType = 'Generative Diffusion Pipeline';
+    else if (p.source === 'github') modelType = 'Open-Source Code Pipeline';
+    else modelType = 'Methodological Framework';
+
+    if (abstract && abstract.length > 30) {
+      const sentences = (p.abstract || '').split(/(?<=[.!?])\s+/);
+      for (const s of sentences) {
+        const sl = s.toLowerCase();
+        if (sl.includes('propose') || sl.includes('introduce') || sl.includes('present') || sl.includes('develop') || sl.includes('method')) {
+          const cleanS = s.trim();
+          return `${modelType}: ${cleanS.length > 110 ? cleanS.substring(0, 110) + '...' : cleanS}`;
+        }
+      }
+    }
+    const terms = parseTitleTerms(p.title);
+    return `${modelType} tailored for ${terms || 'domain feature extraction'}.`;
   };
 
-  const getComputeBudget = (p) => {
-    const count = p.citation_count || 10;
-    if (count > 50) return '4x NVIDIA V100 (12.4 Hours)';
-    if (count > 20) return '2x RTX 3090 (6.5 Hours)';
-    return '1x RTX 3090 (3.8 Hours)';
+  const getDatasetsUsed = (p) => {
+    if (p.benchmarks && p.benchmarks.length > 0) {
+      const names = p.benchmarks.map(b => typeof b === 'string' ? b : (b.dataset || b.name)).filter(Boolean);
+      if (names.length > 0) return names.slice(0, 2).join(', ');
+    }
+    const text = ((p.title || '') + ' ' + (p.abstract || '')).toLowerCase();
+    if (text.includes('imagenet')) return 'ImageNet-1K / ILSVRC';
+    if (text.includes('cifar')) return 'CIFAR-10 / CIFAR-100';
+    if (text.includes('coco')) return 'MS COCO Dataset';
+    if (text.includes('mnist')) return 'MNIST Benchmark';
+    if (text.includes('asvspoof')) return 'ASVspoof 2021 Corpus';
+    if (text.includes('add challenge') || text.includes('add track')) return 'ADD Challenge Dataset';
+    if (text.includes('mimic')) return 'MIMIC-III Clinical Database';
+
+    if (text.includes('image') || text.includes('vision') || text.includes('classification')) return 'Computer Vision Benchmarks (ImageNet/CIFAR)';
+    if (text.includes('audio') || text.includes('speech')) return 'Audio & Speech Processing Corpus';
+    if (text.includes('medical') || text.includes('health')) return 'Clinical Imaging Database';
+    if (text.includes('text') || text.includes('language') || text.includes('nlp')) return 'NLP Language Corpus & Text Benchmarks';
+    if (p.source === 'github') return 'GitHub Test Suite & Benchmark Repositories';
+
+    const srcName = (p.source || 'Literature').toUpperCase();
+    return `${srcName} Reference Dataset`;
   };
 
-  const getBenchmarkScore = (p) => {
-    const title = (p.title || '').toLowerCase();
-    if (title.includes('sinc') || title.includes('resnet')) return '<strong>EER: 0.84%</strong> | min t-DCF: 0.0241';
-    if (title.includes('privacy') || title.includes('safeear')) return '<strong>EER: 0.92%</strong> | Privacy Score: 94.2%';
-    if (title.includes('polyglot')) return '<strong>EER: 1.15%</strong> | Cross-Lingual Acc: 97.8%';
-    return '<strong>EER: 1.28%</strong> | min t-DCF: 0.0382';
+  const getKeyResults = (p) => {
+    if (p.benchmarks && p.benchmarks.length > 0) {
+      const b = p.benchmarks[0];
+      if (b.metric && b.value) return `${escapeHTML(b.metric)}: ${escapeHTML(b.value)}`;
+    }
+    const text = ((p.title || '') + ' ' + (p.abstract || '')).toLowerCase();
+    const pctMatch = text.match(/([0-9]+\.?[0-9]*%\s*(accuracy|f1|precision|recall|auc|eer|bleu))/i);
+    if (pctMatch) return `Reported ${pctMatch[1].toUpperCase()}`;
+    
+    const count = p.citation_count || 0;
+    const year = p.year || (p.published_at ? new Date(p.published_at).getFullYear() : null);
+    const src = (p.source || 'arXiv').toUpperCase();
+
+    if (p.source === 'github') {
+      return `${count ? count.toLocaleString() + ' Stars & Citations' : 'Active Open-Source Repository'}`;
+    }
+    if (count > 50) return `High Academic Impact (${count} Citations)`;
+    if (count > 0) return `Published in ${src} ${year ? '(' + year + ')' : ''} • ${count} Citations`;
+    return `Indexed in ${src} ${year ? '(' + year + ')' : ''}`;
   };
 
-  const getLimitations = (p) => {
-    const text = (p.title + ' ' + (p.abstract || '')).toLowerCase();
-    if (text.includes('privacy')) return 'Increases training convergence time by 18%.';
-    if (text.includes('fusion')) return 'Requires multi-stream feature alignment buffer.';
-    return 'High parameter size (38M), requires raw uncompressed audio.';
+  const getMainInnovation = (p) => {
+    const text = ((p.title || '') + ' ' + (p.abstract || '')).toLowerCase();
+    if (text.includes('grad-cam')) return 'Provides visual attribution maps highlighting pixel regions responsible for model decisions.';
+    if (text.includes('feature space')) return 'Formalizes feature space representation boundaries for classification robustly.';
+    if (text.includes('cross-lingual') || text.includes('polyglot')) return 'First multi-lingual evaluation across diverse speech patterns.';
+    if (text.includes('privacy') || text.includes('adversarial')) return 'Integrates privacy protection directly into model training.';
+    if (text.includes('fusion') || text.includes('multi-score')) return 'Combines multi-modal feature streams for higher accuracy.';
+
+    const abstract = (p.abstract || '').toLowerCase();
+    if (abstract && abstract.length > 30) {
+      const sentences = (p.abstract || '').split(/(?<=[.!?])\s+/);
+      for (const s of sentences) {
+        const sl = s.toLowerCase();
+        if (sl.includes('outperform') || sl.includes('achieve') || sl.includes('demonstrate') || sl.includes('sota')) {
+          const cleanS = s.trim();
+          return cleanS.length > 110 ? cleanS.substring(0, 110) + '...' : cleanS;
+        }
+      }
+    }
+    const terms = parseTitleTerms(p.title);
+    if (p.source === 'github') return `Provides reproducible code implementation and pre-trained model weights for ${terms || 'computer vision'}.`;
+    return `Establishes a dedicated methodological baseline for ${terms || 'domain research'}.`;
   };
+
+  const getStatedLimitations = (p) => {
+    const abstract = (p.abstract || '').trim();
+    if (abstract && abstract.length > 30) {
+      const sentences = abstract.split(/(?<=[.!?])\s+/);
+      const limitKeywords = ['however', 'limitation', 'challenge', 'requires', 'bottleneck', 'trade-off', 'constrained', 'future work', 'costly'];
+      for (const s of sentences) {
+        if (limitKeywords.some(k => s.toLowerCase().includes(k))) {
+          const cleanS = s.trim();
+          return cleanS.length > 120 ? cleanS.substring(0, 120) + '...' : cleanS;
+        }
+      }
+    }
+    if (p.source === 'github') return 'Requires environment setup, GPU hardware, and dependency management for training.';
+    if (p.source === 'crossref') return 'Full paper PDF behind publisher paywall; citation metadata indexed via Crossref DOI.';
+    return `Requires domain-specific dataset tuning and parameter validation for ${parseTitleTerms(p.title) || 'target tasks'}.`;
+  };
+
 
   bodyEl.innerHTML = `
     <tr>
-      <td><strong>🧠 Model Architecture</strong></td>
-      ${papersToCompare.map(p => `<td>${getArchitecture(p)}</td>`).join('')}
+      <td><strong style="color: var(--text-primary); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Research Goal</strong></td>
+      ${papersToCompare.map(p => `<td><span style="font-size: 12px; color: var(--text-primary); line-height: 1.45; display: block;">${escapeHTML(getResearchGoal(p))}</span></td>`).join('')}
     </tr>
     <tr>
-      <td><strong>📊 Datasets Used</strong></td>
-      ${papersToCompare.map(p => `<td><span class="badge badge-neutral">${getDatasets(p)}</span></td>`).join('')}
+      <td><strong style="color: var(--text-primary); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Proposed Approach</strong></td>
+      ${papersToCompare.map(p => `<td><span style="font-size: 12px; color: var(--text-primary); line-height: 1.45; display: block; font-weight: 500;">${escapeHTML(getProposedApproach(p))}</span></td>`).join('')}
     </tr>
     <tr>
-      <td><strong>📐 Loss Formulations</strong></td>
-      ${papersToCompare.map(p => `<td><code style="font-size: 11px; background: var(--bg-subtle); padding: 3px 6px; border-radius: 4px;">${getLossFormulation(p)}</code></td>`).join('')}
+      <td><strong style="color: var(--text-primary); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Datasets & Data</strong></td>
+      ${papersToCompare.map(p => `<td><span class="badge badge-neutral" style="font-size: 11px; font-weight: 600;">${escapeHTML(getDatasetsUsed(p))}</span></td>`).join('')}
     </tr>
     <tr>
-      <td><strong>⚡ Compute Budget</strong></td>
-      ${papersToCompare.map(p => `<td>${getComputeBudget(p)}</td>`).join('')}
+      <td><strong style="color: var(--text-primary); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Key Results</strong></td>
+      ${papersToCompare.map(p => `<td><span style="font-size: 12px; font-weight: 600; color: var(--accent-emerald);">${getKeyResults(p)}</span></td>`).join('')}
     </tr>
     <tr>
-      <td><strong>🏆 Benchmark Score</strong></td>
-      ${papersToCompare.map(p => `<td><span style="color: var(--accent-emerald);">${getBenchmarkScore(p)}</span></td>`).join('')}
+      <td><strong style="color: var(--text-primary); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Core Innovation</strong></td>
+      ${papersToCompare.map(p => `<td><span style="font-size: 12px; color: var(--text-primary); line-height: 1.45; display: block;">${escapeHTML(getMainInnovation(p))}</span></td>`).join('')}
     </tr>
     <tr>
-      <td><strong>⚠️ Key Limitations</strong></td>
-      ${papersToCompare.map(p => `<td><span style="color: var(--text-muted); font-size: 11.5px;">${getLimitations(p)}</span></td>`).join('')}
+      <td><strong style="color: var(--text-primary); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Stated Limitations</strong></td>
+      ${papersToCompare.map(p => `<td><span style="color: var(--text-muted); font-size: 11.5px; line-height: 1.4; display: block;">${escapeHTML(getStatedLimitations(p))}</span></td>`).join('')}
     </tr>
   `;
 };
@@ -944,6 +1060,11 @@ function openPaperInReader(paper) {
   if (authorsEl) authorsEl.textContent = `Authors: ${authors}`;
 
   if (abstractEl) abstractEl.textContent = paper.abstract || 'No abstract text available for this publication.';
+
+  const methodologyEl = document.getElementById('pdf-methodology-text');
+  if (methodologyEl) {
+    methodologyEl.textContent = getProposedApproach(paper);
+  }
 
   const paperUrl = paper.url || paper.pdf_url || `https://arxiv.org/abs/${paper.external_id || ''}`;
   const pdfUrl = paper.pdf_url || paper.url || `https://arxiv.org/pdf/${paper.external_id || '2412.17924'}`;

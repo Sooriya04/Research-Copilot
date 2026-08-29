@@ -279,6 +279,9 @@ CREATE TABLE IF NOT EXISTS research_papers (
     tasks JSONB DEFAULT '[]'::jsonb,
     benchmarks JSONB DEFAULT '[]'::jsonb,
     hyperparameters JSONB DEFAULT '{}'::jsonb,
+    embedding double precision[],
+    embedding_model VARCHAR(100),
+    embedded_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

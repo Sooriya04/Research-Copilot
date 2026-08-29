@@ -12,6 +12,7 @@ import logging
 import os
 import urllib.request
 import urllib.error
+from typing import Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
@@ -179,11 +180,63 @@ async def expand_query(req: ExpandRequest):
         # Final emergency fallback: return the original query only
         return ExpandResponse(queries=[query], method="fallback-none", original_query=query)
 
+import sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "shared")))
+try:
+    from paper_processor import ScikitPaperProcessor
+    paper_processor = ScikitPaperProcessor()
+except Exception as e:
+    logger.warning(f"Could not initialize ScikitPaperProcessor: {e}")
+    paper_processor = None
+
+class ProcessPapersRequest(BaseModel):
+    query: Optional[str] = ""
+    papers: list[dict]
+    similarity_threshold: Optional[float] = 0.85
+    n_clusters: Optional[int] = 3
+
+class ProcessPapersResponse(BaseModel):
+    original_count: int
+    processed_count: int
+    papers: list[dict]
+
+@app.post("/process_papers", response_model=ProcessPapersResponse)
+async def process_papers(req: ProcessPapersRequest):
+    """
+    Deduplicates papers across the 8 sources, reranks them using TF-IDF query relevance,
+    and assigns thematic cluster IDs using Scikit-Learn.
+    """
+    papers = req.papers
+    if not papers:
+        return ProcessPapersResponse(original_count=0, processed_count=0, papers=[])
+
+    if not paper_processor:
+        # Fallback if scikit-learn is unavailable
+        return ProcessPapersResponse(original_count=len(papers), processed_count=len(papers), papers=papers)
+
+    orig_len = len(papers)
+    # 1. Deduplicate
+    deduped = paper_processor.deduplicate_papers(papers, similarity_threshold=req.similarity_threshold)
+    
+    # 2. Rerank if query provided
+    if req.query and req.query.strip():
+        deduped = paper_processor.rerank_papers(req.query, deduped)
+
+    # 3. Cluster into thematic groups
+    clustered = paper_processor.cluster_papers(deduped, n_clusters=req.n_clusters)
+
+    return ProcessPapersResponse(
+        original_count=orig_len,
+        processed_count=len(clustered),
+        papers=clustered
+    )
+
 @app.get("/health")
 async def health():
     gemini_key = os.environ.get("GEMINI_API_KEY")
     method = "gemini_preferred" if gemini_key else "ollama_only"
-    return {"status": "ok", "method": method, "cache_entries": len(CACHE)}
+    scikit_status = "active" if paper_processor is not None else "inactive"
+    return {"status": "ok", "method": method, "scikit_processor": scikit_status, "cache_entries": len(CACHE)}
 
 if __name__ == "__main__":
     import uvicorn

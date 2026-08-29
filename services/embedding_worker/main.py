@@ -42,12 +42,26 @@ def load_env():
 load_env()
 
 
+def ensure_schema(conn):
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                ALTER TABLE research_papers
+                ADD COLUMN IF NOT EXISTS embedding double precision[],
+                ADD COLUMN IF NOT EXISTS embedding_model VARCHAR(100),
+                ADD COLUMN IF NOT EXISTS embedded_at TIMESTAMP;
+            """)
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"Schema auto-migration notice: {e}")
+
 def get_db_conn():
     db_url = os.environ.get("DATABASE_URL", "")
     if not db_url:
         raise RuntimeError("DATABASE_URL not set")
     conn = psycopg2.connect(db_url)
     conn.autocommit = True
+    ensure_schema(conn)
     return conn
 
 

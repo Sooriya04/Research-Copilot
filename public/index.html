@@ -15,7 +15,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
   
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=2.0" />
 </head>
 <body class="light-theme">
   <div class="app-layout">
@@ -375,23 +375,22 @@
                   <p id="pdf-abstract-text">Audio deepfake detection models evaluate acoustic anomalies in synthetic speech. In this paper, we investigate cross-lingual generalization across diverse language datasets to quantify vulnerability against multi-lingual voice conversion and text-to-speech algorithms.</p>
                 </div>
                 <div class="doc-section">
-                  <h3>Extracted Methodology & Mathematical Formulations</h3>
-                  <p id="pdf-methodology-text">Let \(\mathcal{X} \in \mathbb{R}^{T \times F}\) denote the input acoustic log-mel spectrogram. The classification feature extractor computes cross-lingual loss formulation:</p>
-                  <div class="math-code-box" id="pdf-math-box">
-                    $$\mathcal{L}_{total} = \mathcal{L}_{CE}(y, \hat{y}) + \lambda \mathcal{L}_{cross-lingual}(Z_{latent})$$
-                  </div>
+                  <h3>Key Methodology & Research Focus</h3>
+                  <p id="pdf-methodology-text" style="font-size: 13px; color: var(--text-primary); line-height: 1.5;">This publication introduces a methodological evaluation framework to analyze model performance, feature representations, and domain benchmark accuracy.</p>
                 </div>
                 <div class="doc-section">
                   <h3>Key Technical Concepts</h3>
                   <div id="pdf-concepts-tags" style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px;">
-                    <span class="badge badge-neutral">SPECTROGRAM</span>
-                    <span class="badge badge-neutral">CROSS-LINGUAL</span>
-                    <span class="badge badge-neutral">SINCNET</span>
-                    <span class="badge badge-neutral">RESNET</span>
+                    <span class="badge badge-neutral">METHODOLOGY</span>
+                    <span class="badge badge-neutral">EVALUATION</span>
+                    <span class="badge badge-neutral">BENCHMARKS</span>
                   </div>
                 </div>
                 <div class="doc-section">
-                  <h3>BibTeX Citation Entry</h3>
+                  <h3>Academic Citation Code (BibTeX)</h3>
+                  <p style="font-size: 11.5px; color: var(--text-muted); margin-bottom: 6px; line-height: 1.4;">
+                    <i class="fa-solid fa-circle-info" style="color: var(--accent-blue);"></i> <strong>Student Note:</strong> BibTeX is standard citation code used when writing academic research papers and reports. Click <strong>Copy BibTeX</strong> to copy this reference snippet directly into your paper bibliography.
+                  </p>
                   <pre style="background: var(--bg-subtle); padding: 10px 12px; border-radius: var(--radius-sm); font-size: 11px; font-family: var(--font-mono); overflow-x: auto; color: var(--text-primary);" id="pdf-bibtex-box">@article{kinnunen2024polyglots,
   title={Are audio DeepFake detection models polyglots?},
   author={Kinnunen, Tomi and Sahidullah, Md and Delgado, H\'ector},
@@ -626,6 +625,6 @@
     </div>
   </div>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=8.0"></script>
 </body>
 </html>
