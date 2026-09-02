@@ -283,7 +283,7 @@
 
 <br />
 
-## Implement Python Agentic RAG Retrieval Engine (Phase 3.1)
+## Commit 18 (dev and main) : Implement Python Agentic RAG Retrieval Engine (Phase 3.1)
 
 * **Python Agentic RAG Retrieval Microservice (`services/retrieval_service/main.py`)**:
   * Built Python microservice on port `8104` for Phase 3.1 Agentic RAG retrieval.
@@ -295,9 +295,17 @@
   * Configured `handleHybridRetrieval` in Go backend to proxy `POST /api/v1/retrieval/hybrid` directly to Python Retrieval Microservice on port `8104`.
 * **Service Management (`service.sh`)**:
   * Added `retrieval_service` (port `8104`) to background process launcher and shutdown trap.
-* **Bug Fixes & Refactoring**:
-  * **Dense Search Vector Math Fix**: Implemented exact 768-dimensional Cosine Similarity calculation in `services/retrieval_service/main.py`, eliminating dummy index-based scoring.
-  * **FTS GIN Index Optimization**: Updated sparse search SQL to query `c.search_vector @@ websearch_to_tsquery('english', %s)` directly, leveraging PostgreSQL GIN indexing.
-  * **DB Connection Health**: Replaced per-request connection creation with persistent connection pooling and status verification.
-  * **Dead Code Cleanup**: Deleted redundant/bypassed Go retrieval package (`src/retrieval/`).
+
+<br />
+
+## Commit 19 (dev and main) : Fix Dense Vector Similarity, Sparse GIN Index Query, DB Connection Pool & Dead Code Cleanup
+
+* **Dense Search Vector Math Fix (`services/retrieval_service/main.py`)**:
+  * Implemented exact 768-dimensional Cosine Similarity calculation in Python, replacing dummy index-based scoring.
+* **FTS GIN Index Optimization (`services/retrieval_service/main.py`)**:
+  * Updated sparse search SQL to query `c.search_vector @@ websearch_to_tsquery('english', %s)` directly, leveraging PostgreSQL GIN indexing.
+* **DB Connection Health (`services/retrieval_service/main.py`)**:
+  * Replaced per-request connection creation with persistent connection pooling and status verification (`SELECT 1`).
+* **Dead Code Cleanup (`src/retrieval/`)**:
+  * Deleted redundant/bypassed Go retrieval package (`src/retrieval/engine.go`, `rrf.go`, `rrf_test.go`) and unused imports in `src/api/router.go`.
 
