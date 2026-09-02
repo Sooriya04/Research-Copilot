@@ -17,3 +17,4 @@ __pycache__/
 *.pyo
 *.pyd
 .pytest_cache/
+github.sh
