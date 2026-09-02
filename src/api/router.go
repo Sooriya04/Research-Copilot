@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 
+	"research_copilot/src/core"
 	"research_copilot/src/ingestion/arxiv"
 	"research_copilot/src/ingestion/crossref"
 	"research_copilot/src/ingestion/github"
@@ -13,6 +14,7 @@ import (
 	"research_copilot/src/ingestion/kaggle"
 	"research_copilot/src/ingestion/openalex"
 	"research_copilot/src/ingestion/paperswithcode"
+	"research_copilot/src/ingestion/pubmed"
 	"research_copilot/src/ingestion/semanticscholar"
 )
 
@@ -24,6 +26,7 @@ var kaggleClient = kaggle.NewKaggleClient()
 var openAlexClient = openalex.NewOpenAlexClient()
 var crossrefClient = crossref.NewCrossrefClient()
 var pwcClient = paperswithcode.NewPWCClient()
+var pubmedClient = pubmed.NewPubMedClient()
 
 // RegisterRoutes registers the handlers on the given HTTP ServeMux
 func RegisterRoutes(mux *http.ServeMux) {
@@ -36,6 +39,7 @@ func RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/search/openalex", handleSearchOpenAlex)
 	mux.HandleFunc("/api/v1/search/crossref", handleSearchCrossref)
 	mux.HandleFunc("/api/v1/search/paperswithcode", handleSearchPapersWithCode)
+	mux.HandleFunc("/api/v1/search/pubmed", handleSearchPubMed)
 	mux.HandleFunc("/api/v1/search/unified", handleSearchUnified)
 	mux.HandleFunc("/api/v1/search/sessions", handleGetSearchSessions)
 	mux.HandleFunc("/api/v1/papers/by-request/", handleGetPapersByRequestID)
@@ -82,4 +86,39 @@ func handleGetKnowledgeGraph(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)
 }
+
+func handleSearchPubMed(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method Not Allowed")
+		return
+	}
+
+	var req SearchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "Invalid JSON body: "+err.Error())
+		return
+	}
+
+	if req.Query == "" {
+		writeJSONError(w, http.StatusBadRequest, "Missing query parameter")
+		return
+	}
+
+	if req.TopK <= 0 {
+		req.TopK = 5
+	}
+
+	res, err := pubmedClient.Search(r.Context(), req.Query, req.TopK)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "PubMed API search failed: "+err.Error())
+		return
+	}
+
+	if err := pubmed.IngestPubMedSearchResult(r.Context(), core.DB, res); err != nil {
+		log.Printf("[API] Failed to ingest PubMed search results into DB: %v", err)
+	}
+
+	writeJSONResponse(w, http.StatusOK, res)
+}
+
 

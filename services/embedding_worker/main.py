@@ -67,7 +67,11 @@ def get_db_conn():
 
 def embed_text(text: str) -> Optional[List[float]]:
     """Call Ollama nomic-embed-text and return a 768-dim vector."""
-    payload = json.dumps({"model": EMBED_MODEL, "prompt": text}).encode("utf-8")
+    if not text:
+        return None
+    # Truncate text to max 6000 chars to avoid memory overload / timeout on massive abstracts/content
+    truncated_text = text[:6000]
+    payload = json.dumps({"model": EMBED_MODEL, "prompt": truncated_text}).encode("utf-8")
     req = urllib.request.Request(
         OLLAMA_URL,
         data=payload,
@@ -75,7 +79,7 @@ def embed_text(text: str) -> Optional[List[float]]:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=60) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             return data.get("embedding")
     except Exception as e:

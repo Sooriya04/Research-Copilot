@@ -263,3 +263,21 @@
   * Updated `build.sh` to compile `bin/repair_agent` on port `8101`.
   * Updated `service.sh` to run the compiled Go `./bin/repair_agent` service binary instead of Python script.
 
+<br />
+
+## Implement PubMed / Entrez Medical Literature Ingestion Connector
+
+* **PubMed / Entrez Microservice Client (`src/ingestion/pubmed/client.go`, `models.go`)**:
+  * Built native Go client for NCBI Entrez eUtils (`esearch.fcgi` and `efetch.fcgi`).
+  * Defined structured models for PMIDs, PMCIDs, DOIs, open-access status, journal titles, and authors (`PubMedPaper`, `PubMedAuthor`, `PubMedSearchResult`).
+* **XML eFetch Parser Engine (`src/ingestion/pubmed/parser.go`)**:
+  * Built custom XML decoder mapping `PubmedArticleSet` to structured paper metadata, extracting structured abstract sections (e.g. OBJECTIVE, METHODS, RESULTS) and PMC open-access PDF URLs (`https://www.ncbi.nlm.nih.gov/pmc/articles/PMC.../pdf/`).
+* **Bronze & Silver Database Layer (`src/api/setup_db.sql`, `src/ingestion/pubmed/ingest_paper.go`)**:
+  * Deployed PostgreSQL Bronze (`raw_pubmed_doc`) and Silver (`pubmed_papers`, `pubmed_authors`, `pubmed_paper_authors`) tables.
+  * Implemented background PDF sync (`SyncPubMedPDFContent`) with in-flight deduplication via `core.AcquireInFlight`.
+* **API & Unified Router Integration (`src/api/router.go`, `src/api/unified_router.go`)**:
+  * Added standalone REST endpoint `POST /api/v1/search/pubmed`.
+  * Registered PubMed into the multi-source unified search array (`"pubmed"`), enabling parallel search across all 8 scientific databases (arXiv, OpenAlex, Semantic Scholar, Crossref, Hugging Face, Papers with Code, GitHub, and PubMed).
+* **Roadmap Milestone (`docs/roadmap.md`)**:
+  * Completed the final remaining client in Phase 1 (Data Collection & Ingestion Layer).
+

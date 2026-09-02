@@ -96,7 +96,7 @@ func handleSearchUnified(w http.ResponseWriter, r *http.Request) {
 	var rawPapers []UnifiedResearchPaper
 
 	// Launch searches in parallel
-	sources := []string{"arxiv", "openalex", "semanticscholar", "crossref", "huggingface", "paperswithcode", "github"}
+	sources := []string{"arxiv", "openalex", "semanticscholar", "crossref", "huggingface", "paperswithcode", "github", "pubmed"}
 	if len(req.Sources) > 0 {
 		var active []string
 		reqSet := make(map[string]bool)
@@ -120,6 +120,41 @@ func handleSearchUnified(w http.ResponseWriter, r *http.Request) {
 				var srcPapers []UnifiedResearchPaper
 
 				switch src {
+				case "pubmed":
+					res, err := pubmedClient.Search(r.Context(), searchQuery, req.TopK)
+					if err == nil {
+						for _, p := range res.Papers {
+							var authors []string
+							for _, a := range p.Authors {
+								authors = append(authors, a.FullName)
+							}
+							repo := core.ExtractGitHubURL(p.Title, p.Abstract)
+							frameworks := core.ExtractFrameworks(p.Title, p.Abstract)
+							hparams := extractHyperparameters(p.Abstract)
+
+							pdfURL := ""
+							if p.PDFURL != nil {
+								pdfURL = *p.PDFURL
+							}
+							paperURL := ""
+							if p.PaperURL != nil {
+								paperURL = *p.PaperURL
+							}
+
+							srcPapers = append(srcPapers, UnifiedResearchPaper{
+								Source:          "pubmed",
+								ExternalID:      p.PMID,
+								Title:           p.Title,
+								Abstract:        p.Abstract,
+								Authors:         authors,
+								URL:             paperURL,
+								PDFURL:          pdfURL,
+								CodeRepository:  repo,
+								Frameworks:      frameworks,
+								Hyperparameters: hparams,
+							})
+						}
+					}
 				case "arxiv":
 					res, err := arxivClient.Search(r.Context(), searchQuery, req.TopK, 0, "relevance", "descending")
 					if err == nil {

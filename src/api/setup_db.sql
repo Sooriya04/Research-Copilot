@@ -226,6 +226,47 @@ CREATE TABLE IF NOT EXISTS crossref_paper_authors (
 
 CREATE INDEX IF NOT EXISTS idx_crossref_papers_citation ON crossref_papers(citation_count);
 
+-- Initialize PubMed / Entrez schemas (Bronze & Silver layers)
+CREATE TABLE IF NOT EXISTS raw_pubmed_doc (
+    pmid VARCHAR(50) PRIMARY KEY,
+    payload JSONB NOT NULL,
+    fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS pubmed_papers (
+    paper_id VARCHAR(50) PRIMARY KEY, -- Stores PMID
+    pmid VARCHAR(50) NOT NULL,
+    pmcid VARCHAR(50),
+    doi VARCHAR(100),
+    title TEXT NOT NULL,
+    abstract TEXT,
+    journal TEXT,
+    publication_date DATE,
+    year INTEGER,
+    pdf_url TEXT,
+    paper_url TEXT,
+    is_open_access BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS pubmed_authors (
+    author_id SERIAL PRIMARY KEY,
+    last_name TEXT,
+    fore_name TEXT,
+    full_name TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uniq_pubmed_author UNIQUE (last_name, fore_name, full_name)
+);
+
+CREATE TABLE IF NOT EXISTS pubmed_paper_authors (
+    paper_id VARCHAR(50) REFERENCES pubmed_papers(paper_id) ON DELETE CASCADE,
+    author_id INTEGER REFERENCES pubmed_authors(author_id) ON DELETE CASCADE,
+    PRIMARY KEY (paper_id, author_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pubmed_papers_pmid ON pubmed_papers(pmid);
+CREATE INDEX IF NOT EXISTS idx_pubmed_papers_doi ON pubmed_papers(doi);
+
 -- Initialize Papers With Code schemas (Bronze & Silver layers)
 CREATE TABLE IF NOT EXISTS pwc_papers (
     paper_id VARCHAR(255) PRIMARY KEY,

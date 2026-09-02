@@ -37,7 +37,7 @@ flowchart LR
   - [x] Semantic Scholar Client
   - [x] Crossref API Client
   - [x] GitHub API Client
-  - [ ] PubMed / Entrez Client
+  - [x] PubMed / Entrez Client
 - [x] Define normalized schemas: `Paper`, `Dataset`, `CodeRepo`, `Benchmark`, `Author` (deployed to PostgreSQL).
 
 <br />
