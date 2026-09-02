@@ -46,13 +46,13 @@ func discoverSource(ctx context.Context, job *RepairJob, title string) (*RankedS
 	var attemptedURLs []string
 	rows, err := db.QueryContext(ctx, "SELECT source_url FROM repair_attempts WHERE job_id = $1", job.ID)
 	if err == nil {
-		defer rows.Close()
 		for rows.Next() {
 			var u string
 			if err := rows.Scan(&u); err == nil && u != "" {
 				attemptedURLs = append(attemptedURLs, u)
 			}
 		}
+		rows.Close()
 	}
 
 	reqBody := DiscoverRequest{
@@ -90,9 +90,9 @@ func extractContent(sourceURL string, sourceType string, paperID string) (string
 	// 1. Download
 	downReq := map[string]string{"id": paperID, "pdf_url": sourceURL}
 	body, _ := json.Marshal(downReq)
-	client := &http.Client{Timeout: 30 * time.Second}
+	downClient := &http.Client{Timeout: 60 * time.Second}
 	
-	resp, err := client.Post("http://localhost:8001/api/v1/download", "application/json", bytes.NewReader(body))
+	resp, err := downClient.Post("http://localhost:8001/api/v1/download", "application/json", bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("download failed: %v", err)
 	}
@@ -110,8 +110,9 @@ func extractContent(sourceURL string, sourceType string, paperID string) (string
 	// 2. Extract
 	extReq := map[string]string{"path": downRes.LocalPath}
 	body, _ = json.Marshal(extReq)
+	extClient := &http.Client{Timeout: 60 * time.Second}
 	
-	resp2, err := client.Post("http://localhost:8001/api/v1/extract", "application/json", bytes.NewReader(body))
+	resp2, err := extClient.Post("http://localhost:8001/api/v1/extract", "application/json", bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("extract failed: %v", err)
 	}
@@ -223,7 +224,7 @@ func executePipeline(ctx context.Context, job *RepairJob) error {
 	err = tx.QueryRowContext(ctx, `
 		INSERT INTO paper_content_versions (paper_id, content_type, source_url, source_type, extraction_method, content, content_hash, quality_score, validation_status, is_active)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)
-		ON CONFLICT (paper_id, content_type, content_hash) DO UPDATE SET is_active = true
+		ON CONFLICT (paper_id, content_type, content_hash) DO UPDATE SET is_active = true, quality_score = EXCLUDED.quality_score
 		RETURNING id
 	`, job.PaperID, job.ContentType, source.URL, source.SourceType, "default_extractor", content, hash, valResult.QualityScore, "VALID").Scan(&versionID)
 	

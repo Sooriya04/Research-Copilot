@@ -240,7 +240,7 @@ func GenerateSHA256Hash(text string) string {
 func ComputeSHA256(data string) string {
 	h := sha256.New()
 	h.Write([]byte(data))
-	return hex.EncodeToString(h.Sum(nil))[:16]
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // InsertVersionAndChunk helper wraps version insertion and chunking in a transaction
@@ -259,7 +259,7 @@ func InsertVersionAndChunk(ctx context.Context, db *sql.DB, title string, source
 	err = tx.QueryRowContext(ctx, `
 		INSERT INTO paper_content_versions (paper_id, content_type, source_url, source_type, extraction_method, content, content_hash, quality_score, validation_status, is_active)
 		VALUES ($1, 'PDF', $2, $3, 'default_extractor', $4, $5, 1.0, 'VALID', true)
-		ON CONFLICT (paper_id, content_type, content_hash) DO UPDATE SET is_active = true
+		ON CONFLICT (paper_id, content_type, content_hash) DO UPDATE SET is_active = true, quality_score = EXCLUDED.quality_score
 		RETURNING id;
 	`, paperID, sourceURL, sourceType, content, hash).Scan(&versionID)
 	if err != nil {
@@ -282,7 +282,7 @@ func IngestAndChunkFullText(ctx context.Context, tx *sql.Tx, paperID string, sou
 	err := tx.QueryRowContext(ctx, `
 		INSERT INTO paper_content_versions (paper_id, content_type, source_url, source_type, extraction_method, content, content_hash, quality_score, validation_status, is_active)
 		VALUES ($1, 'PDF', $2, $3, 'default_extractor', $4, $5, 1.0, 'VALID', true)
-		ON CONFLICT (paper_id, content_type, content_hash) DO UPDATE SET is_active = true
+		ON CONFLICT (paper_id, content_type, content_hash) DO UPDATE SET is_active = true, quality_score = EXCLUDED.quality_score
 		RETURNING id;
 	`, paperID, sourceURL, sourceType, content, hash).Scan(&versionID)
 	if err != nil {

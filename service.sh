@@ -17,7 +17,7 @@ echo "▶️ Starting Query Expansion Server (port 8100)..."
 PID_PY=$!
 
 echo "▶️ Starting Repair Agent (port 8101)..."
-.venv/bin/python agent/main.py &
+./bin/repair_agent &
 PID_AGENT=$!
 
 echo "▶️ Starting Repair Worker Queue..."

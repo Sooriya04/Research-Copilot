@@ -130,8 +130,6 @@ def process_batch(conn) -> int:
             processed += 1
             logger.info(f"Embedded paper {paper_id[:16]}... ({len(vector)}-dim)")
 
-        return processed
-
     # 2. Process chunk-level embeddings (Agentic RAG Chunks)
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         # Claim chunks atomically to avoid concurrent worker conflicts

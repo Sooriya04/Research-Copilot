@@ -60,21 +60,25 @@ class ExpandResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # In-Memory Cache
 # ---------------------------------------------------------------------------
+import threading
+
 CACHE: dict[str, tuple[list[str], str]] = {}
+CACHE_LOCK = threading.Lock()
 MAX_CACHE_SIZE = 500
 
 def get_cached_expansion(query: str) -> tuple[list[str], str] | None:
     norm = query.lower().strip()
-    return CACHE.get(norm)
+    with CACHE_LOCK:
+        return CACHE.get(norm)
 
 def set_cached_expansion(query: str, queries: list[str], method: str):
     norm = query.lower().strip()
-    if len(CACHE) >= MAX_CACHE_SIZE:
-        # Simple FIFO evict 100 items if cache reaches limit
-        keys_to_remove = list(CACHE.keys())[:100]
-        for k in keys_to_remove:
-            CACHE.pop(k, None)
-    CACHE[norm] = (queries, method)
+    with CACHE_LOCK:
+        if len(CACHE) >= MAX_CACHE_SIZE:
+            keys_to_remove = list(CACHE.keys())[:100]
+            for k in keys_to_remove:
+                CACHE.pop(k, None)
+        CACHE[norm] = (queries, method)
 
 # ---------------------------------------------------------------------------
 # LLM Providers Logic

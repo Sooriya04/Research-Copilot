@@ -145,13 +145,17 @@ func workerLoop(ctx context.Context, workerID string, wg *sync.WaitGroup) {
 	staleTicker := time.NewTicker(1 * time.Minute)
 	defer staleTicker.Stop()
 
+	isPrimary := strings.HasSuffix(workerID, "-1")
+
 	for {
 		select {
 		case <-ctx.Done():
 			core.LogWarn("[WORKER] %s shutting down...", workerID)
 			return
 		case <-staleTicker.C:
-			recoverStaleJobs(ctx)
+			if isPrimary {
+				recoverStaleJobs(ctx)
+			}
 		case <-ticker.C:
 			job, err := claimJob(ctx, workerID)
 			if err != nil {

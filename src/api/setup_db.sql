@@ -340,7 +340,7 @@ CREATE TABLE IF NOT EXISTS paper_content_versions (
 -- 3. Recreate paper_paragraphs pointing to research_papers and paper_content_versions
 CREATE TABLE IF NOT EXISTS paper_paragraphs (
     id SERIAL PRIMARY KEY,
-    paper_id VARCHAR(255) REFERENCES arxiv_papers(paper_id) ON DELETE CASCADE,
+    paper_id VARCHAR(255) REFERENCES research_papers(id) ON DELETE CASCADE,
     content_version_id INTEGER REFERENCES paper_content_versions(id) ON DELETE CASCADE,
     paragraph_index INTEGER NOT NULL,
     page_number INTEGER NOT NULL,

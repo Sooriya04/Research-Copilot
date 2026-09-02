@@ -31,7 +31,7 @@ func normalizeTitle(title string) string {
 	title = strings.ToLower(title)
 	var sb strings.Builder
 	for _, r := range title {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r > 127 {
 			sb.WriteRune(r)
 		}
 	}
@@ -41,7 +41,7 @@ func normalizeTitle(title string) string {
 func computeSHA256(data string) string {
 	h := sha256.New()
 	h.Write([]byte(data))
-	return hex.EncodeToString(h.Sum(nil))[:16]
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 func mergeBenchmarks(b1, b2 []map[string]string) []map[string]string {

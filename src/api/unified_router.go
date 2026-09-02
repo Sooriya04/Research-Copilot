@@ -74,6 +74,9 @@ func handleSearchUnified(w http.ResponseWriter, r *http.Request) {
 	if req.TopK <= 0 {
 		req.TopK = 5
 	}
+	if req.TopK > 50 {
+		req.TopK = 50
+	}
 
 	requestID := uuid.New().String()
 	log.Printf("[API] Starting Unified Multi-Source search. RequestID: %s, Query: '%s'", requestID, req.Query)

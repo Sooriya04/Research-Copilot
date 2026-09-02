@@ -236,3 +236,30 @@
   * Refactored `handleSearchUnified` to use `ON CONFLICT DO NOTHING` when queueing missing PDF or abstract repairs.
   * This prevents background UI polling from resetting failed or active jobs back to `QUEUED` with `attempts = 0`, keeping the persistent repair queue stable and predictable.
 
+<br />
+
+## Comprehensive System Bug Fixes & Native Go Repair Agent & Sentinel Migration
+
+* **Native Go Repair Agent & Sentinel Architecture (`src/agent/sentinel.go`, `src/agent/main/main.go`)**:
+  * Fully replaced legacy Python agent (`agent/main.py`) with a native, high-performance Go Repair Agent server (`bin/repair_agent` on port `8101`).
+  * Implemented native Go multi-source fallbacks (SearxNG, arXiv API, Semantic Scholar API) with URL classification and weighted scoring.
+  * Built event-driven background Sentinel repair monitoring with non-blocking concurrency locks.
+* **Core & SHA-256 Entropy Fixes (`src/api/unified_helpers.go`, `src/core/chunker.go`)**:
+  * Removed 16-character string truncation in `computeSHA256` to return full 64-character SHA-256 hex hashes, eliminating primary key collision risks on `research_papers.id`.
+  * Preserved non-ASCII UTF-8 runes in `normalizeTitle` (`r > 127`) to prevent non-Latin publication titles from normalizing to empty strings.
+* **Database & Schema Integrity (`src/api/setup_db.sql`, `services/repair_worker/pipeline.go`)**:
+  * Fixed foreign key in `paper_paragraphs` table to reference `research_papers(id)` instead of `arxiv_papers(paper_id)`.
+  * Fixed `paper_content_versions` upsert query by updating `quality_score = EXCLUDED.quality_score` to guarantee SQL `RETURNING id` behavior.
+* **Concurrency & Resource Management (`services/repair_worker/pipeline.go`, `services/repair_worker/main.go`)**:
+  * Closed DB query rows explicitly before making HTTP calls in `discoverSource` to prevent connection pool exhaustion.
+  * Dedicated `recoverStaleJobs` stale job recovery execution exclusively to `worker-1`.
+  * Separated download and extract HTTP client timeouts in `extractContent` to 60-second independent limits.
+* **Worker & Pipeline Optimizations (`services/query_optimizer/main.py`, `services/chunker/main.py`, `services/embedding_worker/main.py`)**:
+  * Added `threading.Lock()` to `query_optimizer` for atomic in-memory cache evictions.
+  * Cleaned up top-level `hashlib` imports and eliminated dummy row creation in `chunker`.
+  * Removed early `return` in `embedding_worker` so paper-level and chunk-level embeddings process within the same loop cycle.
+  * Added a `TopK` maximum cap (`50`) in `unified_router.go` to prevent DoS vulnerabilities.
+* **Build & Launcher Alignment (`build.sh`, `service.sh`)**:
+  * Updated `build.sh` to compile `bin/repair_agent` on port `8101`.
+  * Updated `service.sh` to run the compiled Go `./bin/repair_agent` service binary instead of Python script.
+

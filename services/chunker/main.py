@@ -149,14 +149,17 @@ def chunk_text(text: str) -> List[Dict]:
     return chunks
 
 
+import hashlib
+
 def sync_arxiv_papers_to_versions(conn):
     """Finds cached papers in arxiv_papers and ensures they have a content version in paper_content_versions."""
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-        # Select papers in arxiv_papers that don't have a content version yet
+        # Select papers in arxiv_papers that don't have a content version yet, matching existing research_papers
         cur.execute("""
-            SELECT paper_id, full_text, pdf_url
+            SELECT a.paper_id, a.full_text, a.pdf_url
             FROM arxiv_papers a
-            WHERE full_text IS NOT NULL AND length(full_text) > 100
+            JOIN research_papers r ON a.paper_id = r.id
+            WHERE a.full_text IS NOT NULL AND length(a.full_text) > 100
               AND NOT EXISTS (
                   SELECT 1 FROM paper_content_versions 
                   WHERE paper_id = a.paper_id AND content_type = 'PDF'
@@ -174,22 +177,10 @@ def sync_arxiv_papers_to_versions(conn):
         full_text = row["full_text"]
         pdf_url = row["pdf_url"] or ""
         
-        # Calculate SHA256 of the content to match versioning hashing rules
-        import hashlib
         content_hash = hashlib.sha256(full_text.encode('utf-8')).hexdigest()
 
         try:
             with conn.cursor() as cur:
-                # Ensure the paper actually exists in research_papers to satisfy foreign key constraints
-                cur.execute("SELECT 1 FROM research_papers WHERE id = %s", (paper_id,))
-                if not cur.fetchone():
-                    # If not, create a shell paper entry in research_papers so the foreign key doesn't fail
-                    cur.execute("""
-                        INSERT INTO research_papers (id, source, external_id, title, pdf_url)
-                        VALUES (%s, 'arxiv', %s, %s, %s)
-                        ON CONFLICT DO NOTHING
-                    """, (paper_id, paper_id, f"Cached Paper {paper_id}", pdf_url))
-
                 cur.execute("""
                     INSERT INTO paper_content_versions (
                         paper_id, content_type, source_url, source_type, 
