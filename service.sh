@@ -32,8 +32,12 @@ echo "▶️ Starting Chunker Worker (port 8103)..."
 .venv/bin/python services/chunker/main.py &
 PID_CHUNKER=$!
 
+echo "▶️ Starting Python Agentic RAG Retrieval Service (port 8104)..."
+.venv/bin/python services/retrieval_service/main.py &
+PID_RETRIEVAL=$!
+
 # Trap SIGINT and SIGTERM to gracefully shut down the background processes
-trap "echo '🛑 Shutting down side services...'; kill $PID_PDF $PID_PY $PID_AGENT $PID_WORKER $PID_EMBED $PID_CHUNKER 2>/dev/null; exit" SIGINT SIGTERM
+trap "echo '🛑 Shutting down side services...'; kill $PID_PDF $PID_PY $PID_AGENT $PID_WORKER $PID_EMBED $PID_CHUNKER $PID_RETRIEVAL 2>/dev/null; exit" SIGINT SIGTERM
 
 # Wait for processes so logs are printed to terminal
-wait $PID_PDF $PID_PY $PID_AGENT $PID_WORKER $PID_EMBED $PID_CHUNKER
+wait $PID_PDF $PID_PY $PID_AGENT $PID_WORKER $PID_EMBED $PID_CHUNKER $PID_RETRIEVAL

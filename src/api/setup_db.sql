@@ -408,6 +408,7 @@ CREATE TABLE IF NOT EXISTS paper_chunks (
     embedding double precision[],
     embedding_status VARCHAR(50) DEFAULT 'PENDING',
     embedding_model VARCHAR(100),
+    search_vector tsvector GENERATED ALWAYS AS (to_tsvector('english', coalesce(content, ''))) STORED,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(content_version_id, chunk_index)
@@ -415,6 +416,7 @@ CREATE TABLE IF NOT EXISTS paper_chunks (
 
 CREATE INDEX IF NOT EXISTS idx_paper_chunks_paper_id ON paper_chunks(paper_id);
 CREATE INDEX IF NOT EXISTS idx_paper_chunks_status ON paper_chunks(embedding_status);
+CREATE INDEX IF NOT EXISTS idx_paper_chunks_search_vector ON paper_chunks USING GIN(search_vector);
 
 -- 4. Create content_repair_jobs (PostgreSQL Persistent Queue)
 CREATE TABLE IF NOT EXISTS content_repair_jobs (

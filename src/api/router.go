@@ -2,9 +2,11 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"research_copilot/src/core"
 	"research_copilot/src/ingestion/arxiv"
@@ -16,6 +18,7 @@ import (
 	"research_copilot/src/ingestion/paperswithcode"
 	"research_copilot/src/ingestion/pubmed"
 	"research_copilot/src/ingestion/semanticscholar"
+	"research_copilot/src/retrieval"
 )
 
 var arxivClient = arxiv.NewArxivClient()
@@ -27,6 +30,7 @@ var openAlexClient = openalex.NewOpenAlexClient()
 var crossrefClient = crossref.NewCrossrefClient()
 var pwcClient = paperswithcode.NewPWCClient()
 var pubmedClient = pubmed.NewPubMedClient()
+var hybridEngine = retrieval.NewHybridEngine()
 
 // RegisterRoutes registers the handlers on the given HTTP ServeMux
 func RegisterRoutes(mux *http.ServeMux) {
@@ -41,6 +45,7 @@ func RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/search/paperswithcode", handleSearchPapersWithCode)
 	mux.HandleFunc("/api/v1/search/pubmed", handleSearchPubMed)
 	mux.HandleFunc("/api/v1/search/unified", handleSearchUnified)
+	mux.HandleFunc("/api/v1/retrieval/hybrid", handleHybridRetrieval)
 	mux.HandleFunc("/api/v1/search/sessions", handleGetSearchSessions)
 	mux.HandleFunc("/api/v1/papers/by-request/", handleGetPapersByRequestID)
 	mux.HandleFunc("/api/v1/knowledge-graph", handleGetKnowledgeGraph)
@@ -120,5 +125,33 @@ func handleSearchPubMed(w http.ResponseWriter, r *http.Request) {
 
 	writeJSONResponse(w, http.StatusOK, res)
 }
+
+func handleHybridRetrieval(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method Not Allowed")
+		return
+	}
+
+	// Proxy request to Python Agentic RAG Retrieval Service (Port 8104)
+	client := &http.Client{Timeout: 30 * time.Second}
+	req, err := http.NewRequestWithContext(r.Context(), "POST", "http://localhost:8104/retrieval/hybrid", r.Body)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "Failed to proxy retrieval request: "+err.Error())
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "Python Retrieval Service unreachable: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	_, _ = io.Copy(w, resp.Body)
+}
+
 
 

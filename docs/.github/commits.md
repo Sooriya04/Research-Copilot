@@ -281,3 +281,18 @@
 * **Roadmap Milestone (`docs/roadmap.md`)**:
   * Completed the final remaining client in Phase 1 (Data Collection & Ingestion Layer).
 
+<br />
+
+## Implement Python Agentic RAG Retrieval Engine (Phase 3.1)
+
+* **Python Agentic RAG Retrieval Microservice (`services/retrieval_service/main.py`)**:
+  * Built Python microservice on port `8104` for Phase 3.1 Agentic RAG retrieval.
+  * Implemented dense vector similarity retrieval using Ollama `nomic-embed-text` 768-dimensional embeddings.
+  * Implemented PostgreSQL full-text search (`ts_rank_cd` over `to_tsvector` with `websearch_to_tsquery`).
+  * Implemented Reciprocal Rank Fusion (RRF $k=60$) algorithm merging dense and sparse candidates.
+  * Enforced strict `request_id` session isolation across dense, sparse, and fusion stages.
+* **Go Router Proxy (`src/api/router.go`)**:
+  * Configured `handleHybridRetrieval` in Go backend to proxy `POST /api/v1/retrieval/hybrid` directly to Python Retrieval Microservice on port `8104`.
+* **Service Management (`service.sh`)**:
+  * Added `retrieval_service` (port `8104`) to background process launcher and shutdown trap.
+
