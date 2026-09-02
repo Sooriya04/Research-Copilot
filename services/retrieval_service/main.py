@@ -1,20 +1,19 @@
 """
-Research Copilot — Python Hybrid Retrieval Service (Agentic RAG Engine)
+Research Copilot — Python Hybrid Retrieval & ONNX BGE Reranker Service (Agentic RAG Engine)
 Port: 8104
 
 Combines:
 1. Dense Retrieval using Ollama nomic-embed-text (768-dim embeddings) and exact cosine similarity.
 2. Sparse Retrieval using PostgreSQL full-text search (websearch_to_tsquery + stored tsvector GIN index).
-3. Reciprocal Rank Fusion (RRF k=60) for optimal candidate scoring.
+3. Reciprocal Rank Fusion (RRF k=60) for candidate pooling.
+4. Direct In-Process ONNX BGE Reranking (NO PyTorch, NO separate microservice overhead).
 """
 
 import json
 import math
 import os
 import sys
-import time
 import urllib.request
-import urllib.parse
 from typing import List, Dict, Optional
 import psycopg2
 import psycopg2.extras
@@ -23,10 +22,11 @@ from pydantic import BaseModel
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shared.logger import get_logger, log_info, log_success, log_warn, log_error
+from reranker import init_reranker, rerank_candidates, is_ready, MODEL_NAME
 
 logger = get_logger("RETRIEVAL-SERVICE")
 
-app = FastAPI(title="Research Copilot - Hybrid Retrieval Engine", version="3.1.0")
+app = FastAPI(title="Research Copilot - Hybrid Retrieval & BGE Reranker Engine", version="3.2.0")
 
 OLLAMA_URL = os.environ.get("OLLAMA_EMBED_URL", "http://127.0.0.1:11434/api/embeddings")
 EMBED_MODEL = "nomic-embed-text:latest"
@@ -47,6 +47,10 @@ def load_env():
 
 load_env()
 
+@app.on_event("startup")
+def startup_event():
+    init_reranker()
+
 
 def get_db_conn():
     global _db_conn
@@ -64,7 +68,6 @@ def get_db_conn():
             _db_conn = psycopg2.connect(db_url)
 
     return _db_conn
-
 
 class HybridRequest(BaseModel):
     request_id: str
@@ -151,7 +154,6 @@ def execute_dense_search(conn, request_id: str, query_vec: List[float], limit: i
                     }
                 })
 
-        # Sort by dense similarity score descending
         candidates.sort(key=lambda x: x["dense_score"], reverse=True)
         top_candidates = candidates[:limit]
 
@@ -209,7 +211,7 @@ def execute_sparse_search(conn, request_id: str, query_text: str, limit: int) ->
     return candidates
 
 
-def compute_rrf(dense_list: List[Dict], sparse_list: List[Dict], rrf_k: int = 60, top_k: int = 10) -> List[Dict]:
+def compute_rrf(dense_list: List[Dict], sparse_list: List[Dict], rrf_k: int = 60, pool_limit: int = 50) -> List[Dict]:
     """Reciprocal Rank Fusion algorithm: RRF_score = sum(1 / (k + rank_i))."""
     fused_map = {}
 
@@ -240,10 +242,10 @@ def compute_rrf(dense_list: List[Dict], sparse_list: List[Dict], rrf_k: int = 60
     results.sort(key=lambda x: x["rrf_score"], reverse=True)
 
     for idx, r in enumerate(results):
-        r["rank"] = idx + 1
+        r["rrf_rank"] = idx + 1
         r["rrf_score"] = round(r["rrf_score"], 5)
 
-    return results[:top_k]
+    return results[:pool_limit]
 
 
 @app.post("/retrieval/hybrid")
@@ -269,27 +271,45 @@ async def retrieval_hybrid(req: HybridRequest):
     # 3. Sparse FTS Search
     sparse_candidates = execute_sparse_search(conn, req.request_id, req.query, sparse_k)
 
-    # 4. RRF Fusion
-    fused_results = compute_rrf(dense_candidates, sparse_candidates, rrf_k, top_k)
+    # 4. RRF Candidate Pool (Top 30-50)
+    candidate_pool = compute_rrf(dense_candidates, sparse_candidates, rrf_k, pool_limit=50)
+
+    # 5. Direct In-Process ONNX BGE Reranking
+    final_results = rerank_candidates(req.query, candidate_pool, top_k)
 
     return {
         "request_id": req.request_id,
         "query": req.query,
-        "results": fused_results,
+        "results": final_results,
         "retrieval": {
             "dense_candidates": len(dense_candidates),
             "sparse_candidates": len(sparse_candidates),
-            "fusion": "rrf"
+            "rrf_candidates": len(candidate_pool),
+            "fusion": "rrf+bge-onnx",
+            "reranker": MODEL_NAME if is_ready() else "disabled"
         }
     }
 
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "python_retrieval_engine", "port": 8104}
+    return {
+        "status": "ok",
+        "service": "python_retrieval_engine",
+        "port": 8104,
+        "reranker_ready": is_ready(),
+        "reranker_model": MODEL_NAME,
+        "pytorch_installed": False,
+        "transformers_installed": False
+    }
+
+
+@app.get("/ready")
+async def ready():
+    return {"status": "ready", "reranker_ready": is_ready()}
 
 
 if __name__ == "__main__":
     import uvicorn
-    logger.info("Starting Python Hybrid Retrieval Engine on port 8104...")
+    logger.info("Starting Python Hybrid Retrieval & BGE Reranker Service on port 8104...")
     uvicorn.run(app, host="0.0.0.0", port=8104, log_level="info")

@@ -18,3 +18,4 @@ __pycache__/
 *.pyd
 .pytest_cache/
 github.sh
+services/reranker/model

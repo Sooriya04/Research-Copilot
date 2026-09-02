@@ -303,3 +303,36 @@
   * **FTS GIN Index Optimization**: Updated sparse search SQL to query `c.search_vector @@ websearch_to_tsquery('english', %s)` directly, leveraging PostgreSQL GIN indexing.
   * **DB Connection Health**: Replaced per-request connection creation with persistent connection pooling and status verification.
   * **Dead Code Cleanup**: Deleted redundant/bypassed Go retrieval package (`src/retrieval/`).
+
+<br />
+
+## Implement In-Process ONNX BGE Reranker (Phase 3.2)
+
+* **BGE Reranker Module (`services/retrieval_service/reranker.py`)**:
+  * Implemented `BAAI/bge-reranker-base` (ONNX INT8) cross-encoder reranker loaded in-process inside the retrieval service.
+  * **NO PyTorch, NO Transformers, NO Sentence-Transformers installed at runtime.**
+  * Runtime stack: `onnxruntime==1.29.0` + `tokenizers==0.23.1` only.
+  * Uses `CPUExecutionProvider` — no CUDA or GPU required.
+  * Graceful fallback: if ONNX model files are missing, returns raw RRF results without crashing.
+  * Model loaded once on FastAPI startup (`@app.on_event("startup")`), reused across all requests.
+  * **Critical Performance Fix — Dynamic Batch Padding**: Uses `_tokenizer.enable_padding()` (dynamic padding to longest sequence in each batch) instead of fixed padding, dropping latency from **~18,000 ms → ~1,355 ms** for 50 chunks (a **13× speedup**).
+* **Retrieval Pipeline Upgrade (`services/retrieval_service/main.py`)**:
+  * Integrated reranker directly into the hybrid retrieval endpoint. Pipeline is now:
+    * Dense Search (nomic-embed-text cosine similarity)
+    * Sparse FTS Search (PostgreSQL GIN `search_vector`)
+    * RRF fusion → Top-50 candidate pool
+    * **BGE ONNX cross-encoder reranking → Final Top-K**
+  * Response now includes `bge_score` and `bge_rank` fields alongside existing RRF metadata.
+  * `fusion` field in response set to `"rrf+bge-onnx"` to indicate full pipeline.
+  * Cleaned up dead imports and fixed reranker import path (`from reranker import ...`).
+* **Model Files (`services/reranker/model/`)**:
+  * Downloaded `model_int8.onnx` (265.91 MB) and `tokenizer.json` (16.31 MB) from `Xenova/bge-reranker-base`.
+  * Total model directory: 283 MB.
+* **Benchmark Script (`services/reranker/benchmark.py`)**:
+  * Performance benchmarked with 1 query and 50 candidate chunks on CPU (RTX 3050 host, CPU only):
+    * Model load time: **2.17 seconds**
+    * First request: **1,362 ms**
+    * Subsequent requests: **~1,355 ms**
+    * Memory overhead: **405 MB**
+* **Dead Code Removal**:
+  * Deleted standalone `services/reranker/main.py`, `services/reranker/requirements.txt`, and `services/reranker/Dockerfile` — the reranker is in-process, not a separate microservice.
