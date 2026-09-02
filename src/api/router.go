@@ -18,7 +18,6 @@ import (
 	"research_copilot/src/ingestion/paperswithcode"
 	"research_copilot/src/ingestion/pubmed"
 	"research_copilot/src/ingestion/semanticscholar"
-	"research_copilot/src/retrieval"
 )
 
 var arxivClient = arxiv.NewArxivClient()
@@ -30,7 +29,6 @@ var openAlexClient = openalex.NewOpenAlexClient()
 var crossrefClient = crossref.NewCrossrefClient()
 var pwcClient = paperswithcode.NewPWCClient()
 var pubmedClient = pubmed.NewPubMedClient()
-var hybridEngine = retrieval.NewHybridEngine()
 
 // RegisterRoutes registers the handlers on the given HTTP ServeMux
 func RegisterRoutes(mux *http.ServeMux) {

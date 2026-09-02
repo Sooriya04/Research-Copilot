@@ -3,13 +3,13 @@ Research Copilot — Python Hybrid Retrieval Service (Agentic RAG Engine)
 Port: 8104
 
 Combines:
-1. Dense Retrieval using Ollama nomic-embed-text (768-dim embeddings).
-2. Sparse Retrieval using PostgreSQL full-text search (websearch_to_tsquery + tsvector).
+1. Dense Retrieval using Ollama nomic-embed-text (768-dim embeddings) and exact cosine similarity.
+2. Sparse Retrieval using PostgreSQL full-text search (websearch_to_tsquery + stored tsvector GIN index).
 3. Reciprocal Rank Fusion (RRF k=60) for optimal candidate scoring.
 """
 
 import json
-import logging
+import math
 import os
 import sys
 import time
@@ -31,6 +31,8 @@ app = FastAPI(title="Research Copilot - Hybrid Retrieval Engine", version="3.1.0
 OLLAMA_URL = os.environ.get("OLLAMA_EMBED_URL", "http://127.0.0.1:11434/api/embeddings")
 EMBED_MODEL = "nomic-embed-text:latest"
 
+_db_conn = None
+
 
 def load_env():
     env_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
@@ -47,11 +49,21 @@ load_env()
 
 
 def get_db_conn():
+    global _db_conn
     db_url = os.environ.get("DATABASE_URL", "")
     if not db_url:
         raise RuntimeError("DATABASE_URL not set")
-    conn = psycopg2.connect(db_url)
-    return conn
+
+    if _db_conn is None or getattr(_db_conn, "closed", 1) != 0:
+        _db_conn = psycopg2.connect(db_url)
+    else:
+        try:
+            with _db_conn.cursor() as cur:
+                cur.execute("SELECT 1;")
+        except Exception:
+            _db_conn = psycopg2.connect(db_url)
+
+    return _db_conn
 
 
 class HybridRequest(BaseModel):
@@ -84,29 +96,46 @@ def get_query_embedding(query: str) -> Optional[List[float]]:
         return None
 
 
-def execute_dense_search(conn, request_id: str, vec: List[float], limit: int) -> List[Dict]:
-    """Retrieves candidates using vector similarity with strict request_id isolation."""
+def cosine_similarity(v1: List[float], v2: List[float]) -> float:
+    """Computes exact Cosine Similarity between two 768-dim floating point vectors."""
+    if not v1 or not v2 or len(v1) != len(v2):
+        return 0.0
+    dot = sum(a * b for a, b in zip(v1, v2))
+    norm1 = math.sqrt(sum(a * a for a in v1))
+    norm2 = math.sqrt(sum(b * b for b in v2))
+    if norm1 == 0.0 or norm2 == 0.0:
+        return 0.0
+    return dot / (norm1 * norm2)
+
+
+def execute_dense_search(conn, request_id: str, query_vec: List[float], limit: int) -> List[Dict]:
+    """Retrieves chunks for the session request_id, calculates vector similarity, and ranks top candidates."""
     query = """
         SELECT c.id, c.paper_id, c.content, COALESCE(c.section_name, '') as section_name,
-               c.word_count, c.token_count, r.title, r.source, r.authors
+               c.word_count, c.token_count, c.embedding, r.title, r.source, r.authors
         FROM paper_chunks c
         JOIN research_papers r ON c.paper_id = r.id
         WHERE r.request_id = %s
-          AND c.embedding IS NOT NULL
-        LIMIT %s;
+          AND c.embedding IS NOT NULL;
     """
     candidates = []
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute(query, (request_id, limit))
+            cur.execute(query, (request_id,))
             rows = cur.fetchall()
-            for idx, row in enumerate(rows):
+            for row in rows:
+                chunk_vec = row["embedding"]
+                if not chunk_vec:
+                    continue
+
+                sim = cosine_similarity(query_vec, chunk_vec)
                 authors = []
                 if row["authors"]:
                     try:
                         authors = json.loads(row["authors"]) if isinstance(row["authors"], str) else row["authors"]
-                    except:
+                    except Exception:
                         pass
+
                 candidates.append({
                     "chunk_id": row["id"],
                     "paper_id": row["paper_id"],
@@ -114,29 +143,37 @@ def execute_dense_search(conn, request_id: str, vec: List[float], limit: int) ->
                     "section_name": row["section_name"],
                     "word_count": row["word_count"],
                     "token_count": row["token_count"],
-                    "dense_rank": idx + 1,
-                    "dense_score": round(1.0 / (1.0 + idx * 0.1), 4),
+                    "dense_score": round(float(sim), 4),
                     "metadata": {
                         "title": row["title"],
                         "source": row["source"],
                         "authors": authors
                     }
                 })
+
+        # Sort by dense similarity score descending
+        candidates.sort(key=lambda x: x["dense_score"], reverse=True)
+        top_candidates = candidates[:limit]
+
+        for idx, item in enumerate(top_candidates):
+            item["dense_rank"] = idx + 1
+
+        return top_candidates
     except Exception as e:
-        logger.error(f"Dense search error: {e}")
-    return candidates
+        logger.error(f"Dense vector search error: {e}")
+        return []
 
 
 def execute_sparse_search(conn, request_id: str, query_text: str, limit: int) -> List[Dict]:
-    """Retrieves candidates using PostgreSQL websearch_to_tsquery FTS with strict request_id isolation."""
+    """Retrieves candidates using PostgreSQL websearch_to_tsquery over stored search_vector GIN index."""
     query = """
         SELECT c.id, c.paper_id, c.content, COALESCE(c.section_name, '') as section_name,
                c.word_count, c.token_count, r.title, r.source, r.authors,
-               ts_rank_cd(to_tsvector('english', c.content), websearch_to_tsquery('english', %s)) as score
+               ts_rank_cd(c.search_vector, websearch_to_tsquery('english', %s)) as score
         FROM paper_chunks c
         JOIN research_papers r ON c.paper_id = r.id
         WHERE r.request_id = %s
-          AND to_tsvector('english', c.content) @@ websearch_to_tsquery('english', %s)
+          AND c.search_vector @@ websearch_to_tsquery('english', %s)
         ORDER BY score DESC
         LIMIT %s;
     """
@@ -150,7 +187,7 @@ def execute_sparse_search(conn, request_id: str, query_text: str, limit: int) ->
                 if row["authors"]:
                     try:
                         authors = json.loads(row["authors"]) if isinstance(row["authors"], str) else row["authors"]
-                    except:
+                    except Exception:
                         pass
                 candidates.append({
                     "chunk_id": row["id"],
@@ -222,31 +259,29 @@ async def retrieval_hybrid(req: HybridRequest):
     rrf_k = req.rrf_k or 60
 
     conn = get_db_conn()
-    try:
-        # 1. Query Embedding
-        vec = get_query_embedding(req.query)
 
-        # 2. Dense Search
-        dense_candidates = execute_dense_search(conn, req.request_id, vec, dense_k) if vec else []
+    # 1. Query Embedding
+    vec = get_query_embedding(req.query)
 
-        # 3. Sparse FTS Search
-        sparse_candidates = execute_sparse_search(conn, req.request_id, req.query, sparse_k)
+    # 2. Dense Search
+    dense_candidates = execute_dense_search(conn, req.request_id, vec, dense_k) if vec else []
 
-        # 4. RRF Fusion
-        fused_results = compute_rrf(dense_candidates, sparse_candidates, rrf_k, top_k)
+    # 3. Sparse FTS Search
+    sparse_candidates = execute_sparse_search(conn, req.request_id, req.query, sparse_k)
 
-        return {
-            "request_id": req.request_id,
-            "query": req.query,
-            "results": fused_results,
-            "retrieval": {
-                "dense_candidates": len(dense_candidates),
-                "sparse_candidates": len(sparse_candidates),
-                "fusion": "rrf"
-            }
+    # 4. RRF Fusion
+    fused_results = compute_rrf(dense_candidates, sparse_candidates, rrf_k, top_k)
+
+    return {
+        "request_id": req.request_id,
+        "query": req.query,
+        "results": fused_results,
+        "retrieval": {
+            "dense_candidates": len(dense_candidates),
+            "sparse_candidates": len(sparse_candidates),
+            "fusion": "rrf"
         }
-    finally:
-        conn.close()
+    }
 
 
 @app.get("/health")
