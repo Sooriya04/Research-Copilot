@@ -50,9 +50,9 @@ flowchart LR
 <br />
 
 ### Phase 3: Agentic RAG Pipeline
-- [ ] Build hybrid retrieval service (Dense Vector Search + Sparse BM25).
-- [ ] Integrate cross-encoder re-ranking service for relevancy scoring.
-- [ ] Implement multi-hop graph retrieval for contextual synthesis.
+- [x] Build hybrid retrieval service (Dense Vector Search + Sparse BM25).
+- [x] Integrate cross-encoder re-ranking service for relevancy scoring.
+- [x] Implement multi-hop graph retrieval for contextual synthesis.
 
 <br />
 

@@ -336,3 +336,21 @@
     * Memory overhead: **405 MB**
 * **Dead Code Removal**:
   * Deleted standalone `services/reranker/main.py`, `services/reranker/requirements.txt`, and `services/reranker/Dockerfile` — the reranker is in-process, not a separate microservice.
+
+<br />
+
+## Implement Dynamic PostgreSQL Multi-Hop Graph Retrieval (Phase 3.3)
+
+* **Dynamic Relational Graph Expansion (`services/retrieval_service/main.py`)**:
+  * Added `execute_graph_expansion(conn, request_id, seed_candidates, hops=1)` to dynamically traverse PostgreSQL metadata relationships (`authors`, `tasks`, `frameworks`, `benchmarks`) from `research_papers` for retrieved seed candidates.
+  * Discovers adjacent papers sharing explicit metadata edges and injects their top candidate chunks prior to cross-encoder reranking.
+  * Decorates candidate chunks with detailed provenance (`source`: `"seed"` | `"graph"`, `hop`: `0` | `1`, `connection`: `"shared_author"` | `"shared_task"` | `"shared_framework"`, `connected_to`: `seed_paper_id`, `graph_score`: `0.15`).
+* **Configurable Graph Expansion Parameter**:
+  * Extended `HybridRequest` API schema with `graph_hops` (`0`, `1`, `2`, default: `1`), allowing clients to toggle expansion off (`graph_hops: 0`) or configure multi-hop depth.
+* **Pipeline Integration & Fusion Metadata**:
+  * Updated `/retrieval/hybrid` pipeline order to:
+    * Dense + Sparse FTS Search
+    * Reciprocal Rank Fusion (RRF Candidate Pool)
+    * **Dynamic Relational Graph Expansion (Hop 1)**
+    * In-Process ONNX BGE Cross-Encoder Reranking
+  * Updated API response metadata to include `graph_hops`, `graph_expanded_candidates`, `total_candidates_reranked`, and `fusion: "rrf+graph_hop1+bge-onnx"`.

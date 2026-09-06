@@ -76,6 +76,7 @@ class HybridRequest(BaseModel):
     dense_k: Optional[int] = 50
     sparse_k: Optional[int] = 50
     rrf_k: Optional[int] = 60
+    graph_hops: Optional[int] = 1
 
 
 def get_query_embedding(query: str) -> Optional[List[float]]:
@@ -248,6 +249,131 @@ def compute_rrf(dense_list: List[Dict], sparse_list: List[Dict], rrf_k: int = 60
     return results[:pool_limit]
 
 
+def execute_graph_expansion(conn, request_id: str, seed_candidates: List[Dict], hops: int = 1) -> List[Dict]:
+    """
+    Traverses relational graph metadata in PostgreSQL for papers in seed_candidates.
+    Discovers adjacent papers via shared AUTHOR, TASK, FRAMEWORK, or BENCHMARK edges.
+    Decorates expanded candidate chunks with graph provenance.
+    """
+    if hops <= 0 or not seed_candidates:
+        for item in seed_candidates:
+            item.setdefault("source", "seed")
+            item.setdefault("hop", 0)
+        return seed_candidates
+
+    for item in seed_candidates:
+        item["source"] = "seed"
+        item["hop"] = 0
+
+    seed_paper_ids = list({c["paper_id"] for c in seed_candidates if "paper_id" in c})
+    if not seed_paper_ids:
+        return seed_candidates
+
+    existing_chunk_ids = {c["chunk_id"] for c in seed_candidates if "chunk_id" in c}
+    expanded_items = []
+
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("""
+                SELECT id, authors, tasks, frameworks, benchmarks
+                FROM research_papers
+                WHERE id = ANY(%s);
+            """, (seed_paper_ids,))
+            seed_metadata = cur.fetchall()
+
+            for paper in seed_metadata:
+                pid = paper["id"]
+                authors = []
+                if paper["authors"]:
+                    try:
+                        authors = json.loads(paper["authors"]) if isinstance(paper["authors"], str) else paper["authors"]
+                    except Exception:
+                        pass
+                
+                tasks = []
+                if paper["tasks"]:
+                    try:
+                        tasks = json.loads(paper["tasks"]) if isinstance(paper["tasks"], str) else paper["tasks"]
+                    except Exception:
+                        pass
+
+                frameworks = []
+                if paper["frameworks"]:
+                    try:
+                        frameworks = json.loads(paper["frameworks"]) if isinstance(paper["frameworks"], str) else paper["frameworks"]
+                    except Exception:
+                        pass
+
+                author_patterns = [f"%{a}%" for a in authors if isinstance(a, str) and len(a) > 3][:3] or ["%__no_match__%"]
+                task_patterns = [f"%{t}%" for t in tasks if isinstance(t, str) and len(t) > 2][:3] or ["%__no_match__%"]
+                fw_patterns = [f"%{f}%" for f in frameworks if isinstance(f, str) and len(f) > 2][:3] or ["%__no_match__%"]
+
+                adj_query = """
+                    SELECT c.id as chunk_id, c.paper_id, c.content, COALESCE(c.section_name, '') as section_name,
+                           c.word_count, c.token_count, r.title, r.source, r.authors, r.tasks, r.frameworks
+                    FROM paper_chunks c
+                    JOIN research_papers r ON c.paper_id = r.id
+                    WHERE r.id != %s
+                      AND r.request_id = %s
+                      AND (
+                        (r.authors::text ILIKE ANY(%s))
+                        OR (r.tasks::text ILIKE ANY(%s))
+                        OR (r.frameworks::text ILIKE ANY(%s))
+                      )
+                    LIMIT 5;
+                """
+                cur.execute(adj_query, (pid, request_id, author_patterns, task_patterns, fw_patterns))
+                adj_rows = cur.fetchall()
+
+                for row in adj_rows:
+                    if row["chunk_id"] in existing_chunk_ids:
+                        continue
+
+                    row_authors = str(row["authors"] or "")
+                    row_tasks = str(row["tasks"] or "")
+                    row_fws = str(row["frameworks"] or "")
+
+                    connection = "graph_edge"
+                    if any(isinstance(a, str) and a in row_authors for a in authors if isinstance(a, str) and len(a) > 3):
+                        connection = "shared_author"
+                    elif any(isinstance(t, str) and t in row_tasks for t in tasks if isinstance(t, str) and len(t) > 2):
+                        connection = "shared_task"
+                    elif any(isinstance(f, str) and f in row_fws for f in frameworks if isinstance(f, str) and len(f) > 2):
+                        connection = "shared_framework"
+
+                    parsed_authors = []
+                    if row["authors"]:
+                        try:
+                            parsed_authors = json.loads(row["authors"]) if isinstance(row["authors"], str) else row["authors"]
+                        except Exception:
+                            pass
+
+                    expanded_items.append({
+                        "chunk_id": row["chunk_id"],
+                        "paper_id": row["paper_id"],
+                        "content": row["content"],
+                        "section_name": row["section_name"],
+                        "word_count": row["word_count"],
+                        "token_count": row["token_count"],
+                        "source": "graph",
+                        "hop": 1,
+                        "connection": connection,
+                        "connected_to": pid,
+                        "graph_score": 0.15,
+                        "metadata": {
+                            "title": row["title"],
+                            "source": row["source"],
+                            "authors": parsed_authors
+                        }
+                    })
+                    existing_chunk_ids.add(row["chunk_id"])
+
+    except Exception as e:
+        logger.error(f"Graph expansion error: {e}")
+
+    return seed_candidates + expanded_items
+
+
 @app.post("/retrieval/hybrid")
 async def retrieval_hybrid(req: HybridRequest):
     if not req.query.strip():
@@ -259,6 +385,7 @@ async def retrieval_hybrid(req: HybridRequest):
     dense_k = req.dense_k or 50
     sparse_k = req.sparse_k or 50
     rrf_k = req.rrf_k or 60
+    graph_hops = req.graph_hops if req.graph_hops is not None else 1
 
     conn = get_db_conn()
 
@@ -274,8 +401,19 @@ async def retrieval_hybrid(req: HybridRequest):
     # 4. RRF Candidate Pool (Top 30-50)
     candidate_pool = compute_rrf(dense_candidates, sparse_candidates, rrf_k, pool_limit=50)
 
-    # 5. Direct In-Process ONNX BGE Reranking
-    final_results = rerank_candidates(req.query, candidate_pool, top_k)
+    # 5. Dynamic Graph Expansion (Hop 1)
+    if graph_hops > 0:
+        expanded_pool = execute_graph_expansion(conn, req.request_id, candidate_pool, hops=graph_hops)
+    else:
+        for item in candidate_pool:
+            item["source"] = "seed"
+            item["hop"] = 0
+        expanded_pool = candidate_pool
+
+    # 6. Direct In-Process ONNX BGE Reranking over expanded candidate pool
+    final_results = rerank_candidates(req.query, expanded_pool, top_k)
+
+    graph_expanded_count = sum(1 for item in expanded_pool if item.get("source") == "graph")
 
     return {
         "request_id": req.request_id,
@@ -285,7 +423,10 @@ async def retrieval_hybrid(req: HybridRequest):
             "dense_candidates": len(dense_candidates),
             "sparse_candidates": len(sparse_candidates),
             "rrf_candidates": len(candidate_pool),
-            "fusion": "rrf+bge-onnx",
+            "graph_hops": graph_hops,
+            "graph_expanded_candidates": graph_expanded_count,
+            "total_candidates_reranked": len(expanded_pool),
+            "fusion": f"rrf+graph_hop{graph_hops}+bge-onnx",
             "reranker": MODEL_NAME if is_ready() else "disabled"
         }
     }
