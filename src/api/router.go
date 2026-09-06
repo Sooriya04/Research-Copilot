@@ -46,11 +46,8 @@ func RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/retrieval/hybrid", handleHybridRetrieval)
 	mux.HandleFunc("/api/v1/search/sessions", handleGetSearchSessions)
 	mux.HandleFunc("/api/v1/papers/by-request/", handleGetPapersByRequestID)
+	mux.HandleFunc("/api/v1/sentinel/web-fallback", handleWebFallback)
 	mux.HandleFunc("/api/v1/knowledge-graph", handleGetKnowledgeGraph)
-
-	// Serve static files from public/ directory on root URL
-	fs := http.FileServer(http.Dir("./public"))
-	mux.Handle("/", fs)
 }
 
 func writeJSONResponse(w http.ResponseWriter, status int, data interface{}) {

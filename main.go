@@ -3,8 +3,10 @@ package main
 import (
 	_ "github.com/joho/godotenv/autoload"
 	"bytes"
+	"embed"
 	"encoding/json"
 	"io"
+	"io/fs"
 	"log"
 	"net/http"
 	"sync"
@@ -13,6 +15,9 @@ import (
 	"research_copilot/src/api"
 	"research_copilot/src/core"
 )
+
+//go:embed public/*
+var staticFS embed.FS
 
 var (
 	queryHistory      = make(map[string]time.Time)
@@ -92,6 +97,14 @@ func main() {
 	// 2. Register REST router routes
 	mux := http.NewServeMux()
 	api.RegisterRoutes(mux)
+
+	// Serve embedded React production bundle and static assets
+	subFS, err := fs.Sub(staticFS, "public")
+	if err == nil {
+		mux.Handle("/", http.FileServer(http.FS(subFS)))
+	} else {
+		mux.Handle("/", http.FileServer(http.Dir("./public")))
+	}
 
 	// Wrap in CORS and duplication monitoring middleware
 	handler := duplicationMonitorMiddleware(corsMiddleware(mux))

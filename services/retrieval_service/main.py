@@ -31,6 +31,11 @@ app = FastAPI(title="Research Copilot - Hybrid Retrieval & BGE Reranker Engine",
 OLLAMA_URL = os.environ.get("OLLAMA_EMBED_URL", "http://127.0.0.1:11434/api/embeddings")
 EMBED_MODEL = "nomic-embed-text:latest"
 
+WEB_FALLBACK_ENABLED = os.environ.get("WEB_FALLBACK_ENABLED", "true").lower() == "true"
+WEB_FALLBACK_MIN_CANDIDATES = int(os.environ.get("WEB_FALLBACK_MIN_CANDIDATES", "3"))
+WEB_FALLBACK_MIN_SCORE = float(os.environ.get("WEB_FALLBACK_MIN_SCORE", "0.01"))
+WEB_FALLBACK_MAX_PAPERS = int(os.environ.get("WEB_FALLBACK_MAX_PAPERS", "2"))
+
 _db_conn = None
 
 
@@ -77,6 +82,7 @@ class HybridRequest(BaseModel):
     sparse_k: Optional[int] = 50
     rrf_k: Optional[int] = 60
     graph_hops: Optional[int] = 1
+    web_fallback_attempted: Optional[bool] = False
 
 
 def get_query_embedding(query: str) -> Optional[List[float]]:
@@ -249,6 +255,14 @@ def compute_rrf(dense_list: List[Dict], sparse_list: List[Dict], rrf_k: int = 60
     return results[:pool_limit]
 
 
+def should_trigger_web_fallback(candidates: List[Dict], attempted: bool) -> bool:
+    if attempted or not WEB_FALLBACK_ENABLED:
+        return False
+    if not candidates or len(candidates) < WEB_FALLBACK_MIN_CANDIDATES:
+        return True
+    return float(candidates[0].get("rrf_score", 0.0)) < WEB_FALLBACK_MIN_SCORE
+
+
 def execute_graph_expansion(conn, request_id: str, seed_candidates: List[Dict], hops: int = 1) -> List[Dict]:
     """
     Traverses relational graph metadata in PostgreSQL for papers in seed_candidates.
@@ -400,6 +414,29 @@ async def retrieval_hybrid(req: HybridRequest):
 
     # 4. RRF Candidate Pool (Top 30-50)
     candidate_pool = compute_rrf(dense_candidates, sparse_candidates, rrf_k, pool_limit=50)
+
+    # 4.5 Web Sentinel Fallback
+    if should_trigger_web_fallback(candidate_pool, req.web_fallback_attempted):
+        logger.info(f"Quality gate failed for query '{req.query}'. Triggering Web Sentinel Fallback...")
+        fallback_payload = json.dumps({
+            "query": req.query,
+            "max_papers": WEB_FALLBACK_MAX_PAPERS
+        }).encode("utf-8")
+        fb_req = urllib.request.Request(
+            "http://localhost:8000/api/v1/sentinel/web-fallback",
+            data=fallback_payload,
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        try:
+            with urllib.request.urlopen(fb_req, timeout=120) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                logger.info(f"[WebSentinel] Completed: {data}")
+        except Exception as e:
+            logger.error(f"[WebSentinel] Fallback API failed: {e}")
+        
+        req.web_fallback_attempted = True
+        return await retrieval_hybrid(req)
 
     # 5. Dynamic Graph Expansion (Hop 1)
     if graph_hops > 0:

@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"research_copilot/src/core"
+	"research_copilot/src/agent"
 )
 
 const queryExpansionURL = "http://localhost:8100/expand"
@@ -53,6 +54,27 @@ func expandQuery(query string) []string {
 	return finalQueries
 }
 
+
+func handleWebFallback(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "Method Not Allowed")
+		return
+	}
+
+	var req agent.WebFallbackRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+
+	res, err := agent.ExecuteWebFallback(r.Context(), core.DB, req)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSONResponse(w, http.StatusOK, res)
+}
 
 func handleSearchUnified(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

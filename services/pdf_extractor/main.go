@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -41,7 +42,11 @@ func main() {
 		resp, err := handleDownload(&req)
 		if err != nil {
 			log.Printf("[DOWNLOAD] Failed to download paper %s: %v", req.ID, err)
-			writeJSONError(w, http.StatusInternalServerError, "Download Failed", err.Error())
+			status := http.StatusInternalServerError
+			if strings.Contains(err.Error(), "upstream server") {
+				status = http.StatusBadGateway
+			}
+			writeJSONError(w, status, "Download Failed", err.Error())
 			return
 		}
 		duration := time.Since(t0)
@@ -72,7 +77,11 @@ func main() {
 		resp, err := handleExtract(req.Path)
 		if err != nil {
 			log.Printf("[EXTRACT] Failed to extract text from path %s: %v", req.Path, err)
-			writeJSONError(w, http.StatusInternalServerError, "Extraction Failed", err.Error())
+			status := http.StatusInternalServerError
+			if strings.Contains(err.Error(), "invalid PDF signature") {
+				status = http.StatusUnsupportedMediaType
+			}
+			writeJSONError(w, status, "Extraction Failed", err.Error())
 			return
 		}
 		extractDuration := time.Since(t0)

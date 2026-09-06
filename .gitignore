@@ -19,3 +19,6 @@ __pycache__/
 .pytest_cache/
 github.sh
 services/reranker/model
+node_modules/
+frontend/node_modules/
+public

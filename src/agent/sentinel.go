@@ -95,25 +95,43 @@ func getSourceScore(sourceType string, isPDF bool) float64 {
 	return score
 }
 
-// DiscoverRepairSource executes candidate discovery across SearxNG, arXiv API, and Semantic Scholar.
+// cleanTitle removes special punctuation that breaks API queries
+func cleanTitle(title string) string {
+	t := strings.TrimSpace(title)
+	// Remove prefixes like "Table 1:", "Table 2:"
+	if idx := strings.Index(t, ":"); idx != -1 && idx < 15 {
+		t = strings.TrimSpace(t[idx+1:])
+	}
+	replacer := strings.NewReplacer("\"", "", "'", "", ":", " ", "-", " ", "_", " ", "/", " ")
+	t = replacer.Replace(t)
+	return strings.Join(strings.Fields(t), " ")
+}
+
+// DiscoverRepairSource executes candidate discovery across SearxNG, arXiv API, Semantic Scholar, and OpenAlex.
 func (a *RepairAgent) DiscoverRepairSource(ctx context.Context, req RepairRequest) (*RepairResponse, error) {
-	core.LogInfo("[REPAIR-AGENT] Repair: paper=%s title='%s' reason=%s", req.PaperID, req.Title, req.FailureReason)
+	cleanedTitle := cleanTitle(req.Title)
+	core.LogInfo("[REPAIR-AGENT] Repair: paper=%s title='%s' (clean='%s') reason=%s", req.PaperID, req.Title, cleanedTitle, req.FailureReason)
 	var candidates []map[string]string
 
-	// 1. SearxNG
-	searxCandidates := a.searchSearxNG(ctx, req.Title, req.Authors)
+	// 1. SearxNG (with public instance fallback)
+	searxCandidates := a.searchSearxNG(ctx, cleanedTitle, req.Authors)
 	candidates = append(candidates, searxCandidates...)
 	core.LogInfo("[REPAIR-AGENT] SearxNG: %d candidates", len(searxCandidates))
 
 	// 2. arXiv API
-	arxivCandidates := a.searchArxivAPI(ctx, req.Title, req.Authors)
+	arxivCandidates := a.searchArxivAPI(ctx, cleanedTitle, req.Authors)
 	candidates = append(candidates, arxivCandidates...)
 	core.LogInfo("[REPAIR-AGENT] arXiv API: %d candidates", len(arxivCandidates))
 
 	// 3. Semantic Scholar API
-	s2Candidates := a.searchSemanticScholar(ctx, req.Title)
+	s2Candidates := a.searchSemanticScholar(ctx, cleanedTitle)
 	candidates = append(candidates, s2Candidates...)
 	core.LogInfo("[REPAIR-AGENT] S2: %d candidates", len(s2Candidates))
+
+	// 4. OpenAlex API (Open Access PDF links)
+	openAlexCandidates := a.searchOpenAlexAPI(ctx, cleanedTitle)
+	candidates = append(candidates, openAlexCandidates...)
+	core.LogInfo("[REPAIR-AGENT] OpenAlex: %d candidates", len(openAlexCandidates))
 
 	// Blacklist and rank
 	ranked := a.rankSources(candidates, req.ExistingURLs)
@@ -139,63 +157,72 @@ func (a *RepairAgent) searchSearxNG(ctx context.Context, title string, authors [
 	}
 	query += " pdf"
 
-	reqURL := fmt.Sprintf("%s/search?q=%s&format=json&categories=science", a.searxngURL, url.QueryEscape(query))
-	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
-	if err != nil {
-		return nil
-	}
-	req.Header.Set("User-Agent", "ResearchCopilot/2.0")
-
-	resp, err := a.httpClient.Do(req)
-	if err != nil {
-		return nil
-	}
-	defer resp.Body.Close()
-
-	if !strings.Contains(resp.Header.Get("Content-Type"), "json") {
-		return nil
+	searxngURLs := []string{
+		a.searxngURL,
+		"https://searx.be",
+		"https://searx.priv.at",
+		"https://searx.space",
 	}
 
-	var data struct {
-		Results []struct {
-			URL string `json:"url"`
-		} `json:"results"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		return nil
-	}
-
-	var candidates []map[string]string
-	for i, r := range data.Results {
-		if i >= 6 {
-			break
+	for _, baseURL := range searxngURLs {
+		if baseURL == "" {
+			continue
 		}
-		if r.URL != "" {
-			candidates = append(candidates, map[string]string{
-				"url":  r.URL,
-				"type": classifyURL(r.URL),
-			})
+		reqURL := fmt.Sprintf("%s/search?q=%s&format=json&categories=science", baseURL, url.QueryEscape(query))
+		req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
+		if err != nil {
+			continue
+		}
+		req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36")
+
+		resp, err := a.httpClient.Do(req)
+		if err != nil {
+			continue
+		}
+		defer resp.Body.Close()
+
+		if !strings.Contains(resp.Header.Get("Content-Type"), "json") {
+			continue
+		}
+
+		var data struct {
+			Results []struct {
+				URL string `json:"url"`
+			} `json:"results"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+			continue
+		}
+
+		var candidates []map[string]string
+		for i, r := range data.Results {
+			if i >= 6 {
+				break
+			}
+			if r.URL != "" {
+				candidates = append(candidates, map[string]string{
+					"url":  r.URL,
+					"type": classifyURL(r.URL),
+				})
+			}
+		}
+		if len(candidates) > 0 {
+			return candidates
 		}
 	}
-	return candidates
+
+	return nil
 }
 
 func (a *RepairAgent) searchArxivAPI(ctx context.Context, title string, authors []string) []map[string]string {
-	queryParts := []string{fmt.Sprintf("ti:\"%s\"", title)}
-	if len(authors) > 0 {
-		parts := strings.Fields(authors[0])
-		if len(parts) > 0 {
-			queryParts = append(queryParts, fmt.Sprintf("au:%s", parts[len(parts)-1]))
-		}
-	}
-	q := strings.Join(queryParts, " AND ")
-	reqURL := fmt.Sprintf("%s?search_query=%s&max_results=3&sortBy=relevance", a.arxivURL, url.QueryEscape(q))
+	q := fmt.Sprintf("all:\"%s\"", title)
+	reqURL := fmt.Sprintf("%s?search_query=%s&max_results=5&sortBy=relevance", a.arxivURL, url.QueryEscape(q))
 
 	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {
 		return nil
 	}
-	req.Header.Set("User-Agent", "ResearchCopilot/2.0")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36")
 
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
@@ -208,7 +235,6 @@ func (a *RepairAgent) searchArxivAPI(ctx context.Context, title string, authors 
 	xmlStr := buf.String()
 
 	var candidates []map[string]string
-	// Extract direct PDF links from arXiv atom feed
 	for _, line := range strings.Split(xmlStr, "\n") {
 		if strings.Contains(line, "title=\"pdf\"") || (strings.Contains(line, "href=") && strings.Contains(line, "/pdf/")) {
 			if idx := strings.Index(line, "href=\""); idx != -1 {
@@ -227,12 +253,12 @@ func (a *RepairAgent) searchArxivAPI(ctx context.Context, title string, authors 
 }
 
 func (a *RepairAgent) searchSemanticScholar(ctx context.Context, title string) []map[string]string {
-	reqURL := fmt.Sprintf("%s?query=%s&fields=openAccessPdf,title&limit=3", a.s2URL, url.QueryEscape(title))
+	reqURL := fmt.Sprintf("%s?query=%s&fields=openAccessPdf,title&limit=5", a.s2URL, url.QueryEscape(title))
 	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {
 		return nil
 	}
-	req.Header.Set("User-Agent", "ResearchCopilot/2.0")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36")
 	if key := os.Getenv("S2_API_KEY"); key != "" {
 		req.Header.Set("x-api-key", key)
 	}
@@ -260,6 +286,57 @@ func (a *RepairAgent) searchSemanticScholar(ctx context.Context, title string) [
 			candidates = append(candidates, map[string]string{
 				"url":  item.OpenAccessPdf.URL,
 				"type": classifyURL(item.OpenAccessPdf.URL),
+			})
+		}
+	}
+	return candidates
+}
+
+func (a *RepairAgent) searchOpenAlexAPI(ctx context.Context, title string) []map[string]string {
+	reqURL := fmt.Sprintf("https://api.openalex.org/works?search=%s&per_page=5", url.QueryEscape(title))
+	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (ResearchCopilot/2.0)")
+
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+
+	var data struct {
+		Results []struct {
+			PrimaryLocation *struct {
+				PDFURL     string `json:"pdf_url"`
+				LandingURL string `json:"landing_page_url"`
+			} `json:"primary_location"`
+			OpenAccess *struct {
+				OAUrl string `json:"oa_url"`
+			} `json:"open_access"`
+		} `json:"results"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return nil
+	}
+
+	var candidates []map[string]string
+	for _, item := range data.Results {
+		var targetURL string
+		if item.PrimaryLocation != nil && item.PrimaryLocation.PDFURL != "" {
+			targetURL = item.PrimaryLocation.PDFURL
+		} else if item.OpenAccess != nil && item.OpenAccess.OAUrl != "" {
+			targetURL = item.OpenAccess.OAUrl
+		} else if item.PrimaryLocation != nil && item.PrimaryLocation.LandingURL != "" {
+			targetURL = item.PrimaryLocation.LandingURL
+		}
+
+		if targetURL != "" {
+			candidates = append(candidates, map[string]string{
+				"url":  targetURL,
+				"type": classifyURL(targetURL),
 			})
 		}
 	}

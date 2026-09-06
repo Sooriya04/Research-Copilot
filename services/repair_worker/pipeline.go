@@ -36,9 +36,26 @@ type DiscoverResponse struct {
 func getPaperTitle(ctx context.Context, paperID string) string {
 	var title string
 	err := db.QueryRowContext(ctx, "SELECT title FROM research_papers WHERE id = $1", paperID).Scan(&title)
-	if err != nil {
-		return ""
+	if err == nil && title != "" {
+		return title
 	}
+	_ = db.QueryRowContext(ctx, "SELECT title FROM arxiv_papers WHERE id = $1 OR arxiv_id = $1", paperID).Scan(&title)
+	if title != "" {
+		return title
+	}
+	_ = db.QueryRowContext(ctx, "SELECT title FROM openalex_papers WHERE id = $1 OR paper_id = $1", paperID).Scan(&title)
+	if title != "" {
+		return title
+	}
+	_ = db.QueryRowContext(ctx, "SELECT title FROM crossref_papers WHERE id = $1 OR paper_id = $1", paperID).Scan(&title)
+	if title != "" {
+		return title
+	}
+	_ = db.QueryRowContext(ctx, "SELECT title FROM semanticscholar_papers WHERE id = $1 OR paper_id = $1", paperID).Scan(&title)
+	if title != "" {
+		return title
+	}
+	_ = db.QueryRowContext(ctx, "SELECT title FROM pubmed_papers WHERE id = $1 OR pmid = $1", paperID).Scan(&title)
 	return title
 }
 
