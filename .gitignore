@@ -22,3 +22,12 @@ services/reranker/model
 node_modules/
 frontend/node_modules/
 public
+artifacts
+data/
+others/
+
+# Sensitive & internal reference documentation
+ideas.md
+ENDPOINTS.md
+feynman.md
+tasks/

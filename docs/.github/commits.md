@@ -354,3 +354,31 @@
     * **Dynamic Relational Graph Expansion (Hop 1)**
     * In-Process ONNX BGE Cross-Encoder Reranking
   * Updated API response metadata to include `graph_hops`, `graph_expanded_candidates`, `total_candidates_reranked`, and `fusion: "rrf+graph_hop1+bge-onnx"`.
+<br />
+
+## Rebuild Unified Loop + Graph Research Engine, 6-Factor PaperRank, and Async SQLite Persistence in Python & FastAPI
+
+* **Autonomous Loop + Graph State Architecture (`src/graph/`)**:
+  * Designed an extensible state-machine graph topology (`ResearchStateGraph`) where research phases are decoupled into discrete async execution nodes (`discover_papers`, `rank_papers`, `expand_citation_graph`, `extract_full_text`, `synthesize_evidence`).
+  * Implemented conditional feedback edge routing (`should_continue_loop`) to support iterative refinement and convergence criteria.
+  * Added step-by-step execution history and timing logs (`ExecutionStepLog`) to track pipeline provenance.
+* **PaperRank 6-Factor Algorithm (`src/engines/paper_rank.py`)**:
+  * Implemented transparent multi-factor literature prioritization scoring: Topical Relevance (30%), Citation Impact (20%), Citation Graph Prestige (20%), Citation Velocity (10%), Methodology Rigor (10%), and Reproducibility (10%).
+  * NetworkX directed citation graph builder with damping-factored PageRank computation.
+  * Automated heuristic rubric evaluator (`src/engines/rubric_evaluator.py`) detecting ablation studies, baseline comparisons, public GitHub links, uncertainty quantification (confidence intervals, error bars), and hardware compute budgets.
+* **Section-Aware PDF & Legal Open-Access Resolver (`src/engines/`)**:
+  * Built PyMuPDF (`fitz`) and BeautifulSoup parser (`src/engines/pdf_parser.py`) for extracting structured research sections (`Abstract`, `Methods`, `Results`, `Limitations`).
+  * Implemented multi-source legal open-access resolver (`src/engines/access_resolver.py`) supporting DOIs, arXiv IDs, OpenAlex IDs, PMIDs, and PMCIDs.
+* **Multi-Provider Search & Research Intelligence Endpoints (`src/api/`)**:
+  * Direct and unified parallel search across OpenAlex, arXiv, Europe PMC, PubMed, Crossref, Semantic Scholar, and Hugging Face.
+  * Added side-by-side methodology comparison matrix (`/api/v1/papers/compare`).
+  * Added automated research critique (`/api/v1/papers/critique`).
+  * Added gap-driven novel hypothesis generator (`/api/v1/hypothesis/generate`).
+  * Added 8-section publication-ready LaTeX paper drafting (`/api/v1/manuscript/draft`).
+  * Added code-paper hyperparameter audit (`/api/v1/audit/paper-code`).
+  * Added real-time Server-Sent Events (SSE) chat streaming (`/api/v1/chat/stream`).
+* **Async SQLite Persistence Engine (`src/core/database.py`, `src/core/models.py`, `src/core/db_service.py`)**:
+  * Deployed `aiosqlite` + `SQLAlchemy 2.0` asynchronous storage layer (`./data/research_copilot.db`).
+  * Managed physical tables for `projects`, `sessions`, `artifacts`, `graph_runs`, `paper_cache`, and `citation_edges`.
+* **Testing & Verification**:
+  * Built a 17-test verification suite (`pytest`) with 100% pass rate.

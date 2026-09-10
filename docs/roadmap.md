@@ -1,85 +1,31 @@
-# Development Roadmap & Implementation Plan
+# Development Roadmap
 
-> **Phased development milestones for building Research Copilot**
-
-This roadmap details the implementation breakdown across 7 distinct engineering phases, ensuring a modular and scalable build.
-
-<br />
+Implementation roadmap and milestones for the **Research Copilot** platform.
 
 ---
 
-## 🎯 Implementation Phases Overview
+### Phase 1: Core Research Engine & SQLite Foundation ✅
+- [x] Multi-source ingestion (OpenAlex, arXiv)
+- [x] 6-Factor PaperRank algorithm implementation
+- [x] Directed citation network & PageRank prestige (NetworkX)
+- [x] Section-aware PDF/HTML parser (PyMuPDF + BeautifulSoup)
+- [x] Heuristic rubric evaluator (Ablations, baselines, code repos, compute budgets)
+- [x] Async SQLite persistence (aiosqlite + SQLAlchemy 2.0)
+- [x] Loop + Graph state machine pipeline (`src/graph/`)
+- [x] Comprehensive Pytest test suite
 
-```mermaid
-flowchart LR
-    P1[Phase 1: Ingestion] --> P2[Phase 2: Graph & Parsing]
-    P2 --> P3[Phase 3: Agentic RAG]
-    P3 --> P4[Phase 4: Reasoning Engine]
-    P4 --> P5[Phase 5: MCP & Coding Agents]
-    P5 --> P6[Phase 6: Paper Generation]
-    P6 --> P7[Phase 7: Platform UI & Orchestration]
-```
+### Phase 2: Intelligence & Comparison Endpoints ✅
+- [x] Scientific multi-paper comparison matrix (`POST /api/v1/papers/compare`)
+- [x] Automated paper critique & limitation extractor (`POST /api/v1/papers/critique`)
+- [x] Gap-driven hypothesis generator (`POST /api/v1/hypothesis/generate`)
+- [x] Section extraction endpoint (`GET /api/v1/paper/{id}/sections`)
+- [x] Graph visualization JSON output (`GET /api/v1/graph/visualize/{session_id}`)
+- [x] Complete endpoints reference directory (`ENDPOINTS.md`)
+- [x] Architectural innovations & ideas document (`ideas.md`)
 
-<br />
-
----
-
-## 📋 Detailed Phase Breakdown
-
-### Phase 1: Data Collection & Ingestion Layer
-- [x] Implement Native Go Source Clients and unified aggregator.
-- [x] Build scientific source connectors:
-  - [x] arXiv API Client
-  - [x] Papers with Code Client
-  - [x] Hugging Face Hub Client
-  - [x] Kaggle API Client
-  - [x] OpenAlex API Client
-  - [x] Semantic Scholar Client
-  - [x] Crossref API Client
-  - [x] GitHub API Client
-  - [x] PubMed / Entrez Client
-- [x] Define normalized schemas: `Paper`, `Dataset`, `CodeRepo`, `Benchmark`, `Author` (deployed to PostgreSQL).
-
-<br />
-
-### Phase 2: Document Processing & Knowledge Graph
-- [x] Build section-aware PDF parser and LaTeX text extractor (Stateless Go PDF Extractor).
-- [x] Implement scientific entity extraction (Models, Datasets, Metrics, Hyperparameters).
-- [x] Implement Knowledge Graph engine (In-memory JSON `.ua/knowledge-graph.json`) linking papers $\leftrightarrow$ authors $\leftrightarrow$ code $\leftrightarrow$ benchmarks.
-
-<br />
-
-### Phase 3: Agentic RAG Pipeline
-- [x] Build hybrid retrieval service (Dense Vector Search + Sparse BM25).
-- [x] Integrate cross-encoder re-ranking service for relevancy scoring.
-- [x] Implement multi-hop graph retrieval for contextual synthesis.
-
-<br />
-
-### Phase 4: Research Reasoning Engine
-- [ ] Build literature summarizer & related work discovery engine.
-- [ ] Build research gap detection module.
-- [ ] Implement hypothesis and novel research idea generator.
-- [ ] Build experiment plan generator (compute budget, metric targets, dataset splits).
-
-<br />
-
-### Phase 5: MCP Skill Router & Code Execution Subsystem
-- [ ] Build MCP (Model Context Protocol) tool router.
-- [ ] Implement containerized sandboxed execution environment.
-- [ ] Integrate adapters for AI coding agents (**Claude Code**, **OpenAI Codex**, **OpenCode**).
-- [ ] Implement standard experiment runner (download, reproduce, modify, train, evaluate, compare).
-
-<br />
-
-### Phase 6: Paper Generation Engine
-- [ ] Build structured LaTeX generator for 8 paper sections (*Abstract* to *Conclusion*).
-- [ ] Build DOI / arXiv citation verification engine (zero-hallucination guarantee).
-- [ ] Implement automated table and benchmark figure compiler.
-
-<br />
-
-### Phase 7: Platform Orchestration & User Interface
-- [ ] Build master `ResearchOrchestrator` service.
-- [ ] Build interactive web interface for session management, execution monitoring, and manuscript editing.
-- [ ] Perform end-to-end evaluation runs.
+### Phase 3: Coding Agent Sandboxing & Bio Tools (Next)
+- [ ] MCP Router connecting Claude Code, OpenAI Codex, and OpenCode
+- [ ] Containerized Docker execution sandbox for ML training recipes
+- [ ] Biomolecular structure prediction (Chai-1 / Boltz-1 / DiffDock) dispatch
+- [ ] Interactive Ketcher chemical sketch viewer
+- [ ] Automated LaTeX manuscript generation (`01_intro.tex` through `08_conclusion.tex`)
