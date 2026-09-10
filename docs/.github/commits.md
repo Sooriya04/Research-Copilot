@@ -382,3 +382,31 @@
   * Managed physical tables for `projects`, `sessions`, `artifacts`, `graph_runs`, `paper_cache`, and `citation_edges`.
 * **Testing & Verification**:
   * Built a 17-test verification suite (`pytest`) with 100% pass rate.
+
+<br />
+
+## Implement Paper Intelligence Engine: Canonical Multi-Source Resolution, Context-Budgeted PDF Extraction, Normalized SQLite Persistence, and Gemini Flash-Lite Claim Verification
+
+* **Canonical Paper Model & Multi-Identifier Resolver (`src/core/canonical_models.py`, `src/engines/canonical_resolver.py`)**:
+  * Designed strongly-typed Pydantic schemas (`CanonicalPaper`, `Author`, `SourceMetadata`, `BenchmarkEvidence`, `CodeRepository`, `PaperSectionEntity`, `ExtractedClaim`, `PaperSummaryOutput`) to serve as the unified internal foundation for literature reasoning.
+  * Implemented multi-source resolver accepting any standard identifier (DOI, arXiv ID, OpenAlex ID, or Title) and resolving into a single canonical record with automated identifier normalization and source fallback.
+* **Papers With Code Client & Benchmark Extraction (`src/engines/paperswithcode.py`)**:
+  * Built an independent, decoupled ingestion client for the Papers With Code REST API.
+  * Extracts benchmark evaluations (task, dataset, metric, evaluation value), leaderboards, and official linked GitHub code repositories with automated redirect handling.
+* **PDF Intelligence Engine & Semantic Section Classifier (`src/engines/pdf_extractor.py`, `src/engines/context_cleaner.py`, `src/engines/section_extractor.py`)**:
+  * Built robust PyMuPDF (`fitz`) extractor with exception handling for malformed or corrupted PDF byte payloads.
+  * Implemented `ContextCleaner` to strip running headers/footers, page numbers, and citation noise (`[1, 2]`, `[1-3]`, `(Smith et al., 2020)`), maximizing token efficiency.
+  * Implemented semantic section classifier detecting and extracting key research sections (`problem`, `related_work`, `method`, `experiments`, `limitations`) while enforcing a strict token budget (< 3,500 tokens) to prevent LLM context pollution and hallucinations.
+* **Normalized Relational SQLite Storage & Repository (`src/core/normalized_models.py`, `src/core/paper_repository.py`)**:
+  * Deployed a fully normalized relational schema using `SQLAlchemy 2.0` and `aiosqlite` with physical tables: `canonical_papers`, `paper_sources`, `paper_sections`, `benchmarks`, `code_repositories`, `paper_summaries`, and `research_gaps`.
+  * Implemented `PaperRepository` providing asynchronous relational CRUD operations, relation pruning, query-by-identifier lookups, and caching with `force_refresh` invalidation support.
+* **Gemini Flash-Lite Provider & Claim Verification Engine (`src/providers/gemini.py`, `src/engines/paper_analyzer.py`, `src/engines/claim_verifier.py`, `src/engines/paper_intelligence_engine.py`)**:
+  * Implemented `GeminiProvider` utilizing `gemini-2.0-flash-lite` / `gemini-1.5-flash` with compact evidence prompt formatting and JSON schema enforcement, alongside offline heuristic fallback.
+  * Built `PaperAnalyzer` to produce structured research analyses (problem statement, core contributions, methodology architectures, empirical findings, limitations, and open questions).
+  * Built `ClaimVerifier` to ground model claims directly against extracted text sections and benchmark metrics, assigning verifiable states (`verified`, `inferred`, `unverified`, `contradicted`).
+  * Orchestrated the complete workflow in `PaperIntelligenceEngine`.
+* **API Implementation & Complete Test Suite (`src/api/routes_paper_intelligence.py`, `src/api/app.py`, `tests/`)**:
+  * Registered `POST /api/v1/paper/summarize` in FastAPI router with full OpenAPI request/response schema specifications.
+  * Expanded test coverage with dedicated test suites: `test_canonical_resolver.py`, `test_multi_source_ingestion.py`, `test_pdf_intelligence.py`, `test_paper_repository.py`, and `test_paper_intelligence_engine.py`.
+  * Full project test suite verified with **30 passing tests out of 30**.
+

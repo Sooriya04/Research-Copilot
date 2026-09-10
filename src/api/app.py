@@ -5,6 +5,7 @@ from src.api.routes_chat import router as chat_router
 from src.api.routes_graph import router as graph_router
 from src.api.routes_intelligence import router as intelligence_router
 from src.api.routes_manuscript import router as manuscript_router
+from src.api.routes_paper_intelligence import router as paper_intelligence_router
 from src.api.routes_rank import router as rank_router
 from src.api.routes_search import router as search_router
 from src.api.routes_workbench import router as workbench_router
@@ -43,6 +44,7 @@ def create_app() -> FastAPI:
         return {"status": "healthy", "version": settings.app_version}
 
     # Register All API Routers
+    app.include_router(paper_intelligence_router)
     app.include_router(rank_router)
     app.include_router(search_router)
     app.include_router(intelligence_router)
