@@ -61,7 +61,6 @@ def create_app() -> FastAPI:
 
     # Static Assets & React SPA Frontend Serving
     dist_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "public_dist")
-    public_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "public")
     assets_dir = os.path.join(dist_dir, "assets")
 
     if os.path.exists(assets_dir):
@@ -71,15 +70,10 @@ def create_app() -> FastAPI:
     async def serve_spa_frontend(full_path: str, request: Request):
         if full_path.startswith("api/"):
             return None
-        # Check if dist index.html exists
         dist_index = os.path.join(dist_dir, "index.html")
         if os.path.exists(dist_index):
             return FileResponse(dist_index)
-        # Fallback to public/index.html
-        public_index = os.path.join(public_dir, "index.html")
-        if os.path.exists(public_index):
-            return FileResponse(public_index)
-        return {"message": "Research Copilot Frontend"}
+        return {"message": "Research Copilot API"}
 
     return app
 

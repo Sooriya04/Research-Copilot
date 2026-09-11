@@ -121,6 +121,7 @@
   * Added fallback 2: Concurrently downloads Open Access PDFs, triggering the Go PDF extractor microservice, and parses paragraphs to extract abstract segments if public catalog lookups fail.
   * Serialized background ingestion loop with a 1.2-second rate-limiting delay between tasks to protect public API allocations.
 
+<br />
 
 ## Commit 9 (dev and main) : Implement Crossref Client for Works Search and Polite Pool Ingestion
 
@@ -434,23 +435,80 @@
 
 <br />
 
-## Rebuild Enterprise React Frontend with React Router and Lucide Iconography
+## Rebuild Dynamic React SPA Frontend with Real API Integration, Lucide Iconography, and Purge Legacy Assets
 
-* **Modular React SPA Architecture (`frontend/src/`)**:
-  * Converted legacy monolithic static frontend into a modular, production-grade React application with **React Router v6** and centralized state context (`AppContext.jsx`).
-  * Structured component decomposition:
-    * **Layout Components**: `Sidebar.jsx`, `TopHeader.jsx` with keyboard shortcuts (`1`, `2`, `3`, `4`, `⌘K`).
-    * **Modal Dialogs**: `CommandPaletteModal.jsx` (instant jump navigation & query routing), `PaperDetailModal.jsx` (metadata & citation inspector).
-    * **Domain Views**:
-      * `OverviewView.jsx` — Metrics ribbon, 8-source connector pipeline, and recent research session history.
-      * `LiteratureSearchView.jsx` — Multi-source parallel search (arXiv, HuggingFace, GitHub, OpenAlex, Crossref, Semantic Scholar, Kaggle, PapersWithCode) with BibTeX copying, comparison tagging, and PDF reader routing.
-      * `KnowledgeGraphView.jsx` — Interactive **vis-network** physics canvas, entity inspector, relationship matrix, and side-by-side comparison matrix.
-      * `PaperReaderView.jsx` — Document extractor, PDF upload handler, methodology/concepts breakdown, BibTeX generator, and embedded PDF iframe viewer.
-      * `BenchmarksView.jsx` — Active reproduction pipeline step tracker and SOTA benchmark leaderboard.
-      * `ManuscriptView.jsx` — 8-section publication draft studio with outline navigation and LaTeX export (`.tex`).
-      * `ResearchGapView.jsx` — Open limitation analyzer and gap-driven hypothesis generator.
+* **Purged Legacy Static Directory**:
+  * Deleted legacy monolithic static folder (`public/`) and replaced it with a modern modular React SPA in `frontend/` building to `public_dist/`.
+* **Zero Hardcoded Data & Real Scientific API Mapping**:
+  * Removed all hardcoded mock sessions, dummy graph nodes, and default static PDFs.
+  * **Literature Search (`/search`)**: Maps directly to `POST /api/v1/search/unified` querying 8 scientific repositories (arXiv, OpenAlex, Semantic Scholar, Crossref, Europe PMC, PubMed, Hugging Face, Papers With Code).
+  * **Paper Reader (`/pdf-inspector`)**: Dynamically extracts structured intelligence, methodology, claims, and embedded PDF iframe previews via `POST /api/v1/paper/summarize`.
+  * **Knowledge Graph (`/knowledge-graph`)**: Dynamically queries real nodes and 2D coverage matrices from `GET /api/v1/graph/nodes` and `GET /api/v1/graph/summary`.
+  * **Research Gap Finder (`/research-gaps`)**: Promoted to primary engineering position; loads real combinatorial graph gaps (`GET /api/v1/graph/gaps`) and generates novel hypotheses (`POST /api/v1/hypothesis/generate`).
+  * **Roadmap Placeholders (`/experiment-studio`, `/manuscript`)**: Configured with clean "Coming Soon" status for sandboxed cloud compute and publication LaTeX compilation.
 * **Professional Enterprise Design System & Iconography**:
-  * Replaced all emojis and informal symbols with crisp, professional **Lucide icons** (`LayoutDashboard`, `Search`, `Network`, `FileText`, `FlaskConical`, `PenTool`, `Lightbulb`, `Copy`, `Check`, `ExternalLink`, etc.).
-  * Supported system-wide **Light & Dark themes** using CSS custom properties with persistent `localStorage` synchronization.
+  * Replaced all informal emojis with crisp, scalable **Lucide icons** (`LayoutDashboard`, `Search`, `Network`, `FileText`, `FlaskConical`, `PenTool`, `Lightbulb`, `Copy`, `Check`, `ExternalLink`, etc.).
+  * Integrated **KaTeX** and **Vis-Network** physics rendering with full Light & Dark theme support.
 * **FastAPI SPA Integration & Production Build (`src/api/app.py`, `frontend/vite.config.js`)**:
   * Configured Vite production bundling into `public_dist/` with automated static asset mounting and SPA fallback routing in FastAPI.
+
+<br />
+
+## Enhance Cross-Source Deduplication, Global Session State Persistence, and Search-to-Graph Synchronized Relationship Canvas
+
+* **Multi-Key Cross-Source Deduplication (`src/api/routes_search.py`)**:
+  * Implemented robust DOI normalizer (`strip prefixes http://dx.doi.org/, https://doi.org/, doi:`), arXiv ID normalizer (`strip arxiv: and version tags v1, v2`), and whitespace/punctuation title slugifier.
+  * Smartly merges duplicate records across arXiv, OpenAlex, Semantic Scholar, Crossref, and PubMed, resolving missing PDFs, merging citations, abstracts, and topic lists without duplicate entries.
+* **Persistent Research Session Tracking (`src/api/routes_search.py`, `frontend/src/context/AppContext.jsx`)**:
+  * Connected unified search directly to SQLite `sessions` table (`SessionModel`) with `session_id`, execution duration, and query metadata.
+  * Persisted `sessionId`, `searchQuery`, `searchResults`, `sourceCounts`, `selectedSources`, `comparisonPapers`, and `activeReaderPaper` in `localStorage` across page reloads and tab navigations.
+* **Search-to-Graph Auto-Ingestion & Real-Time Dynamic Relations (`src/graph/builder.py`, `src/api/routes_graph.py`, `frontend/src/views/KnowledgeGraphView.jsx`)**:
+  * Auto-ingests search query results (e.g. "chain of thought", "direct preference optimization") into the `ResearchGraphStore` upon searching, extracting MethodNodes, DatasetNodes, ClaimNodes, and labeled directed edges.
+  * Built `GET /api/v1/graph/elements` (returning typed nodes, labeled relation edges, and node counts) and `GET /api/v1/graph/node/{id}/neighborhood` for direct multi-hop relation inspection.
+  * Updated **Knowledge Graph View**:
+    * Rendered distinct color-coded and shaped nodes for papers, methods, datasets, metrics, claims, and limitations.
+    * Added visible relation labels on edges (`USES_METHOD`, `EVALUATES_ON`, `ACHIEVES`, `CITES`, `HAS_CLAIM`, `LIMITED_BY`).
+    * Implemented interactive node focusing, neighborhood isolation, and real-time filtering by node type and relation type.
+    * **Relationship Matrix**: Synchronized dynamically with the active search topic and extracted literature methods & benchmarks.
+    * **Multi-Paper Comparison Matrix**: Auto-populates and allows 1-click toggling of papers from current search results to compare architectures, datasets, authors, and abstracts side-by-side.
+    * **Research Gap Finder**: Prefilled automatically from the active research topic for instantaneous hypothesis generation.
+
+<br />
+
+## Hierarchical Topic Head Node, Paper Subnodes, and Relational Knowledge Graph Topology
+
+* **Topic Head Node & Hierarchical Schema (`src/graph/schema.py`)**:
+  * Added `NodeType.TOPIC = "topic"` and `TopicNode` model (`id`, `name`, `query`, `node_type`).
+  * Added hierarchical semantic relations: `Relation.COVERS = "covers"` and `Relation.INVESTIGATES = "investigates"`.
+  * Updated `GraphNode` discriminated union and `parse_graph_node` deserializer to support Topic nodes.
+* **Hierarchical Subgraph Builder (`src/graph/builder.py`)**:
+  * Implemented `build_topic_subgraph(topic, papers)`: Automatically creates an anchored **Topic Head Node** (`topic-{slug}`) and connects directed `COVERS` relations to all discovered **Paper Subnodes**.
+  * Each Paper Subnode is subsequently connected to its extracted **MethodNodes** (`USES_METHOD`), **DatasetNodes** (`EVALUATES_ON`), **ResearchGapNodes** (`ADDRESSES_GAP`), and cross-citations (`CITES`).
+* **Topic-Aware Graph Endpoints (`src/api/routes_graph.py`, `src/api/routes_search.py`)**:
+  * Enhanced `GET /api/v1/graph/elements?topic={topic}` to dynamically link and return the active topic head node anchoring the paper subnodes and relational network.
+  * Updated `search_unified_endpoint` to automatically invoke `build_topic_subgraph` upon searching, ensuring the active search topic instantly establishes a clean hierarchical constellation.
+  * Updated `POST /api/v1/graph/seed-sample` to build a canonical Topic Head Node topology.
+* **Canvas Physics & Multi-Tier Hierarchy Visualization (`frontend/src/views/KnowledgeGraphView.jsx`)**:
+  * Configured distinct visual weights and mass attributes in `vis-network`:
+    * **Topic Head Node**: Mass `4`, distinct cyan/indigo styling, prominent border, central anchor.
+    * **Paper Subnodes**: Mass `2`, blue badge styling, connected via `COVERS` directed edges.
+    * **Method / Dataset / Gap Nodes**: Mass `1`, purple/amber/red badges branching cleanly from their parent papers.
+  * Updated **Legend Strip** and **Entity Inspector** to display Topic Root details and connected literature counts.
+  * Production frontend bundled cleanly to `public_dist/`.
+
+<br />
+
+## Search Isolation, Paper Ingestion Reliability, and Non-Technical Graph Readability
+
+* **Topic Isolation & Transient Node Reset (`src/graph/store.py`, `src/graph/builder.py`, `src/api/routes_graph.py`, `src/api/routes_search.py`)**:
+  * Added `ResearchGraphStore.clear()` and `POST /api/v1/graph/clear` to flush in-memory NetworkX graph and database tables.
+  * Updated `build_topic_subgraph(topic, papers, clear_existing=True)` to ensure when a new research topic is queried, prior unrelated nodes are isolated and cleaned.
+  * Added `GET /api/v1/graph/elements?topic={topic}&scoped=true` to isolate the active topic's connected component and prevent cross-query node pollution.
+* **Reliable "+ Graph" Paper Ingestion Pipeline (`src/api/routes_graph.py`, `frontend/src/views/LiteratureSearchView.jsx`)**:
+  * Updated `POST /api/v1/graph/ingest-paper` to accept flexible paper dictionaries and string lists, linking ingested papers directly to the active topic root node.
+  * Configured `LiteratureSearchView` to pass active query topics, sanitized authors, and tags, giving real-time feedback with instant graph synchronization.
+* **Simplified Non-Technical Visuals & Physics Configuration (`frontend/src/views/KnowledgeGraphView.jsx`)**:
+  * Replaced raw technical code IDs with clean human-readable badges: `🎯 Topic: <Name>`, `📄 <Title> (<Year>)`, `💡 Method: <Name>`, `📊 Dataset: <Name>`, `🔍 Gap: <Name>`.
+  * Plain-English relationship edge labels (`Explores`, `Uses Method`, `Tested On`, `References`, `Solves`).
+  * Tuned anti-collision physics (`gravitationalConstant: -180`, `springLength: 260`, `avoidOverlap: 1.0`) preventing cluttered overlapping nodes.
+  * Added quick canvas actions (`Reload`, `Fit View`, `Clear Graph`) and friendly 1-line guidance banner.

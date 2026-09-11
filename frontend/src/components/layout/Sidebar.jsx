@@ -5,9 +5,9 @@ import {
   Search,
   Network,
   FileText,
+  Lightbulb,
   FlaskConical,
   PenTool,
-  Lightbulb,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 
@@ -81,6 +81,16 @@ export default function Sidebar() {
           <div className="nav-section-title">ENGINEERING</div>
           <div className="nav-group">
             <NavLink
+              to="/research-gaps"
+              className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+            >
+              <div className="nav-item-left">
+                <Lightbulb size={15} />
+                <span>Research Gap Finder</span>
+              </div>
+            </NavLink>
+
+            <NavLink
               to="/experiment-studio"
               className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
             >
@@ -88,6 +98,7 @@ export default function Sidebar() {
                 <FlaskConical size={15} />
                 <span>Benchmarks & SOTA</span>
               </div>
+              <span className="badge badge-neutral" style={{ fontSize: 10, padding: '2px 5px' }}>Soon</span>
             </NavLink>
 
             <NavLink
@@ -98,16 +109,7 @@ export default function Sidebar() {
                 <PenTool size={15} />
                 <span>Manuscript Draft</span>
               </div>
-            </NavLink>
-
-            <NavLink
-              to="/research-gaps"
-              className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-            >
-              <div className="nav-item-left">
-                <Lightbulb size={15} />
-                <span>Research Gap Finder</span>
-              </div>
+              <span className="badge badge-neutral" style={{ fontSize: 10, padding: '2px 5px' }}>Soon</span>
             </NavLink>
           </div>
         </div>

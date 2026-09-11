@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Network } from 'vis-network';
 import {
   Network as NetworkIcon,
@@ -6,101 +6,512 @@ import {
   Columns3,
   RotateCw,
   Maximize2,
+  Trash2,
   Info,
   X,
+  Loader2,
+  Plus,
+  Search,
+  Filter,
+  Sparkles,
+  FileText,
+  Layers,
+  ArrowRight,
+  SlidersHorizontal,
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 
+function wrapLabel(text, maxChars = 20) {
+  if (!text) return '';
+  const words = String(text).split(' ');
+  const lines = [];
+  let currentLine = '';
+  for (const word of words) {
+    if ((currentLine + ' ' + word).trim().length > maxChars) {
+      if (currentLine) lines.push(currentLine);
+      currentLine = word;
+    } else {
+      currentLine = currentLine ? `${currentLine} ${word}` : word;
+    }
+  }
+  if (currentLine) lines.push(currentLine);
+  return lines.slice(0, 3).join('\n');
+}
+
+const NODE_THEMES = {
+  topic: { bg: '#0f172a', border: '#38bdf8', text: '#38bdf8', shape: 'box', size: 30 },
+  paper: { bg: '#2563eb', border: '#1d4ed8', text: '#ffffff', shape: 'box', size: 22 },
+  method: { bg: '#7c3aed', border: '#6d28d9', text: '#ffffff', shape: 'box', size: 18 },
+  dataset: { bg: '#d97706', border: '#b45309', text: '#ffffff', shape: 'box', size: 18 },
+  metric: { bg: '#059669', border: '#047857', text: '#ffffff', shape: 'box', size: 16 },
+  claim: { bg: '#0891b2', border: '#0e7490', text: '#ffffff', shape: 'box', size: 16 },
+  limitation: { bg: '#e11d48', border: '#be123c', text: '#ffffff', shape: 'box', size: 16 },
+  gap: { bg: '#dc2626', border: '#991b1b', text: '#ffffff', shape: 'box', size: 20 },
+};
+
+const FRIENDLY_RELATION_LABELS = {
+  covers: 'Explores',
+  investigates: 'Explores',
+  has_paper: 'Includes',
+  uses_method: 'Uses Method',
+  evaluates_on: 'Tested On',
+  achieves: 'Achieves',
+  cites: 'References',
+  has_claim: 'Claims',
+  limited_by: 'Limited By',
+  addresses: 'Solves',
+  extends: 'Extends',
+  compared_to: 'Compared With',
+  relates_to: 'Connected To',
+};
+
+const EDGE_COLORS = {
+  covers: '#38bdf8',
+  investigates: '#38bdf8',
+  has_paper: '#38bdf8',
+  uses_method: '#a855f7',
+  evaluates_on: '#f59e0b',
+  achieves: '#10b981',
+  cites: '#3b82f6',
+  has_claim: '#06b6d4',
+  limited_by: '#f43f5e',
+  addresses: '#a855f7',
+  extends: '#ec4899',
+  compared_to: '#06b6d4',
+  relates_to: '#64748b',
+};
+
 export default function KnowledgeGraphView() {
-  const { theme, comparisonPapers, clearComparisonPapers, removeComparisonPaper } = useApp();
+  const {
+    theme,
+    comparisonPapers,
+    addComparisonPaper,
+    removeComparisonPaper,
+    clearComparisonPapers,
+    setActiveReaderPaper,
+    searchQuery,
+    searchResults,
+  } = useApp();
+  const navigate = useNavigate();
   const [graphMode, setGraphMode] = useState('graph'); // 'graph' | 'matrix' | 'compare'
   const [selectedEntity, setSelectedEntity] = useState(null);
+  const [neighborhood, setNeighborhood] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [seeding, setSeeding] = useState(false);
+
+  const [rawNodes, setRawNodes] = useState([]);
+  const [rawEdges, setRawEdges] = useState([]);
+  const [summaryData, setSummaryData] = useState(null);
+
+  // Filter & Layout states
+  const [graphScope, setGraphScope] = useState('core'); // 'core' (topic, papers, methods, datasets) | 'all'
+  const [nodeTypeFilter, setNodeTypeFilter] = useState('all');
+  const [relationFilter, setRelationFilter] = useState('all');
+  const [searchTerm, setSearchTerm] = useState('');
+
   const containerRef = useRef(null);
   const networkRef = useRef(null);
 
-  // Default Graph Data
-  const defaultGraphData = {
-    nodes: [
-      { id: '1', label: 'Audio DeepFake Detection', group: 'topic', title: 'Root Research Domain' },
-      { id: '2', label: 'Are audio DeepFake models polyglots?', group: 'paper', title: 'Kinnunen et al., 2024' },
-      { id: '3', label: 'ASVspoof 2021 Challenge Baseline', group: 'paper', title: 'Yamagishi et al., 2021' },
-      { id: '4', label: 'Self-Supervised Wav2Vec 2.0', group: 'method', title: 'Speech Feature Extractor' },
-      { id: '5', label: 'Cross-lingual Generalization', group: 'concept', title: 'Acoustic Generalization' },
-      { id: '6', label: 'Mamba State Space Models', group: 'paper', title: 'Gu & Dao, 2023' },
-    ],
-    edges: [
-      { from: '1', to: '2', label: 'investigates' },
-      { from: '1', to: '3', label: 'benchmark' },
-      { from: '2', to: '5', label: 'evaluates' },
-      { from: '2', to: '4', label: 'uses' },
-      { from: '3', to: '4', label: 'baseline' },
-      { from: '6', to: '4', label: 'extends' },
-    ]
+  const fetchGraphData = async () => {
+    setLoading(true);
+    try {
+      // 1. Fetch graph elements strictly scoped to active topic query
+      const url = searchQuery
+        ? `/api/v1/graph/elements?topic=${encodeURIComponent(searchQuery)}&scoped=true`
+        : '/api/v1/graph/elements';
+      const elemRes = await fetch(url);
+      if (elemRes.ok) {
+        const elemData = await elemRes.json();
+        setRawNodes(elemData.nodes || []);
+        setRawEdges(elemData.edges || []);
+      }
+
+      // 2. Fetch summary & coverage
+      const sumRes = await fetch('/api/v1/graph/summary');
+      if (sumRes.ok) {
+        const summary = await sumRes.json();
+        setSummaryData(summary);
+      }
+    } catch (err) {
+      console.error('Failed to load graph elements:', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
-    if (graphMode === 'graph' && containerRef.current) {
+    fetchGraphData();
+  }, [searchQuery]);
+
+  const handleClearGraph = async () => {
+    try {
+      await fetch('/api/v1/graph/clear', { method: 'POST' });
+      setRawNodes([]);
+      setRawEdges([]);
+      setSelectedEntity(null);
+      setNeighborhood(null);
+    } catch (err) {
+      console.error('Failed to clear graph:', err);
+    }
+  };
+
+  const handleSeedGraph = async () => {
+    setSeeding(true);
+    try {
+      const res = await fetch('/api/v1/graph/seed-sample', { method: 'POST' });
+      if (res.ok) {
+        await fetchGraphData();
+      }
+    } catch (err) {
+      console.error('Failed to seed graph:', err);
+    } finally {
+      setSeeding(false);
+    }
+  };
+
+  // Build matrix rows dynamically from search results & graph summary
+  const matrixRows = useMemo(() => {
+    const rows = [];
+    const seen = new Set();
+
+    // 1. From active search results
+    if (searchResults && searchResults.length > 0) {
+      searchResults.forEach((p) => {
+        const methods = p.topics && p.topics.length > 0 ? p.topics.slice(0, 3) : ['Reasoning & Empirical Analysis'];
+        const datasets = p.topics && p.topics.length > 3 ? p.topics.slice(3, 5) : ['Benchmark Evaluation'];
+
+        methods.forEach((m) => {
+          datasets.forEach((d) => {
+            const key = `${m}->${d}`;
+            if (!seen.has(key)) {
+              seen.add(key);
+              rows.push({
+                method: m,
+                dataset: d,
+                status: 'Evaluated',
+                rationale: `Evidence reported in '${p.title.slice(0, 45)}...' (${p.year || 2024})`,
+                paperTitle: p.title,
+                paperId: p.id || p.canonical_id,
+              });
+            }
+          });
+        });
+      });
+    }
+
+    // 2. From graph summary coverage matrix
+    if (summaryData && summaryData.coverage_matrix) {
+      for (const [method, datasets] of Object.entries(summaryData.coverage_matrix)) {
+        for (const [dataset, covered] of Object.entries(datasets)) {
+          if (covered) {
+            const key = `${method}->${dataset}`;
+            if (!seen.has(key)) {
+              seen.add(key);
+              rows.push({
+                method,
+                dataset,
+                status: 'Evaluated',
+                rationale: `Empirical evaluation of ${method} on ${dataset} benchmark in Knowledge Graph.`,
+              });
+            }
+          }
+        }
+      }
+    }
+
+    return rows;
+  }, [searchResults, summaryData]);
+
+  // Active papers to display in Multi-Paper Comparison Matrix
+  const activeComparisonPapers = useMemo(() => {
+    if (comparisonPapers.length > 0) {
+      return comparisonPapers;
+    }
+    if (searchResults && searchResults.length > 0) {
+      return searchResults.slice(0, 4);
+    }
+    return [];
+  }, [comparisonPapers, searchResults]);
+
+  // Filter nodes and edges with Scope and Collision Prevention
+  const filteredData = useMemo(() => {
+    let nodesPool = [];
+    let edgesPool = [];
+
+    // When searchQuery is present, build cleanly around the active topic and its search results
+    if (searchQuery) {
+      const topicId = `topic-${searchQuery.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-')}`;
+      const activeTopicNode = {
+        id: topicId,
+        label: searchQuery,
+        node_type: 'topic',
+        title: `[TOPIC] ${searchQuery}`,
+        data: { name: searchQuery, id: topicId, query: searchQuery },
+      };
+      nodesPool.push(activeTopicNode);
+
+      // Collect papers from active searchResults or matching rawNodes
+      const paperMap = new Map();
+      (searchResults || []).forEach(p => {
+        const pid = p.id || p.canonical_id || `paper-${p.title?.slice(0, 20)}`;
+        paperMap.set(pid, {
+          id: pid,
+          label: p.title?.slice(0, 35) || 'Research Paper',
+          node_type: 'paper',
+          title: `[PAPER] ${p.title}`,
+          data: p,
+        });
+      });
+
+      // Also include any papers from rawNodes that are linked to this topic
+      rawEdges.forEach(e => {
+        if (e.source === topicId || e.relation === 'covers' || e.relation === 'investigates') {
+          const rawPaper = rawNodes.find(n => n.id === e.target && (n.node_type === 'paper' || n.node_type === 'Paper'));
+          if (rawPaper && !paperMap.has(rawPaper.id)) {
+            paperMap.set(rawPaper.id, rawPaper);
+          }
+        }
+      });
+
+      // Add all topic papers and edges
+      for (const [pid, pNode] of paperMap.entries()) {
+        nodesPool.push(pNode);
+        edgesPool.push({
+          source: topicId,
+          target: pid,
+          relation: 'covers',
+          label: 'Explores',
+          weight: 2.0,
+        });
+
+        // Add method/dataset subnodes from paper topics
+        const pData = pNode.data || {};
+        const topics = pData.topics || [];
+        if (Array.isArray(topics)) {
+          topics.slice(0, 2).forEach(mStr => {
+            const mId = `method-${mStr.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-')}`;
+            if (!nodesPool.some(n => n.id === mId)) {
+              nodesPool.push({
+                id: mId,
+                label: mStr.slice(0, 30),
+                node_type: 'method',
+                title: `[METHOD] ${mStr}`,
+                data: { name: mStr, id: mId },
+              });
+            }
+            edgesPool.push({
+              source: pid,
+              target: mId,
+              relation: 'uses_method',
+              label: 'Uses Method',
+              weight: 1.0,
+            });
+          });
+        }
+      }
+
+      // Add any existing rawEdges between our active nodes (e.g. citations, evaluations)
+      const validNodeIds = new Set(nodesPool.map(n => n.id));
+      rawEdges.forEach(e => {
+        if (validNodeIds.has(e.source) && validNodeIds.has(e.target) && !edgesPool.some(ep => ep.source === e.source && ep.target === e.target)) {
+          edgesPool.push(e);
+        }
+      });
+    } else {
+      // If no active search query, use rawNodes from backend
+      nodesPool = [...rawNodes];
+      edgesPool = [...rawEdges];
+    }
+
+    let filteredNodes = nodesPool;
+
+    // Filter by Scope (Core = Topic, Paper, Method, Dataset, Gap)
+    if (graphScope === 'core') {
+      filteredNodes = filteredNodes.filter(n =>
+        ['topic', 'paper', 'method', 'dataset', 'gap'].includes((n.node_type || 'paper').toLowerCase())
+      );
+    }
+
+    if (nodeTypeFilter !== 'all') {
+      filteredNodes = filteredNodes.filter(n => (n.node_type || 'paper').toLowerCase() === nodeTypeFilter.toLowerCase());
+    }
+
+    if (searchTerm.trim()) {
+      const term = searchTerm.toLowerCase();
+      filteredNodes = filteredNodes.filter(n =>
+        (n.label || '').toLowerCase().includes(term) ||
+        (n.title || '').toLowerCase().includes(term) ||
+        (n.id || '').toLowerCase().includes(term)
+      );
+    }
+
+    const validNodeIds = new Set(filteredNodes.map(n => n.id));
+    let filteredEdges = edgesPool.filter(e => validNodeIds.has(e.source) && validNodeIds.has(e.target));
+
+    if (relationFilter !== 'all') {
+      filteredEdges = filteredEdges.filter(e => (e.relation || '').toLowerCase() === relationFilter.toLowerCase());
+    }
+
+    return {
+      nodes: filteredNodes,
+      edges: filteredEdges,
+    };
+  }, [rawNodes, rawEdges, graphScope, nodeTypeFilter, relationFilter, searchTerm, searchQuery, searchResults]);
+
+  // Render Vis Network with forceAtlas2 collision avoidance
+  useEffect(() => {
+    if (graphMode === 'graph' && containerRef.current && filteredData.nodes.length > 0) {
       renderVisGraph();
     }
-  }, [graphMode, theme]);
+  }, [graphMode, theme, filteredData]);
 
   const renderVisGraph = () => {
-    if (!containerRef.current) return;
+    if (!containerRef.current || filteredData.nodes.length === 0) return;
 
     const isDark = theme === 'dark';
-    const textColor = isDark ? '#fafafa' : '#09090b';
-    const bgNodeColor = isDark ? '#27272a' : '#ffffff';
-    const borderNodeColor = isDark ? '#3b82f6' : '#2563eb';
-    const edgeColor = isDark ? '#52525b' : '#cbd5e1';
 
-    const nodes = defaultGraphData.nodes.map(n => ({
-      ...n,
-      color: {
-        background: bgNodeColor,
-        border: borderNodeColor,
-        highlight: { background: '#2563eb', border: '#1d4ed8' },
-      },
-      font: { color: textColor, size: 12, face: 'Plus Jakarta Sans' },
-      shape: 'box',
-      margin: 10,
-      shadow: true,
-    }));
+    const nodes = filteredData.nodes.map(n => {
+      const ntype = (n.node_type || 'paper').toLowerCase();
+      const style = NODE_THEMES[ntype] || NODE_THEMES.paper;
+      const rawLabel = n.data?.name || n.data?.title || n.data?.text || n.label || n.id;
+      
+      let formattedLabel;
+      if (ntype === 'topic') {
+        formattedLabel = `🎯 TOPIC\n${wrapLabel(rawLabel, 22)}`;
+      } else if (ntype === 'paper') {
+        const yearPart = n.data?.year ? `\n(${n.data.year})` : '';
+        formattedLabel = `📄 ${wrapLabel(rawLabel, 20)}${yearPart}`;
+      } else if (ntype === 'method') {
+        formattedLabel = `💡 ${wrapLabel(rawLabel, 18)}`;
+      } else if (ntype === 'dataset') {
+        formattedLabel = `📊 ${wrapLabel(rawLabel, 18)}`;
+      } else if (ntype === 'gap') {
+        formattedLabel = `🔍 ${wrapLabel(rawLabel, 18)}`;
+      } else {
+        formattedLabel = wrapLabel(rawLabel, 18);
+      }
 
-    const edges = defaultGraphData.edges.map(e => ({
-      ...e,
-      color: { color: edgeColor, highlight: '#2563eb' },
-      font: { color: isDark ? '#a1a1aa' : '#71717a', size: 10, align: 'middle' },
-      arrows: 'to',
-      smooth: { type: 'continuous' },
-    }));
+      const mass = ntype === 'topic' ? 4 : ntype === 'paper' ? 2 : 1;
 
+      return {
+        id: n.id,
+        label: formattedLabel,
+        title: `${ntype.toUpperCase()}: ${rawLabel}`,
+        shape: 'box',
+        borderRadius: ntype === 'topic' ? 10 : 6,
+        mass,
+        color: {
+          background: ntype === 'topic' ? (isDark ? '#0b132b' : '#f0fdf4') : (isDark && ntype === 'paper' ? '#1e3a8a' : style.bg),
+          border: ntype === 'topic' ? '#38bdf8' : (isDark && ntype === 'paper' ? '#60a5fa' : style.border),
+          highlight: { background: '#2563eb', border: '#1d4ed8' },
+          hover: { background: '#3b82f6', border: '#1d4ed8' },
+        },
+        font: {
+          color: ntype === 'topic' ? (isDark ? '#38bdf8' : '#0369a1') : style.text,
+          size: ntype === 'topic' ? 13 : ntype === 'paper' ? 11.5 : 10.5,
+          face: 'Plus Jakarta Sans, -apple-system, sans-serif',
+          bold: { mod: 'bold' },
+        },
+        margin: ntype === 'topic' ? { top: 12, right: 16, bottom: 12, left: 16 } : { top: 8, right: 12, bottom: 8, left: 12 },
+        borderWidth: ntype === 'topic' ? 2.5 : 1.5,
+        shadow: {
+          enabled: true,
+          color: ntype === 'topic' ? 'rgba(56, 189, 248, 0.4)' : 'rgba(0,0,0,0.15)',
+          size: ntype === 'topic' ? 12 : 6,
+          x: 0,
+          y: 2,
+        },
+        data: n.data,
+        nodeType: ntype,
+      };
+    });
+
+    const edges = filteredData.edges.map(e => {
+      const rel = (e.relation || 'relates_to').toLowerCase();
+      const color = EDGE_COLORS[rel] || EDGE_COLORS.relates_to;
+      const isTopicEdge = rel === 'covers' || rel === 'investigates' || rel === 'has_paper';
+      const friendlyLabel = FRIENDLY_RELATION_LABELS[rel] || (e.label || rel.replace('_', ' '));
+
+      return {
+        id: `${e.source}->${e.target}:${e.relation}`,
+        from: e.source,
+        to: e.target,
+        label: friendlyLabel,
+        color: { color, highlight: '#2563eb', hover: '#3b82f6', opacity: isTopicEdge ? 0.95 : 0.8 },
+        font: {
+          color: isDark ? '#94a3b8' : '#64748b',
+          size: isTopicEdge ? 10.5 : 9.5,
+          face: 'Plus Jakarta Sans, sans-serif',
+          align: 'middle',
+          background: isDark ? '#18181b' : '#ffffff',
+          strokeWidth: 0,
+        },
+        arrows: {
+          to: { enabled: true, scaleFactor: isTopicEdge ? 0.8 : 0.65 },
+        },
+        smooth: { type: 'continuous', roundness: 0.25 },
+        width: isTopicEdge ? 2.2 : 1.5,
+      };
+    });
+
+    // forceAtlas2 with anti-collision and spacious node repulsion
     const options = {
       physics: {
-        stabilization: true,
-        barnesHut: {
-          gravitationalConstant: -3000,
-          springLength: 120,
-          springConstant: 0.04,
+        solver: 'forceAtlas2Based',
+        forceAtlas2Based: {
+          gravitationalConstant: -180,
+          centralGravity: 0.005,
+          springLength: 260,
+          springConstant: 0.05,
+          damping: 0.45,
+          avoidOverlap: 1.0, // Strict collision prevention
+        },
+        stabilization: {
+          enabled: true,
+          iterations: 250,
+          updateInterval: 25,
         },
       },
-      interaction: { hover: true, tooltipDelay: 200 },
+      interaction: {
+        hover: true,
+        tooltipDelay: 150,
+        selectable: true,
+        selectConnectedEdges: true,
+        navigationButtons: false,
+      },
+      layout: {
+        improvedLayout: true,
+      },
     };
 
     const network = new Network(containerRef.current, { nodes, edges }, options);
     networkRef.current = network;
 
-    network.on('click', (params) => {
+    network.on('click', async (params) => {
       if (params.nodes.length > 0) {
         const nodeId = params.nodes[0];
-        const node = defaultGraphData.nodes.find(n => n.id === nodeId);
-        if (node) {
+        const foundNode = filteredData.nodes.find(n => n.id === nodeId) || rawNodes.find(n => n.id === nodeId);
+        if (foundNode) {
           setSelectedEntity({
-            id: node.id,
-            title: node.label,
-            type: node.group ? node.group.toUpperCase() : 'ENTITY',
-            summary: node.title || 'Connected literature entity in the Research Copilot Knowledge Graph.',
-            connections: defaultGraphData.edges.filter(e => e.from === node.id || e.to === node.id).length,
+            id: foundNode.id,
+            title: foundNode.data?.name || foundNode.data?.title || foundNode.data?.text || foundNode.label,
+            type: (foundNode.node_type || 'ENTITY').toUpperCase(),
+            raw: foundNode.data,
           });
+
+          // Fetch neighborhood
+          try {
+            const neighRes = await fetch(`/api/v1/graph/node/${encodeURIComponent(nodeId)}/neighborhood`);
+            if (neighRes.ok) {
+              const neighData = await neighRes.json();
+              setNeighborhood(neighData);
+            } else {
+              setNeighborhood(null);
+            }
+          } catch {
+            setNeighborhood(null);
+          }
         }
       }
     });
@@ -112,13 +523,41 @@ export default function KnowledgeGraphView() {
     }
   };
 
+  const handleFocusNode = (nodeId) => {
+    if (networkRef.current) {
+      networkRef.current.focus(nodeId, {
+        scale: 1.2,
+        animation: { duration: 800, easingFunction: 'easeInOutQuad' },
+      });
+      networkRef.current.selectNodes([nodeId]);
+    }
+  };
+
+  const openInReader = (paperData) => {
+    if (paperData) {
+      setActiveReaderPaper({
+        id: paperData.id,
+        title: paperData.title,
+        authors: paperData.authors,
+        year: paperData.year,
+        pdf_url: paperData.pdf_url || `https://arxiv.org/pdf/${paperData.id}.pdf`,
+      });
+      navigate('/pdf-inspector');
+    }
+  };
+
   return (
     <section id="view-knowledge-graph" className="view-panel active">
       <div className="panel-header">
         <div>
           <h1>Research Knowledge Graph</h1>
           <p className="panel-subtitle">
-            Paper-to-Paper network graph linking Research Papers by shared technical methodologies & concepts.
+            Interactive multi-hop semantic relationship graph linking papers, methods, benchmark datasets, and claims.
+            {searchQuery && (
+              <span className="badge badge-blue" style={{ marginLeft: 8 }}>
+                Topic: {searchQuery}
+              </span>
+            )}
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -128,7 +567,7 @@ export default function KnowledgeGraphView() {
             style={{ display: 'flex', alignItems: 'center', gap: 6 }}
           >
             <NetworkIcon size={13} />
-            <span>Graph Canvas View</span>
+            <span>Graph Canvas</span>
           </button>
           <button
             className={`btn btn-secondary btn-sm ${graphMode === 'matrix' ? 'btn-primary' : ''}`}
@@ -136,7 +575,7 @@ export default function KnowledgeGraphView() {
             style={{ display: 'flex', alignItems: 'center', gap: 6 }}
           >
             <Table2 size={13} />
-            <span>Relationship Matrix Table</span>
+            <span>Relationship Matrix ({matrixRows.length})</span>
           </button>
           <button
             className={`btn btn-secondary btn-sm ${graphMode === 'compare' ? 'btn-primary' : ''}`}
@@ -144,14 +583,15 @@ export default function KnowledgeGraphView() {
             style={{ display: 'flex', alignItems: 'center', gap: 6 }}
           >
             <Columns3 size={13} />
-            <span>Multi-Paper Comparison Matrix</span>
+            <span>Multi-Paper Comparison ({activeComparisonPapers.length})</span>
           </button>
           {graphMode === 'graph' && (
             <>
               <button
                 className="btn btn-secondary btn-sm"
-                onClick={renderVisGraph}
+                onClick={fetchGraphData}
                 style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                title="Reload Knowledge Graph"
               >
                 <RotateCw size={13} />
                 <span>Reload</span>
@@ -160,63 +600,327 @@ export default function KnowledgeGraphView() {
                 className="btn btn-secondary btn-sm"
                 onClick={handleResetFit}
                 style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                title="Reset Zoom and Fit to Screen"
               >
                 <Maximize2 size={13} />
-                <span>Reset Fit</span>
+                <span>Fit</span>
+              </button>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={handleClearGraph}
+                style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                title="Clear Knowledge Graph Canvas"
+              >
+                <Trash2 size={13} />
+                <span>Clear</span>
               </button>
             </>
           )}
         </div>
       </div>
 
-      {/* 1. Graph Canvas View */}
-      {graphMode === 'graph' && (
-        <div className="graph-workspace" id="graph-workspace-view">
-          <div className="card graph-canvas-box" style={{ height: 600, position: 'relative' }}>
-            <div ref={containerRef} style={{ width: '100%', height: '100%' }}></div>
-            <div className="graph-legend-strip">
-              <div><span className="dot dot-paper"></span> Research Paper Node</div>
-              <div>
-                <span
-                  style={{
-                    display: 'inline-block',
-                    width: 14,
-                    height: 2,
-                    background: 'var(--accent-emerald)',
-                    verticalAlign: 'middle',
-                    marginRight: 4,
-                  }}
-                ></span>
-                Shared Methodology Link
-              </div>
-            </div>
+      {/* Filter & Control Bar */}
+      {graphMode === 'graph' && rawNodes.length > 0 && (
+        <div className="search-bar-box" style={{ padding: '10px 14px', marginBottom: 12, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 200 }}>
+            <Search size={14} style={{ color: 'var(--text-muted)' }} />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Filter nodes by name or keyword..."
+              style={{
+                background: 'none',
+                border: 'none',
+                outline: 'none',
+                color: 'var(--text-primary)',
+                fontSize: 13,
+                width: '100%',
+              }}
+            />
+            {searchTerm && (
+              <button onClick={() => setSearchTerm('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
+                <X size={13} />
+              </button>
+            )}
           </div>
 
-          <div className="card" id="graph-inspector-panel">
-            <h3 style={{ fontSize: 14, marginBottom: 8 }}>Entity Inspector</h3>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {/* Complexity Scope Selector */}
+            <div style={{ display: 'flex', background: 'var(--bg-secondary)', padding: 2, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
+              <button
+                onClick={() => setGraphScope('core')}
+                className={`btn btn-sm ${graphScope === 'core' ? 'btn-primary' : 'btn-ghost'}`}
+                style={{ fontSize: 11, padding: '2px 8px' }}
+                title="Show Papers, Methods & Datasets (Clean Architecture)"
+              >
+                Core Architecture
+              </button>
+              <button
+                onClick={() => setGraphScope('all')}
+                className={`btn btn-sm ${graphScope === 'all' ? 'btn-primary' : 'btn-ghost'}`}
+                style={{ fontSize: 11, padding: '2px 8px' }}
+                title="Show Full Detail including Claims & Metrics"
+              >
+                Full Detail
+              </button>
+            </div>
+
+            <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <Filter size={12} />
+              Type:
+              <select
+                value={nodeTypeFilter}
+                onChange={(e) => setNodeTypeFilter(e.target.value)}
+                style={{
+                  background: 'var(--bg-secondary)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '3px 8px',
+                  fontSize: 12,
+                }}
+              >
+                <option value="all">All Entity Types</option>
+                <option value="topic">Topic (Head Node)</option>
+                <option value="paper">Papers (Subnodes)</option>
+                <option value="method">Methods</option>
+                <option value="dataset">Datasets</option>
+                <option value="gap">Research Gaps</option>
+                <option value="metric">Metrics</option>
+                <option value="claim">Claims</option>
+                <option value="limitation">Limitations</option>
+              </select>
+            </label>
+
+            <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+              Relation:
+              <select
+                value={relationFilter}
+                onChange={(e) => setRelationFilter(e.target.value)}
+                style={{
+                  background: 'var(--bg-secondary)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '3px 8px',
+                  fontSize: 12,
+                }}
+              >
+                <option value="all">All Relationships</option>
+                <option value="covers">COVERS (Topic → Paper)</option>
+                <option value="uses_method">USES_METHOD</option>
+                <option value="evaluates_on">EVALUATES_ON</option>
+                <option value="cites">CITES</option>
+                <option value="achieves">ACHIEVES</option>
+                <option value="has_claim">HAS_CLAIM</option>
+                <option value="limited_by">LIMITED_BY</option>
+              </select>
+            </label>
+
+            <span className="badge badge-neutral" style={{ fontSize: 11.5 }}>
+              {filteredData.nodes.length} Nodes • {filteredData.edges.length} Relations
+            </span>
+          </div>
+        </div>
+      )}
+
+      {loading && (
+        <div className="loading-box">
+          <Loader2 size={24} className="animate-spin" style={{ color: 'var(--accent-blue)', marginBottom: 8 }} />
+          <p>Loading Knowledge Graph entities & semantic relationships...</p>
+        </div>
+      )}
+
+      {/* Friendly Plain-English Guide Banner */}
+      {graphMode === 'graph' && !loading && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          padding: '10px 14px',
+          background: 'var(--bg-secondary)',
+          borderRadius: 'var(--radius-sm)',
+          border: '1px solid var(--border-subtle)',
+          marginBottom: 12,
+          fontSize: 12.5,
+          color: 'var(--text-secondary)',
+        }}>
+          <Sparkles size={15} style={{ color: 'var(--accent-blue)', flexShrink: 0 }} />
+          <span>
+            <strong>How to read:</strong> The central blue node is the <strong>Research Topic</strong>. It connects to the <strong>Research Papers</strong> studying it. Each paper branches into the <strong>Techniques</strong> it uses and <strong>Datasets</strong> it tested on. Click any node to inspect details.
+          </span>
+        </div>
+      )}
+
+      {/* 1. Graph Canvas View */}
+      {graphMode === 'graph' && !loading && (
+        <div className="graph-workspace" id="graph-workspace-view">
+          <div className="card graph-canvas-box" style={{ height: 620, position: 'relative' }}>
+            {filteredData.nodes.length > 0 ? (
+              <div ref={containerRef} style={{ width: '100%', height: '100%' }}></div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)' }}>
+                <NetworkIcon size={44} style={{ marginBottom: 14, color: 'var(--accent-blue)' }} />
+                <h3 style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6 }}>
+                  Knowledge Graph is Ready to Explore
+                </h3>
+                <p style={{ fontSize: 13, maxWidth: 440, textAlign: 'center', marginBottom: 20 }}>
+                  Search any topic (e.g. "chain of thought") in Literature Search to auto-build nodes, or seed canonical literature.
+                </p>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button className="btn btn-primary" onClick={handleSeedGraph} disabled={seeding}>
+                    {seeding ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                    <span style={{ marginLeft: 6 }}>Seed Canonical Research Graph</span>
+                  </button>
+                  <button className="btn btn-secondary" onClick={() => navigate('/search')}>
+                    <Plus size={14} style={{ marginRight: 6 }} />
+                    Search Literature
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {filteredData.nodes.length > 0 && (
+              <div className="graph-legend-strip">
+                <div><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: '#38bdf8', marginRight: 4 }}></span> 🎯 Topic (Main Theme)</div>
+                <div><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: NODE_THEMES.paper.bg, marginRight: 4 }}></span> 📄 Papers (Articles)</div>
+                <div><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: NODE_THEMES.method.bg, marginRight: 4 }}></span> 💡 Methods (Techniques)</div>
+                <div><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: NODE_THEMES.dataset.bg, marginRight: 4 }}></span> 📊 Datasets (Test Data)</div>
+                <div><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: NODE_THEMES.gap.bg, marginRight: 4 }}></span> 🔍 Gaps (Open Ideas)</div>
+                {graphScope === 'all' && (
+                  <>
+                    <div><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: NODE_THEMES.metric.bg, marginRight: 4 }}></span> 📈 Metrics</div>
+                    <div><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: NODE_THEMES.claim.bg, marginRight: 4 }}></span> 💬 Claims</div>
+                    <div><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: NODE_THEMES.limitation.bg, marginRight: 4 }}></span> ⚠️ Limitations</div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Entity & Relationship Inspector Panel */}
+          <div className="card" id="graph-inspector-panel" style={{ height: 620, overflowY: 'auto' }}>
+            <h3 style={{ fontSize: 14, marginBottom: 4 }}>Entity & Relationship Inspector</h3>
             <p className="panel-subtitle" style={{ fontSize: 12 }}>
-              Select any graph node on the canvas to inspect its metadata relationships.
+              Click any node on the canvas to inspect its semantic connections.
             </p>
 
             {selectedEntity ? (
               <div id="inspector-details-content" style={{ marginTop: 14 }}>
-                <span className="badge badge-blue">{selectedEntity.type}</span>
-                <h4 style={{ fontSize: 13.5, fontWeight: 600, margin: '8px 0 4px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span className={`badge ${selectedEntity.type === 'TOPIC' ? 'badge-blue' : selectedEntity.type === 'METHOD' ? 'badge-purple' : selectedEntity.type === 'DATASET' ? 'badge-amber' : 'badge-neutral'}`}>
+                    {selectedEntity.type}
+                  </span>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => handleFocusNode(selectedEntity.id)}
+                    style={{ fontSize: 11, padding: '2px 6px' }}
+                  >
+                    Focus
+                  </button>
+                </div>
+
+                <h4 style={{ fontSize: 14, fontWeight: 600, margin: '10px 0 6px', color: 'var(--text-primary)' }}>
                   {selectedEntity.title}
                 </h4>
-                <p style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.4 }}>
-                  {selectedEntity.summary}
-                </p>
-                <div className="inspector-meta-list" style={{ marginTop: 10 }}>
-                  <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                    <strong>Direct Relations:</strong> {selectedEntity.connections} edges
+
+                {selectedEntity.type === 'TOPIC' && (
+                  <div style={{ marginBottom: 14 }}>
+                    <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 10 }}>
+                      Primary research topic head node anchoring literature subnodes and methodological interconnections.
+                    </p>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => navigate('/search')}
+                      style={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6 }}
+                    >
+                      <Search size={12} />
+                      <span>Search More Papers for this Topic</span>
+                    </button>
                   </div>
-                </div>
+                )}
+
+                {selectedEntity.raw?.abstract && (
+                  <p style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.45, marginBottom: 12 }}>
+                    {selectedEntity.raw.abstract.slice(0, 220)}...
+                  </p>
+                )}
+
+                {selectedEntity.type === 'PAPER' && (
+                  <div style={{ marginBottom: 14 }}>
+                    <button
+                      className="btn btn-primary btn-sm"
+                      onClick={() => openInReader(selectedEntity.raw)}
+                      style={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6 }}
+                    >
+                      <FileText size={12} />
+                      <span>Open in PDF Reader</span>
+                    </button>
+                  </div>
+                )}
+
+                {/* Neighborhood & Relationships Section */}
+                {neighborhood && neighborhood.edges && neighborhood.edges.length > 0 && (
+                  <div style={{ marginTop: 14, borderTop: '1px solid var(--border-subtle)', paddingTop: 12 }}>
+                    <h5 style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <Layers size={13} />
+                      Connected Relationships ({neighborhood.edges.length})
+                    </h5>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {neighborhood.edges.map((edge, idx) => {
+                        const targetNeighbor = neighborhood.neighbors?.find(
+                          n => n.id === (edge.direction === 'outgoing' ? edge.target : edge.source)
+                        );
+                        const neighborLabel = targetNeighbor?.title || targetNeighbor?.name || targetNeighbor?.text || (edge.direction === 'outgoing' ? edge.target : edge.source);
+                        const relColor = EDGE_COLORS[edge.relation] || '#64748b';
+
+                        return (
+                          <div
+                            key={idx}
+                            onClick={() => handleFocusNode(targetNeighbor?.id || (edge.direction === 'outgoing' ? edge.target : edge.source))}
+                            style={{
+                              padding: '6px 8px',
+                              borderRadius: 'var(--radius-sm)',
+                              background: 'var(--bg-secondary)',
+                              border: '1px solid var(--border-subtle)',
+                              fontSize: 11.5,
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              gap: 6,
+                            }}
+                          >
+                            <div>
+                              <span
+                                style={{
+                                  fontSize: 9.5,
+                                  fontWeight: 700,
+                                  color: relColor,
+                                  textTransform: 'uppercase',
+                                  display: 'block',
+                                }}
+                              >
+                                {edge.direction === 'outgoing' ? '→ ' : '← '} {edge.relation.replace('_', ' ')}
+                              </span>
+                              <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>
+                                {String(neighborLabel).slice(0, 30)}
+                              </span>
+                            </div>
+                            <ArrowRight size={11} style={{ color: 'var(--text-muted)' }} />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
-              <div style={{ marginTop: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
+              <div style={{ marginTop: 40, textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
                 <Info size={24} style={{ marginBottom: 8, display: 'block', margin: '0 auto 8px' }} />
-                Click a node in the graph to view properties.
+                Click any node on the graph to inspect incoming and outgoing scientific relationships.
               </div>
             )}
           </div>
@@ -224,55 +928,60 @@ export default function KnowledgeGraphView() {
       )}
 
       {/* 2. Relationship Matrix Table */}
-      {graphMode === 'matrix' && (
+      {graphMode === 'matrix' && !loading && (
         <div className="card table-box" id="matrix-workspace-view">
-          <h3 style={{ fontSize: 14, marginBottom: 12 }}>Paper Content Relationship Matrix</h3>
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Source Paper</th>
-                <th>Target Paper</th>
-                <th>Shared Concept</th>
-                <th>Scientific Link Rationale</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td><strong>Are audio DeepFake models polyglots?</strong></td>
-                <td>ASVspoof 2021 Challenge Baseline</td>
-                <td><span className="badge badge-blue">Wav2Vec 2.0</span></td>
-                <td>Shared pre-trained feature representation benchmarked across language partitions.</td>
-              </tr>
-              <tr>
-                <td><strong>Attention Is All You Need</strong></td>
-                <td>Language Models are Few-Shot Learners</td>
-                <td><span className="badge badge-violet">Transformer Decoder</span></td>
-                <td>Autoregressive self-attention architecture scaled from 65M to 175B parameters.</td>
-              </tr>
-              <tr>
-                <td><strong>Mamba: Linear-Time Sequence Modeling</strong></td>
-                <td>Attention Is All You Need</td>
-                <td><span className="badge badge-emerald">Selective State Space</span></td>
-                <td>Replaces quadratic O(N^2) attention with O(N) hardware-aware scan kernels.</td>
-              </tr>
-            </tbody>
-          </table>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+            <div>
+              <h3 style={{ fontSize: 14 }}>Method × Benchmark Relationship Matrix</h3>
+              <p className="panel-subtitle" style={{ fontSize: 12 }}>
+                Cross-mapping extracted methods to evaluated benchmarks for <strong>{searchQuery || 'Current Knowledge Base'}</strong>.
+              </p>
+            </div>
+            <span className="badge badge-blue">{matrixRows.length} Mappings Extracted</span>
+          </div>
+
+          {matrixRows.length > 0 ? (
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Extracted Methodology</th>
+                  <th>Evaluated Benchmark Dataset</th>
+                  <th>Evidence Status</th>
+                  <th>Scientific Link Rationale</th>
+                </tr>
+              </thead>
+              <tbody>
+                {matrixRows.map((row, idx) => (
+                  <tr key={idx}>
+                    <td><strong>{row.method}</strong></td>
+                    <td>{row.dataset}</td>
+                    <td><span className="badge badge-emerald">{row.status}</span></td>
+                    <td>{row.rationale}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+              No relationship matrix data extracted yet. Run a search in <strong>Literature Search</strong> (e.g. 'chain of thought').
+            </div>
+          )}
         </div>
       )}
 
       {/* 3. Multi-Paper Comparison Matrix */}
-      {graphMode === 'compare' && (
+      {graphMode === 'compare' && !loading && (
         <div className="card table-box" id="compare-workspace-view">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
             <div>
               <h3 style={{ fontSize: 15, fontWeight: 700 }}>Side-by-Side Multi-Paper Comparison Matrix</h3>
               <p className="panel-subtitle" style={{ fontSize: 12 }}>
-                Compare selected research papers across architecture, datasets, loss formulations, compute budget, and metrics.
+                Comparing research papers across source platform, publication year, authors, and technical topics for <strong>{searchQuery || 'Active Literature'}</strong>.
               </p>
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <span className="badge badge-blue">
-                {comparisonPapers.length} / 5 Papers Selected
+                {activeComparisonPapers.length} Papers Compared
               </span>
               {comparisonPapers.length > 0 && (
                 <button
@@ -281,96 +990,103 @@ export default function KnowledgeGraphView() {
                   style={{ display: 'flex', alignItems: 'center', gap: 4 }}
                 >
                   <X size={13} />
-                  <span>Clear Selection</span>
+                  <span>Reset Custom Selection</span>
                 </button>
               )}
             </div>
           </div>
 
-          <div style={{ overflowX: 'auto' }}>
-            <table className="data-table" style={{ minWidth: 750 }}>
-              <thead>
-                <tr>
-                  <th style={{ width: 180 }}>Comparison Dimension</th>
-                  {comparisonPapers.length > 0 ? (
-                    comparisonPapers.map((paper, idx) => (
+          {/* Quick Paper Selector from search results */}
+          {searchResults && searchResults.length > 0 && (
+            <div style={{ padding: '8px 12px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 11.5, color: 'var(--text-muted)', fontWeight: 600 }}>Toggle Search Papers:</span>
+              {searchResults.slice(0, 6).map((p, idx) => {
+                const pId = p.id || p.canonical_id || `p-${idx}`;
+                const isSelected = activeComparisonPapers.some(cp => (cp.id || cp.canonical_id) === pId);
+                return (
+                  <button
+                    key={pId}
+                    onClick={() => isSelected ? removeComparisonPaper(pId) : addComparisonPaper(p)}
+                    className={`btn btn-sm ${isSelected ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ fontSize: 11, padding: '2px 8px' }}
+                  >
+                    {isSelected ? '✓ ' : '+ '} {p.title.slice(0, 20)}...
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {activeComparisonPapers.length > 0 ? (
+            <div style={{ overflowX: 'auto' }}>
+              <table className="data-table" style={{ minWidth: 750 }}>
+                <thead>
+                  <tr>
+                    <th style={{ width: 180 }}>Comparison Dimension</th>
+                    {activeComparisonPapers.map((paper, idx) => (
                       <th key={paper.id || idx}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span>{paper.title.slice(0, 30)}...</span>
+                          <span title={paper.title}>{paper.title.slice(0, 32)}...</span>
                           <button
                             onClick={() => removeComparisonPaper(paper.id || paper.canonical_id)}
                             style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
+                            title="Remove from comparison"
                           >
                             <X size={13} />
                           </button>
                         </div>
                       </th>
-                    ))
-                  ) : (
-                    <>
-                      <th>Mamba (Gu & Dao, 2023)</th>
-                      <th>Transformer (Vaswani et al., 2017)</th>
-                      <th>ASVspoof Deepfake Polyglot (2024)</th>
-                    </>
-                  )}
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td><strong>Core Architecture</strong></td>
-                  {comparisonPapers.length > 0 ? (
-                    comparisonPapers.map((p, i) => (
-                      <td key={i}>{p.methods ? p.methods.join(', ') : 'State Space / Attention Layer'}</td>
-                    ))
-                  ) : (
-                    <>
-                      <td>Selective State Space (SSM) with GPU scan</td>
-                      <td>Multi-Head Scaled Dot-Product Attention</td>
-                      <td>ResNet-SincNet Hybrid Feature Extractor</td>
-                    </>
-                  )}
-                </tr>
-                <tr>
-                  <td><strong>Complexity</strong></td>
-                  {comparisonPapers.length > 0 ? (
-                    comparisonPapers.map((p, i) => <td key={i}>Linear O(N) / Quadratic O(N²)</td>)
-                  ) : (
-                    <>
-                      <td><span className="badge badge-emerald">O(N) Linear Time</span></td>
-                      <td><span className="badge badge-neutral">O(N²) Quadratic</span></td>
-                      <td><span className="badge badge-blue">O(N) Temporal Scan</span></td>
-                    </>
-                  )}
-                </tr>
-                <tr>
-                  <td><strong>Evaluation Datasets</strong></td>
-                  {comparisonPapers.length > 0 ? (
-                    comparisonPapers.map((p, i) => <td key={i}>{p.datasets ? p.datasets.join(', ') : 'The Pile, WikiText-103'}</td>)
-                  ) : (
-                    <>
-                      <td>The Pile, LAMBADA, WikiText-103</td>
-                      <td>WMT 2014 English-to-German, WMT En-Fr</td>
-                      <td>ASVspoof 2021 LA & DF, In-the-Wild Voice</td>
-                    </>
-                  )}
-                </tr>
-                <tr>
-                  <td><strong>Reported Metric</strong></td>
-                  {comparisonPapers.length > 0 ? (
-                    comparisonPapers.map((p, i) => <td key={i}>SOTA Empirical Benchmark Result</td>)
-                  ) : (
-                    <>
-                      <td>5x inference throughput, 5.6 perplexity</td>
-                      <td>28.4 BLEU on WMT 2014 En-De</td>
-                      <td>0.84% Equal Error Rate (EER)</td>
-                    </>
-                  )}
-                </tr>
-              </tbody>
-            </table>
-          </div>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><strong>Source Platform</strong></td>
+                    {activeComparisonPapers.map((p, i) => (
+                      <td key={i}>
+                        <span className="badge badge-violet" style={{ textTransform: 'uppercase' }}>
+                          {p.primary_source || p.source || 'Open Access'}
+                        </span>
+                      </td>
+                    ))}
+                  </tr>
+                  <tr>
+                    <td><strong>Publication Year</strong></td>
+                    {activeComparisonPapers.map((p, i) => <td key={i}>{p.year || 'N/A'}</td>)}
+                  </tr>
+                  <tr>
+                    <td><strong>Authors</strong></td>
+                    {activeComparisonPapers.map((p, i) => (
+                      <td key={i}>{(p.authors || []).map(a => (typeof a === 'string' ? a : a.name)).slice(0, 2).join(', ')}</td>
+                    ))}
+                  </tr>
+                  <tr>
+                    <td><strong>Key Topics / Methods</strong></td>
+                    {activeComparisonPapers.map((p, i) => (
+                      <td key={i}>{p.topics ? p.topics.join(', ') : 'Extracted from canonical literature'}</td>
+                    ))}
+                  </tr>
+                  <tr>
+                    <td><strong>Abstract Summary</strong></td>
+                    {activeComparisonPapers.map((p, i) => (
+                      <td key={i} style={{ fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+                        {p.abstract ? p.abstract.slice(0, 160) + '...' : 'No abstract preview provided.'}
+                      </td>
+                    ))}
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+              No papers found for comparison. Run a search in <strong>Literature Search</strong>.
+            </div>
+          )}
         </div>
       )}
     </section>
   );
 }
+
+
+

@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import Any, Dict, List, Optional, Union
 
 from src.core.schemas import PaperIntelligence
@@ -12,6 +13,7 @@ from src.graph.schema import (
     PaperNode,
     Relation,
     ResearchEdge,
+    TopicNode,
     slugify_id,
 )
 from src.graph.store import ResearchGraphStore
@@ -25,7 +27,45 @@ class GraphBuilder:
     def __init__(self, store: ResearchGraphStore):
         self.store = store
 
-    async def build_from_paper_intelligence(self, paper_intel: Union[PaperIntelligence, Any]) -> None:
+    async def build_topic_subgraph(
+        self,
+        topic: str,
+        papers: List[Union[PaperIntelligence, Any]],
+        clear_existing: bool = False,
+    ) -> str:
+        """Constructs a hierarchical research topology with a Head Topic node, Paper subnodes, and relational edges."""
+        topic_clean = topic.strip()
+        if not topic_clean:
+            return ""
+
+        if clear_existing:
+            await self.store.clear()
+
+        topic_id = f"topic-{slugify_id(topic_clean)}"
+
+        # 1. Head Node: Topic
+        existing_topic = await self.store.get_node(topic_id)
+        if not existing_topic:
+            topic_node = TopicNode(id=topic_id, name=topic_clean, query=topic_clean)
+            await self.store.add_node(topic_node)
+            logger.info("Added Head TopicNode: %s (%s)", topic_id, topic_clean)
+
+        # 2. Paper subnodes and relational links
+        for p in papers:
+            paper_id = await self.build_from_paper_intelligence(p)
+            if paper_id:
+                # Link Head Topic -> Paper Subnode
+                edge = ResearchEdge(
+                    source_id=topic_id,
+                    target_id=paper_id,
+                    relation=Relation.COVERS,
+                    weight=2.0,
+                )
+                await self.store.add_edge(edge)
+
+        return topic_id
+
+    async def build_from_paper_intelligence(self, paper_intel: Union[PaperIntelligence, Any]) -> str:
         """Parse structured paper intelligence and construct/persist corresponding graph entities."""
         # 1. Extract PaperNode fields
         if hasattr(paper_intel, "id"):
@@ -67,9 +107,39 @@ class GraphBuilder:
             await self.store.add_node(paper_node)
             logger.info("Added PaperNode: %s", paper_id)
 
-        # 2. Methods
+        # 2. Methods & Datasets derivation (Exclude generic stop-words)
+        STOP_WORDS = {
+            "impact", "general benchmark", "empirical method", "topic modeling", 
+            "general", "method", "dataset", "benchmark", "analysis", "study",
+            "advanced neural network application"
+        }
+
         methods = getattr(paper_intel, "methods", []) if not isinstance(paper_intel, dict) else paper_intel.get("methods", [])
-        for m in methods:
+        datasets = getattr(paper_intel, "datasets", []) if not isinstance(paper_intel, dict) else paper_intel.get("datasets", [])
+        topics = getattr(paper_intel, "topics", []) if not isinstance(paper_intel, dict) else paper_intel.get("topics", [])
+
+        derived_methods = list(methods)
+        derived_datasets = list(datasets)
+
+        if not derived_methods and not derived_datasets and topics:
+            for top in topics:
+                t_str = str(top).strip()
+                t_lower = t_str.lower()
+                if t_lower in STOP_WORDS or len(t_str) < 3:
+                    continue
+                if any(kw in t_lower for kw in ["dataset", "benchmark", "corpus", "eval", "gsm", "svamp", "math", "glue", "squad", "mmlu", "imagenet", "wmt", "pile", "wikitext"]):
+                    derived_datasets.append(t_str)
+                else:
+                    derived_methods.append(t_str)
+
+        # Fallback if both still empty: derive from title
+        if not derived_methods and title:
+            clean_t = re.sub(r"^(a|an|the|towards|on)\s+", "", title, flags=re.I)
+            parts = [p.strip() for p in re.split(r"[:\-\–\—]", clean_t) if len(p.strip()) > 3]
+            if parts and parts[0].lower() not in STOP_WORDS:
+                derived_methods.append(parts[0][:40])
+
+        for m in derived_methods:
             if isinstance(m, str):
                 method_name = m.strip()
                 category = "general"
@@ -83,7 +153,7 @@ class GraphBuilder:
                 method_name = str(m).strip()
                 category = "general"
 
-            if not method_name:
+            if not method_name or method_name.lower() in STOP_WORDS or len(method_name) < 3:
                 continue
 
             method_id = slugify_id(method_name)
@@ -97,8 +167,7 @@ class GraphBuilder:
             await self.store.add_edge(edge)
 
         # 3. Datasets
-        datasets = getattr(paper_intel, "datasets", []) if not isinstance(paper_intel, dict) else paper_intel.get("datasets", [])
-        for d in datasets:
+        for d in derived_datasets:
             if isinstance(d, str):
                 dataset_name = d.strip()
                 domain = "general"
@@ -112,7 +181,7 @@ class GraphBuilder:
                 dataset_name = str(d).strip()
                 domain = "general"
 
-            if not dataset_name:
+            if not dataset_name or dataset_name.lower() in STOP_WORDS or len(dataset_name) < 3:
                 continue
 
             dataset_id = slugify_id(dataset_name)
@@ -125,148 +194,7 @@ class GraphBuilder:
             edge = ResearchEdge(source_id=paper_id, target_id=dataset_id, relation=Relation.EVALUATES_ON)
             await self.store.add_edge(edge)
 
-        # 4. Metrics
-        raw_metrics = getattr(paper_intel, "metrics", {}) if not isinstance(paper_intel, dict) else paper_intel.get("metrics", {})
-        if isinstance(raw_metrics, dict):
-            metric_items = list(raw_metrics.items())
-            for key, val in metric_items:
-                metric_name = str(key).strip()
-                if not metric_name:
-                    continue
-                unit = val.get("unit") if isinstance(val, dict) else None
-                metric_id = slugify_id(metric_name)
-                existing_metric = await self.store.get_node(metric_id)
-                if not existing_metric:
-                    metric_node = MetricNode(id=metric_id, name=metric_name, unit=unit)
-                    await self.store.add_node(metric_node)
-                    logger.info("Added MetricNode: %s", metric_id)
-
-                edge = ResearchEdge(source_id=paper_id, target_id=metric_id, relation=Relation.ACHIEVES)
-                await self.store.add_edge(edge)
-        elif isinstance(raw_metrics, list):
-            for m in raw_metrics:
-                if isinstance(m, str):
-                    metric_name = m.strip()
-                    unit = None
-                elif isinstance(m, dict):
-                    metric_name = m.get("metric", m.get("name", "")).strip()
-                    unit = m.get("unit")
-                elif hasattr(m, "metric"):
-                    metric_name = getattr(m, "metric", "").strip()
-                    unit = getattr(m, "unit", None)
-                elif hasattr(m, "name"):
-                    metric_name = getattr(m, "name", "").strip()
-                    unit = getattr(m, "unit", None)
-                else:
-                    metric_name = str(m).strip()
-                    unit = None
-
-                if not metric_name:
-                    continue
-
-                metric_id = slugify_id(metric_name)
-                existing_metric = await self.store.get_node(metric_id)
-                if not existing_metric:
-                    metric_node = MetricNode(id=metric_id, name=metric_name, unit=unit)
-                    await self.store.add_node(metric_node)
-                    logger.info("Added MetricNode: %s", metric_id)
-
-                edge = ResearchEdge(source_id=paper_id, target_id=metric_id, relation=Relation.ACHIEVES)
-                await self.store.add_edge(edge)
-
-        # Also support benchmarks if present
-        benchmarks = getattr(paper_intel, "benchmarks", []) if not isinstance(paper_intel, dict) else paper_intel.get("benchmarks", [])
-        for bm in benchmarks:
-            bm_dataset = getattr(bm, "dataset", None) if not isinstance(bm, dict) else bm.get("dataset")
-            bm_metric = getattr(bm, "metric", None) if not isinstance(bm, dict) else bm.get("metric")
-            if bm_dataset:
-                ds_id = slugify_id(bm_dataset)
-                if not await self.store.get_node(ds_id):
-                    await self.store.add_node(DatasetNode(id=ds_id, name=bm_dataset, domain="benchmark"))
-                await self.store.add_edge(ResearchEdge(source_id=paper_id, target_id=ds_id, relation=Relation.EVALUATES_ON))
-            if bm_metric:
-                m_id = slugify_id(bm_metric)
-                if not await self.store.get_node(m_id):
-                    await self.store.add_node(MetricNode(id=m_id, name=bm_metric))
-                await self.store.add_edge(ResearchEdge(source_id=paper_id, target_id=m_id, relation=Relation.ACHIEVES))
-
-        # 5. Claims
-        claims = getattr(paper_intel, "claims", []) if not isinstance(paper_intel, dict) else paper_intel.get("claims", [])
-        for idx, c in enumerate(claims):
-            if isinstance(c, str):
-                claim_text = c.strip()
-                verified = False
-                confidence = 0.8
-            elif isinstance(c, dict):
-                claim_text = c.get("claim", c.get("text", "")).strip()
-                v_stat = c.get("verification_status")
-                verified = (v_stat == "verified") or c.get("verified", False)
-                confidence = float(c.get("confidence", 0.8))
-            elif hasattr(c, "claim"):
-                claim_text = getattr(c, "claim", "").strip()
-                v_stat = getattr(c, "verification_status", None)
-                verified = (v_stat == "verified") or getattr(c, "verified", False)
-                confidence = float(getattr(c, "confidence", 0.8))
-            elif hasattr(c, "text"):
-                claim_text = getattr(c, "text", "").strip()
-                verified = getattr(c, "verified", False)
-                confidence = float(getattr(c, "confidence", 0.8))
-            else:
-                claim_text = str(c).strip()
-                verified = False
-                confidence = 0.8
-
-            if not claim_text:
-                continue
-
-            slug_snippet = slugify_id(claim_text[:30])
-            claim_id = f"claim-{paper_id}-{slug_snippet or idx}"
-            
-            existing_claim = await self.store.get_node(claim_id)
-            if not existing_claim:
-                claim_node = ClaimNode(
-                    id=claim_id,
-                    text=claim_text,
-                    verified=bool(verified),
-                    paper_id=paper_id,
-                    confidence=confidence,
-                )
-                await self.store.add_node(claim_node)
-                logger.info("Added ClaimNode: %s", claim_id)
-
-            edge = ResearchEdge(source_id=paper_id, target_id=claim_id, relation=Relation.HAS_CLAIM)
-            await self.store.add_edge(edge)
-
-        # 6. Limitations
-        limitations = getattr(paper_intel, "limitations", []) if not isinstance(paper_intel, dict) else paper_intel.get("limitations", [])
-        for idx, lim in enumerate(limitations):
-            if isinstance(lim, str):
-                lim_text = lim.strip()
-            elif isinstance(lim, dict):
-                lim_text = lim.get("description", lim.get("text", "")).strip()
-            elif hasattr(lim, "description"):
-                lim_text = getattr(lim, "description", "").strip()
-            elif hasattr(lim, "text"):
-                lim_text = getattr(lim, "text", "").strip()
-            else:
-                lim_text = str(lim).strip()
-
-            if not lim_text:
-                continue
-
-            slug_snippet = slugify_id(lim_text[:30])
-            lim_id = f"lim-{paper_id}-{slug_snippet or idx}"
-
-            existing_lim = await self.store.get_node(lim_id)
-            if not existing_lim:
-                lim_node = LimitationNode(id=lim_id, text=lim_text, paper_id=paper_id)
-                await self.store.add_node(lim_node)
-                logger.info("Added LimitationNode: %s", lim_id)
-
-            edge = ResearchEdge(source_id=paper_id, target_id=lim_id, relation=Relation.LIMITED_BY)
-            await self.store.add_edge(edge)
-
-        # 7. Cited Papers
+        # 4. Citations (Cross-Paper Links)
         cited_list = (
             getattr(paper_intel, "cited_papers", [])
             or getattr(paper_intel, "referenced_works", [])
@@ -279,3 +207,6 @@ class GraphBuilder:
                 continue
             edge = ResearchEdge(source_id=paper_id, target_id=cid_str, relation=Relation.CITES)
             await self.store.add_edge(edge)
+
+        return paper_id
+

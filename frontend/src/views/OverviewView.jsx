@@ -1,27 +1,39 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, ArrowRight, Layers, FileText, Network, Database } from 'lucide-react';
+import { Plus, Database, Network, BookOpen, Layers } from 'lucide-react';
 
 export default function OverviewView() {
   const navigate = useNavigate();
   const [graphStats, setGraphStats] = useState({
-    total_papers: 290,
-    total_methods: 1420,
-    total_datasets: 84,
-    total_gaps: 42,
+    total_papers: 0,
+    total_methods: 0,
+    total_datasets: 0,
+    total_gaps: 0,
   });
+  const [recentSessions, setRecentSessions] = useState([]);
 
   useEffect(() => {
+    // 1. Fetch real graph summary
     fetch('/api/v1/graph/summary')
       .then(res => (res.ok ? res.json() : null))
       .then(data => {
         if (data) {
           setGraphStats({
-            total_papers: Math.max(data.total_papers || 0, 290),
-            total_methods: Math.max((data.total_methods || 0) + (data.total_papers || 0) * 4, 1420),
-            total_datasets: Math.max(data.total_datasets || 0, 84),
-            total_gaps: Math.max(data.total_gaps || 0, 42),
+            total_papers: data.total_papers || 0,
+            total_methods: data.total_methods || 0,
+            total_datasets: data.total_datasets || 0,
+            total_gaps: data.total_gaps || 0,
           });
+        }
+      })
+      .catch(() => {});
+
+    // 2. Fetch real sessions
+    fetch('/api/v1/workbench/sessions')
+      .then(res => (res.ok ? res.json() : null))
+      .then(data => {
+        if (data && Array.isArray(data)) {
+          setRecentSessions(data.slice(0, 5));
         }
       })
       .catch(() => {});
@@ -54,19 +66,19 @@ export default function OverviewView() {
       <div className="metrics-strip">
         <div className="metric-box">
           <span className="metric-label">Indexed Scientific Papers</span>
-          <span className="metric-val">{graphStats.total_papers}+</span>
+          <span className="metric-val">{graphStats.total_papers}</span>
         </div>
         <div className="metric-box">
-          <span className="metric-label">Knowledge Graph Entities</span>
-          <span className="metric-val">{graphStats.total_methods.toLocaleString()}</span>
+          <span className="metric-label">Extracted Methods</span>
+          <span className="metric-val">{graphStats.total_methods}</span>
         </div>
         <div className="metric-box">
-          <span className="metric-label">Connected Repositories</span>
-          <span className="metric-val">8 Connectors</span>
-        </div>
-        <div className="metric-box">
-          <span className="metric-label">Linked SOTA Benchmarks</span>
+          <span className="metric-label">Benchmark Datasets</span>
           <span className="metric-val">{graphStats.total_datasets}</span>
+        </div>
+        <div className="metric-box">
+          <span className="metric-label">Identified Research Gaps</span>
+          <span className="metric-val">{graphStats.total_gaps}</span>
         </div>
       </div>
 
@@ -82,46 +94,34 @@ export default function OverviewView() {
             <div className="source-chip"><strong>OpenAlex</strong><span>Publication Graph</span></div>
             <div className="source-chip"><strong>Semantic Scholar</strong><span>Citations & Metrics</span></div>
             <div className="source-chip"><strong>Crossref</strong><span>Publisher DOIs</span></div>
-            <div className="source-chip"><strong>Kaggle</strong><span>Datasets & Notebooks</span></div>
+            <div className="source-chip"><strong>PubMed / Europe PMC</strong><span>Bio & Medical</span></div>
           </div>
         </div>
 
         <div className="card">
-          <h3>Recent Search Sessions</h3>
+          <h3>Recent Research Sessions</h3>
           <div className="session-list" id="recent-sessions-container">
-            <div
-              className="session-row"
-              onClick={() => handleRecentSession('audio deepfake detection')}
-              style={{ cursor: 'pointer' }}
-            >
-              <div>
-                <span className="session-title">audio deepfake detection</span>
-                <span className="session-sub">20 Papers Ingested • ASVspoof Benchmark</span>
+            {recentSessions.length > 0 ? (
+              recentSessions.map((sess) => (
+                <div
+                  key={sess.id}
+                  className="session-row"
+                  onClick={() => handleRecentSession(sess.query || '')}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <div>
+                    <span className="session-title">{sess.query}</span>
+                    <span className="session-sub">Session {sess.id} • {sess.status}</span>
+                  </div>
+                  <span className="badge badge-blue">Saved</span>
+                </div>
+              ))
+            ) : (
+              <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+                <BookOpen size={24} style={{ display: 'block', margin: '0 auto 8px', color: 'var(--text-muted)' }} />
+                No prior search sessions found. Run a query in <strong>Literature Search</strong> to begin.
               </div>
-              <span className="badge badge-blue">4 Sources</span>
-            </div>
-            <div
-              className="session-row"
-              onClick={() => handleRecentSession('state space models mamba')}
-              style={{ cursor: 'pointer' }}
-            >
-              <div>
-                <span className="session-title">state space models mamba</span>
-                <span className="session-sub">Linear-Time Sequence Modeling</span>
-              </div>
-              <span className="badge badge-violet">arXiv</span>
-            </div>
-            <div
-              className="session-row"
-              onClick={() => handleRecentSession('sparse autoencoders mechanistic interpretability')}
-              style={{ cursor: 'pointer' }}
-            >
-              <div>
-                <span className="session-title">sparse autoencoders interpretability</span>
-                <span className="session-sub">Knowledge Graph Connected</span>
-              </div>
-              <span className="badge badge-emerald">Linked</span>
-            </div>
+            )}
           </div>
         </div>
       </div>

@@ -6,6 +6,7 @@ from slugify import slugify
 # --- Enums ---
 
 class NodeType(str, Enum):
+    TOPIC = "topic"
     PAPER = "paper"
     METHOD = "method"
     DATASET = "dataset"
@@ -16,6 +17,8 @@ class NodeType(str, Enum):
 
 
 class Relation(str, Enum):
+    COVERS = "covers"
+    INVESTIGATES = "investigates"
     CITES = "cites"
     USES_METHOD = "uses_method"
     EVALUATES_ON = "evaluates_on"
@@ -39,6 +42,13 @@ def slugify_id(text: str) -> str:
 class BaseGraphNode(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
     id: str
+
+
+class TopicNode(BaseGraphNode):
+    id: str  # e.g. "topic-chain-of-thought"
+    name: str  # Topic label
+    query: Optional[str] = None
+    node_type: Literal[NodeType.TOPIC] = NodeType.TOPIC
 
 
 class PaperNode(BaseGraphNode):
@@ -98,6 +108,7 @@ class ResearchGapNode(BaseGraphNode):
 
 GraphNode = Annotated[
     Union[
+        TopicNode,
         PaperNode,
         MethodNode,
         DatasetNode,
@@ -126,6 +137,7 @@ def parse_graph_node(node_type: Union[str, NodeType], data: Dict[str, Any]) -> G
     nt = NodeType(node_type) if isinstance(node_type, str) else node_type
     
     mapping = {
+        NodeType.TOPIC: TopicNode,
         NodeType.PAPER: PaperNode,
         NodeType.METHOD: MethodNode,
         NodeType.DATASET: DatasetNode,

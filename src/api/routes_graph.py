@@ -1,5 +1,5 @@
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -12,7 +12,7 @@ from src.engines.paper_intelligence_engine import PaperIntelligenceEngine
 from src.graph.builder import GraphBuilder
 from src.graph.gap_engine import GapDetectionEngine
 from src.graph.pipeline import build_default_research_pipeline
-from src.graph.schema import NodeType, ResearchGapNode
+from src.graph.schema import NodeType, Relation, ResearchEdge, ResearchGapNode, TopicNode, slugify_id
 from src.graph.state import create_initial_state
 from src.graph.store import ResearchGraphStore
 
@@ -44,7 +44,8 @@ class GraphVisualizationResponse(BaseModel):
 
 class IngestPaperRequest(BaseModel):
     identifier: Optional[str] = None  # e.g. "2312.00752" or DOI
-    paper_data: Optional[PaperIntelligence] = None
+    paper_data: Optional[Union[PaperIntelligence, Dict[str, Any]]] = None
+    topic: Optional[str] = None
 
 
 class IngestPaperResponse(BaseModel):
@@ -53,6 +54,13 @@ class IngestPaperResponse(BaseModel):
     title: str
     nodes_count: int
     edges_count: int
+
+
+@router.post("/clear")
+async def clear_graph_endpoint():
+    """Clear all stored nodes and edges from the research knowledge graph."""
+    await graph_store.clear()
+    return {"status": "cleared", "nodes_count": 0, "edges_count": 0}
 
 
 @router.post("/run", response_model=GraphRunResponse)
@@ -141,8 +149,12 @@ async def ingest_paper_into_graph(req: IngestPaperRequest, db: AsyncSession = De
 
     if req.paper_data:
         paper_intel = req.paper_data
-        paper_id = paper_intel.id
-        title = paper_intel.title
+        if isinstance(paper_intel, dict):
+            paper_id = paper_intel.get("id") or paper_intel.get("canonical_id") or "paper-unknown"
+            title = paper_intel.get("title", "Untitled Paper")
+        else:
+            paper_id = getattr(paper_intel, "id", None) or getattr(paper_intel, "canonical_id", "paper-unknown")
+            title = getattr(paper_intel, "title", "Untitled Paper")
     elif req.identifier:
         # Live multi-source intelligence extraction
         sum_resp = await intel_engine.summarize_paper(
@@ -154,11 +166,27 @@ async def ingest_paper_into_graph(req: IngestPaperRequest, db: AsyncSession = De
     else:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Must provide either 'identifier' or 'paper_data'.")
 
-    await builder.build_from_paper_intelligence(paper_intel)
+    paper_node_id = await builder.build_from_paper_intelligence(paper_intel)
+
+    # If topic is specified, link topic -> paper
+    if req.topic and req.topic.strip():
+        topic_clean = req.topic.strip()
+        topic_id = f"topic-{slugify_id(topic_clean)}"
+        existing_topic = await graph_store.get_node(topic_id)
+        if not existing_topic:
+            topic_node = TopicNode(id=topic_id, name=topic_clean, query=topic_clean)
+            await graph_store.add_node(topic_node)
+        edge = ResearchEdge(
+            source_id=topic_id,
+            target_id=paper_node_id or paper_id,
+            relation=Relation.COVERS,
+            weight=2.0,
+        )
+        await graph_store.add_edge(edge)
 
     return IngestPaperResponse(
         status="ingested",
-        paper_id=paper_id,
+        paper_id=paper_node_id or paper_id,
         title=title,
         nodes_count=graph_store.graph.number_of_nodes(),
         edges_count=graph_store.graph.number_of_edges(),
@@ -205,3 +233,172 @@ async def get_graph_nodes(node_type: Optional[str] = Query(None, description="pa
         if n:
             nodes.append(n)
     return nodes
+
+
+@router.get("/elements")
+async def get_graph_elements(
+    topic: Optional[str] = Query(None, description="Optional topic to link or filter by"),
+    scoped: bool = Query(False, description="If true, return strictly nodes connected to topic")
+):
+    """Return complete graph elements (nodes + typed labeled edges) for visual network canvas."""
+    await graph_store._ensure_initialized()
+
+    target_topic_id = None
+    # If topic is provided, ensure TopicNode exists and is linked to papers in store
+    if topic and topic.strip():
+        builder = GraphBuilder(store=graph_store)
+        topic_clean = topic.strip()
+        target_topic_id = f"topic-{slugify_id(topic_clean)}"
+        existing_topic = await graph_store.get_node(target_topic_id)
+        if not existing_topic:
+            topic_node = TopicNode(id=target_topic_id, name=topic_clean, query=topic_clean)
+            await graph_store.add_node(topic_node)
+
+        # Connect to existing paper nodes
+        for nid in list(graph_store.graph.nodes):
+            n = await graph_store.get_node(nid)
+            if n and (n.node_type == NodeType.PAPER or getattr(n, "node_type", "") == "paper"):
+                edge = ResearchEdge(
+                    source_id=target_topic_id,
+                    target_id=nid,
+                    relation=Relation.COVERS,
+                    weight=2.0,
+                )
+                await graph_store.add_edge(edge)
+
+    # If scoped to a specific topic, only collect reachable nodes from that topic
+    allowed_node_ids = None
+    if scoped and target_topic_id and target_topic_id in graph_store.graph:
+        allowed_node_ids = {target_topic_id}
+        # Get all successors (paper subnodes)
+        for p_id in graph_store.graph.successors(target_topic_id):
+            allowed_node_ids.add(p_id)
+            # Get methods, datasets, gaps connected to each paper
+            for child_id in graph_store.graph.successors(p_id):
+                allowed_node_ids.add(child_id)
+    
+    nodes = []
+    node_type_counts = {}
+    for nid in graph_store.graph.nodes:
+        if allowed_node_ids is not None and nid not in allowed_node_ids:
+            continue
+        n = await graph_store.get_node(nid)
+        if n:
+            n_dict = n.model_dump(mode="json")
+            ntype = n.node_type.value if hasattr(n.node_type, "value") else str(n.node_type)
+            node_type_counts[ntype] = node_type_counts.get(ntype, 0) + 1
+            label = getattr(n, "name", None) or getattr(n, "title", None) or getattr(n, "text", None) or nid
+            nodes.append({
+                "id": nid,
+                "label": str(label)[:35],
+                "node_type": ntype,
+                "title": f"[{ntype.upper()}] {label}",
+                "data": n_dict,
+            })
+            
+    edges_raw = await graph_store.get_all_edges()
+    edges = []
+    for e in edges_raw:
+        if allowed_node_ids is not None and (e.source_id not in allowed_node_ids or e.target_id not in allowed_node_ids):
+            continue
+        rel_str = e.relation.value if hasattr(e.relation, "value") else str(e.relation)
+        edges.append({
+            "source": e.source_id,
+            "target": e.target_id,
+            "relation": rel_str,
+            "label": rel_str.replace("_", " ").upper(),
+            "weight": e.weight,
+        })
+        
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "stats": {
+            "total_nodes": len(nodes),
+            "total_edges": len(edges),
+            "node_type_counts": node_type_counts,
+        }
+    }
+
+
+@router.get("/node/{node_id:path}/neighborhood")
+async def get_node_neighborhood_endpoint(node_id: str):
+    """Inspect all incoming and outgoing semantic relationships for a specific node."""
+    res = await graph_store.get_node_neighborhood(node_id)
+    if not res.get("node"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Node '{node_id}' not found.")
+    return res
+
+
+@router.post("/seed-sample")
+async def seed_sample_graph():
+    """Seed the research graph with canonical AI/ML literature nodes & cross-cutting semantic relations."""
+    builder = GraphBuilder(store=graph_store)
+
+    sample_papers = [
+        PaperIntelligence(
+            id="1706.03762",
+            title="Attention Is All You Need",
+            year=2017,
+            venue="NeurIPS 2017",
+            authors=["Vaswani, Ashish", "Shazeer, Noam", "Parmar, Niki", "Uszkoreit, Jakob", "Jones, Llion"],
+            abstract="The dominant sequence transduction models are based on complex recurrent or convolutional neural networks. We propose the Transformer, a model architecture eschewing recurrence and relying entirely on an attention mechanism.",
+            methods=["Self-Attention Mechanism", "Multi-Head Attention", "Positional Encoding", "Transformer Architecture"],
+            datasets=["WMT 2014 English-to-German", "WMT 2014 English-to-French"],
+            metrics={"BLEU Score": {"value": "28.4", "unit": "BLEU"}},
+            claims=[{"claim": "Self-attention mechanism allows significantly more parallelization than RNNs", "verified": True}],
+            limitations=[{"description": "Quadratic compute and memory complexity O(N^2) with sequence length"}],
+            cited_papers=[],
+        ),
+        PaperIntelligence(
+            id="2106.09685",
+            title="LoRA: Low-Rank Adaptation of Large Language Models",
+            year=2021,
+            venue="ICLR 2022",
+            authors=["Hu, Edward J.", "Shen, Yelong", "Wallis, Phillip", "Allen-Zhu, Zeyuan"],
+            abstract="LoRA reduces the number of trainable parameters by 10,000 times and GPU memory requirement by 3 times while matching full fine-tuning performance.",
+            methods=["Low-Rank Decomposition", "Parameter-Efficient Fine-Tuning", "Transformer Architecture"],
+            datasets=["GLUE Benchmark", "GSM8k", "WMT 2014 English-to-German"],
+            metrics={"Accuracy": {"value": "89.2", "unit": "%"}, "Parameter Reduction": {"value": "99.9", "unit": "%"}},
+            claims=[{"claim": "Injects trainable rank decomposition matrices into Transformer layers", "verified": True}],
+            limitations=[{"description": "May require careful rank rank hyperparameter tuning per task"}],
+            cited_papers=["1706.03762"],
+        ),
+        PaperIntelligence(
+            id="2205.14135",
+            title="FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness",
+            year=2022,
+            venue="NeurIPS 2022",
+            authors=["Dao, Tri", "Fu, Daniel Y.", "Ermon, Stefano", "Rudra, Atri", "Re, Christopher"],
+            abstract="FlashAttention makes attention exact with IO-awareness, speeding up Transformer training from 2x to 4x while saving GPU SRAM memory.",
+            methods=["IO-Aware Tiling", "FlashAttention", "Transformer Architecture", "Self-Attention Mechanism"],
+            datasets=["WikiText-103", "Long Range Arena"],
+            metrics={"Speedup": {"value": "3.5x", "unit": "x"}, "Memory Footprint": {"value": "O(N)", "unit": "complexity"}},
+            claims=[{"claim": "Eliminates memory bottleneck by avoiding materialization of N x N attention matrix in HBM", "verified": True}],
+            limitations=[{"description": "Requires specialized GPU kernel implementation in CUDA"}],
+            cited_papers=["1706.03762"],
+        ),
+        PaperIntelligence(
+            id="2302.13971",
+            title="LLaMA: Open and Efficient Foundation Language Models",
+            year=2023,
+            venue="arXiv 2023",
+            authors=["Touvron, Hugo", "Lavril, Thibaut", "Izacard, Gautier", "Martinet, Xavier"],
+            abstract="We introduce LLaMA, a collection of foundation language models ranging from 7B to 65B parameters trained on trillions of tokens.",
+            methods=["RoPE Positional Embedding", "SwiGLU Activation", "FlashAttention", "Transformer Architecture"],
+            datasets=["MMLU", "GSM8k", "GLUE Benchmark", "WikiText-103"],
+            metrics={"MMLU Score": {"value": "68.9", "unit": "%"}},
+            claims=[{"claim": "Trained exclusively on publicly available datasets without proprietary data", "verified": True}],
+            limitations=[{"description": "Base models exhibit hallucination and require reinforcement learning alignment"}],
+            cited_papers=["1706.03762", "2205.14135"],
+        ),
+    ]
+
+    await builder.build_topic_subgraph(topic="Large Language Models & Efficient Attention", papers=sample_papers)
+
+    return {
+        "status": "seeded",
+        "total_nodes": graph_store.graph.number_of_nodes(),
+        "total_edges": graph_store.graph.number_of_edges(),
+    }
+

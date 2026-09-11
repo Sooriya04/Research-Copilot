@@ -243,3 +243,82 @@ class ResearchGraphStore:
                     results.append(node)
 
         return results
+
+    async def get_all_edges(self) -> List[ResearchEdge]:
+        """Return all edges from the in-memory graph."""
+        await self._ensure_initialized()
+        edges: List[ResearchEdge] = []
+        for u, v, data in self.graph.edges(data=True):
+            edge_obj = data.get("edge_obj")
+            if edge_obj:
+                edges.append(edge_obj)
+            else:
+                rel = data.get("relation", "relates_to")
+                rel_enum = Relation(rel) if rel in Relation._value2member_map_ else rel
+                edges.append(
+                    ResearchEdge(
+                        source_id=u,
+                        target_id=v,
+                        relation=rel_enum,
+                        weight=data.get("weight", 1.0),
+                    )
+                )
+        return edges
+
+    async def get_node_neighborhood(self, node_id: str) -> Dict[str, Any]:
+        """Return the focus node, in-edges, out-edges, and direct neighbor nodes."""
+        await self._ensure_initialized()
+        if node_id not in self.graph:
+            return {"node": None, "neighbors": [], "edges": []}
+
+        target_node = await self.get_node(node_id)
+        neighbor_nodes: Dict[str, Any] = {}
+        sub_edges: List[Dict[str, Any]] = []
+
+        # Outgoing edges
+        for succ_id in self.graph.successors(node_id):
+            edge_data = self.graph.get_edge_data(node_id, succ_id, default={})
+            rel = edge_data.get("relation", "relates_to")
+            sub_edges.append({
+                "source": node_id,
+                "target": succ_id,
+                "relation": rel,
+                "weight": edge_data.get("weight", 1.0),
+                "direction": "outgoing",
+            })
+            if succ_id not in neighbor_nodes:
+                n_obj = await self.get_node(succ_id)
+                if n_obj:
+                    neighbor_nodes[succ_id] = n_obj
+
+        # Incoming edges
+        for pred_id in self.graph.predecessors(node_id):
+            edge_data = self.graph.get_edge_data(pred_id, node_id, default={})
+            rel = edge_data.get("relation", "relates_to")
+            sub_edges.append({
+                "source": pred_id,
+                "target": node_id,
+                "relation": rel,
+                "weight": edge_data.get("weight", 1.0),
+                "direction": "incoming",
+            })
+            if pred_id not in neighbor_nodes:
+                n_obj = await self.get_node(pred_id)
+                if n_obj:
+                    neighbor_nodes[pred_id] = n_obj
+
+        return {
+            "node": target_node,
+            "neighbors": list(neighbor_nodes.values()),
+            "edges": sub_edges,
+        }
+
+    async def clear(self) -> None:
+        """Clear all in-memory graph nodes/edges and truncate persistent SQLite tables."""
+        await self._ensure_initialized()
+        self.graph.clear()
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("DELETE FROM graph_edges")
+            await db.execute("DELETE FROM graph_nodes")
+            await db.commit()
+        logger.info("Cleared ResearchGraphStore nodes and edges.")

@@ -1,45 +1,36 @@
-import React, { useState } from 'react';
-import { Compass, AlertTriangle, Lightbulb, Loader2 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Compass, AlertTriangle, Lightbulb, Loader2, Sparkles } from 'lucide-react';
+import { useApp } from '../context/AppContext';
 
 export default function ResearchGapView() {
-  const [topic, setTopic] = useState('audio deepfake detection');
+  const { searchQuery } = useApp();
+  const [topic, setTopic] = useState(searchQuery || '');
   const [loading, setLoading] = useState(false);
+  const [gaps, setGaps] = useState([]);
+  const [hypotheses, setHypotheses] = useState([]);
 
-  const [gaps, setGaps] = useState([
-    {
-      id: 1,
-      title: '1. Cross-Environment Generalization Degradation',
-      desc: 'Existing detectors drop performance by up to 28% EER when deployed on unseen codecs (MP3, Opus) or noisy acoustic channels.',
-    },
-    {
-      id: 2,
-      title: '2. Privacy Leakage in Raw Feature Extractors',
-      desc: 'Feature representations trained for spoofing detection inadvertently retain speaker identity and spoken text content.',
-    },
-    {
-      id: 3,
-      title: '3. High Computational Overhead for Edge Deployment',
-      desc: 'SOTA graph neural networks and transformers exceed 40M parameters, preventing real-time mobile inference.',
-    },
-  ]);
+  useEffect(() => {
+    if (searchQuery && !topic) {
+      setTopic(searchQuery);
+    }
+  }, [searchQuery]);
 
-  const [hypotheses, setHypotheses] = useState([
-    {
-      id: 1,
-      title: 'Hypothesis 1: Privacy-Preserving Adversarial Disentanglement',
-      desc: 'Combine a mini-ResNet feature extractor with a reverse gradient privacy loss to project speech into an identity-sanitized manifold.',
-    },
-    {
-      id: 2,
-      title: 'Hypothesis 2: Self-Supervised Codec Augmentation',
-      desc: 'Pre-train Wav2Vec 2.0 with dynamic lossy compression masks to enforce invariance against telecom codec artifacts.',
-    },
-    {
-      id: 3,
-      title: 'Hypothesis 3: Lightweight Sinc-Conformer Architecture',
-      desc: 'Replace standard 2D convolutions with learnable band-pass Sinc filters to reduce parameter count by 65% while preserving accuracy.',
-    },
-  ]);
+  useEffect(() => {
+    // Load real detected gaps from SQLite / Knowledge Graph
+    fetch('/api/v1/graph/gaps')
+      .then(res => (res.ok ? res.json() : []))
+      .then(data => {
+        if (data && Array.isArray(data) && data.length > 0) {
+          setGaps(data.map((g, i) => ({
+            id: g.id || `gap-${i}`,
+            title: `${i + 1}. Unexplored: ${g.method_id || 'Method'} on ${g.dataset_id || 'Dataset'}`,
+            desc: g.description || 'No existing publication evaluates this methodology on this benchmark dataset.',
+            confidence: g.confidence,
+          })));
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const handleAnalyzeGaps = async () => {
     if (!topic.trim()) return;
@@ -60,13 +51,13 @@ export default function ResearchGapView() {
             hypList.map((h, i) => ({
               id: i + 1,
               title: `Hypothesis ${i + 1}: ${h.title || 'Novel Research Direction'}`,
-              desc: h.hypothesis_statement || h.rationale || h.experimental_design || 'Testable hypothesis statement.',
+              desc: h.hypothesis_statement || h.rationale || h.experimental_design || 'Testable research hypothesis.',
             }))
           );
         }
       }
     } catch (err) {
-      // Keep existing data on error
+      // Keep state
     } finally {
       setLoading(false);
     }
@@ -78,7 +69,7 @@ export default function ResearchGapView() {
         <div>
           <h1>Research Gap & Hypothesis Finder</h1>
           <p className="panel-subtitle">
-            Identify open scientific limitations, unresolved trade-offs, and generate novel paper hypotheses.
+            Identify open scientific limitations, combinatorial graph gaps, and generate novel paper hypotheses.
           </p>
         </div>
       </div>
@@ -96,7 +87,7 @@ export default function ResearchGapView() {
             id="gap-query-input"
             value={topic}
             onChange={(e) => setTopic(e.target.value)}
-            placeholder="Enter research topic..."
+            placeholder="Enter research topic (e.g. 'sparse autoencoders mechanistic interpretability')..."
             style={{
               flex: 1,
               padding: '8px 12px',
@@ -115,57 +106,72 @@ export default function ResearchGapView() {
             style={{ display: 'flex', alignItems: 'center', gap: 6 }}
           >
             {loading ? <Loader2 size={14} className="animate-spin" /> : <Compass size={14} />}
-            <span>{loading ? 'Analyzing...' : 'Analyze Research Gaps'}</span>
+            <span>{loading ? 'Analyzing...' : 'Generate Hypotheses'}</span>
           </button>
         </form>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }} id="gap-results-container">
+        {/* Left Column: Combinatorial Graph Gaps */}
         <div className="card">
           <h3 style={{ fontSize: 14, marginBottom: 10, color: 'var(--accent-amber)', display: 'flex', alignItems: 'center', gap: 6 }}>
             <AlertTriangle size={15} />
-            <span>Key Identified Research Gaps & Limitations</span>
+            <span>Detected Combinatorial Literature Gaps</span>
           </h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 12.5 }} id="gap-limitations-list">
-            {gaps.map((g) => (
-              <div
-                key={g.id}
-                style={{
-                  padding: 10,
-                  background: 'var(--bg-subtle)',
-                  borderRadius: 'var(--radius-sm)',
-                  borderLeft: '3px solid var(--accent-amber)',
-                }}
-              >
-                <strong>{g.title}</strong>
-                <p style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>{g.desc}</p>
+            {gaps.length > 0 ? (
+              gaps.map((g) => (
+                <div
+                  key={g.id}
+                  style={{
+                    padding: 10,
+                    background: 'var(--bg-subtle)',
+                    borderRadius: 'var(--radius-sm)',
+                    borderLeft: '3px solid var(--accent-amber)',
+                  }}
+                >
+                  <strong>{g.title}</strong>
+                  <p style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>{g.desc}</p>
+                </div>
+              ))
+            ) : (
+              <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+                No combinatorial gaps detected yet. Ingest multiple papers in the <strong>Knowledge Graph</strong> to automatically compute unproven Method × Dataset pairs.
               </div>
-            ))}
+            )}
           </div>
         </div>
 
+        {/* Right Column: Generated Hypotheses */}
         <div className="card">
           <h3 style={{ fontSize: 14, marginBottom: 10, color: 'var(--accent-emerald)', display: 'flex', alignItems: 'center', gap: 6 }}>
             <Lightbulb size={15} />
             <span>Generated Novel Research Hypotheses</span>
           </h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 12.5 }} id="gap-hypotheses-list">
-            {hypotheses.map((h) => (
-              <div
-                key={h.id}
-                style={{
-                  padding: 10,
-                  background: 'var(--bg-subtle)',
-                  borderRadius: 'var(--radius-sm)',
-                  borderLeft: '3px solid var(--accent-emerald)',
-                }}
-              >
-                <strong>{h.title}</strong>
-                <p style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>
-                  <em>Idea:</em> {h.desc}
-                </p>
+            {hypotheses.length > 0 ? (
+              hypotheses.map((h) => (
+                <div
+                  key={h.id}
+                  style={{
+                    padding: 10,
+                    background: 'var(--bg-subtle)',
+                    borderRadius: 'var(--radius-sm)',
+                    borderLeft: '3px solid var(--accent-emerald)',
+                  }}
+                >
+                  <strong>{h.title}</strong>
+                  <p style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>
+                    <em>Rationale:</em> {h.desc}
+                  </p>
+                </div>
+              ))
+            ) : (
+              <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+                <Sparkles size={24} style={{ display: 'block', margin: '0 auto 8px', color: 'var(--accent-emerald)' }} />
+                Enter a scientific topic above and click <strong>Generate Hypotheses</strong> to formulate novel research questions grounded in scientific evidence.
               </div>
-            ))}
+            )}
           </div>
         </div>
       </div>

@@ -4,11 +4,115 @@ const AppContext = createContext(null);
 
 export function AppProvider({ children }) {
   const [theme, setTheme] = useState(() => localStorage.getItem('rc_theme') || 'light');
+  const [sessionId, setSessionId] = useState(() => localStorage.getItem('rc_session_id') || `sess-${Math.random().toString(36).substring(2, 9)}`);
   const [isCmdPaletteOpen, setIsCmdPaletteOpen] = useState(false);
   const [selectedPaper, setSelectedPaper] = useState(null);
   const [systemConnected, setSystemConnected] = useState(true);
-  const [comparisonPapers, setComparisonPapers] = useState([]);
-  const [activeReaderPaper, setActiveReaderPaper] = useState(null);
+  
+  // Persisted search & literature state
+  const [searchQuery, setSearchQuery] = useState(() => localStorage.getItem('rc_search_query') || '');
+  const [searchResults, setSearchResults] = useState(() => {
+    try {
+      const saved = localStorage.getItem('rc_search_results');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [sourceCounts, setSourceCounts] = useState(() => {
+    try {
+      const saved = localStorage.getItem('rc_source_counts');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+  const [selectedSources, setSelectedSources] = useState(() => {
+    try {
+      const saved = localStorage.getItem('rc_sources');
+      return saved ? JSON.parse(saved) : [
+        'arxiv',
+        'openalex',
+        'semanticscholar',
+        'crossref',
+        'europepmc',
+        'pubmed',
+        'huggingface',
+        'paperswithcode',
+      ];
+    } catch {
+      return [
+        'arxiv',
+        'openalex',
+        'semanticscholar',
+        'crossref',
+        'europepmc',
+        'pubmed',
+        'huggingface',
+        'paperswithcode',
+      ];
+    }
+  });
+
+  // Persisted comparisons
+  const [comparisonPapers, setComparisonPapers] = useState(() => {
+    try {
+      const saved = localStorage.getItem('rc_comparison_papers');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Persisted reader paper
+  const [activeReaderPaper, setActiveReaderPaperState] = useState(() => {
+    try {
+      const saved = localStorage.getItem('rc_reader_paper');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  // Save session ID
+  useEffect(() => {
+    localStorage.setItem('rc_session_id', sessionId);
+  }, [sessionId]);
+
+  // Save search query
+  useEffect(() => {
+    localStorage.setItem('rc_search_query', searchQuery);
+  }, [searchQuery]);
+
+  // Save search results
+  useEffect(() => {
+    localStorage.setItem('rc_search_results', JSON.stringify(searchResults));
+  }, [searchResults]);
+
+  // Save source counts
+  useEffect(() => {
+    localStorage.setItem('rc_source_counts', JSON.stringify(sourceCounts));
+  }, [sourceCounts]);
+
+  // Save selected sources
+  useEffect(() => {
+    localStorage.setItem('rc_sources', JSON.stringify(selectedSources));
+  }, [selectedSources]);
+
+  // Save comparison papers
+  useEffect(() => {
+    localStorage.setItem('rc_comparison_papers', JSON.stringify(comparisonPapers));
+  }, [comparisonPapers]);
+
+  // Save active reader paper
+  const setActiveReaderPaper = (paper) => {
+    setActiveReaderPaperState(paper);
+    if (paper) {
+      localStorage.setItem('rc_reader_paper', JSON.stringify(paper));
+    } else {
+      localStorage.removeItem('rc_reader_paper');
+    }
+  };
 
   // Apply theme to document.body
   useEffect(() => {
@@ -81,11 +185,30 @@ export function AppProvider({ children }) {
     setComparisonPapers([]);
   };
 
+  const createNewSession = (newQuery = '') => {
+    const newId = `sess-${Math.random().toString(36).substring(2, 9)}`;
+    setSessionId(newId);
+    setSearchQuery(newQuery);
+    setSearchResults([]);
+    setSourceCounts({});
+  };
+
   return (
     <AppContext.Provider
       value={{
         theme,
         toggleTheme,
+        sessionId,
+        setSessionId,
+        createNewSession,
+        searchQuery,
+        setSearchQuery,
+        searchResults,
+        setSearchResults,
+        sourceCounts,
+        setSourceCounts,
+        selectedSources,
+        setSelectedSources,
         isCmdPaletteOpen,
         openCmdPalette: () => setIsCmdPaletteOpen(true),
         closeCmdPalette: () => setIsCmdPaletteOpen(false),
@@ -113,3 +236,4 @@ export function useApp() {
   }
   return context;
 }
+
