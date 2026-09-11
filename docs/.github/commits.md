@@ -430,6 +430,27 @@
   * Identifies underexplored methods and datasets (< 2 papers) and generates 2D research space coverage matrices (`Method x Dataset -> bool`).
 * **REST API Endpoints & Verification Suite (`src/api/routes_graph.py`, `tests/test_graph_engine_v2.py`)**:
   * Added REST endpoints: `POST /api/v1/graph/ingest-paper`, `GET /api/v1/graph/summary`, `GET /api/v1/graph/gaps`, `GET /api/v1/graph/underexplored`, and `GET /api/v1/graph/nodes`.
-  * Created unit and HTTP integration test suite (`tests/test_graph_engine_v2.py`) with 100% pass rate (**34/34 passing tests across the entire project**).
+  * Created unit and HTTP integration test suite (`tests/test_graph_engine_v2.py`) with 100% pass rate (**35/35 passing tests across the entire project**).
 
+<br />
 
+## Rebuild Enterprise React Frontend with React Router and Lucide Iconography
+
+* **Modular React SPA Architecture (`frontend/src/`)**:
+  * Converted legacy monolithic static frontend into a modular, production-grade React application with **React Router v6** and centralized state context (`AppContext.jsx`).
+  * Structured component decomposition:
+    * **Layout Components**: `Sidebar.jsx`, `TopHeader.jsx` with keyboard shortcuts (`1`, `2`, `3`, `4`, `⌘K`).
+    * **Modal Dialogs**: `CommandPaletteModal.jsx` (instant jump navigation & query routing), `PaperDetailModal.jsx` (metadata & citation inspector).
+    * **Domain Views**:
+      * `OverviewView.jsx` — Metrics ribbon, 8-source connector pipeline, and recent research session history.
+      * `LiteratureSearchView.jsx` — Multi-source parallel search (arXiv, HuggingFace, GitHub, OpenAlex, Crossref, Semantic Scholar, Kaggle, PapersWithCode) with BibTeX copying, comparison tagging, and PDF reader routing.
+      * `KnowledgeGraphView.jsx` — Interactive **vis-network** physics canvas, entity inspector, relationship matrix, and side-by-side comparison matrix.
+      * `PaperReaderView.jsx` — Document extractor, PDF upload handler, methodology/concepts breakdown, BibTeX generator, and embedded PDF iframe viewer.
+      * `BenchmarksView.jsx` — Active reproduction pipeline step tracker and SOTA benchmark leaderboard.
+      * `ManuscriptView.jsx` — 8-section publication draft studio with outline navigation and LaTeX export (`.tex`).
+      * `ResearchGapView.jsx` — Open limitation analyzer and gap-driven hypothesis generator.
+* **Professional Enterprise Design System & Iconography**:
+  * Replaced all emojis and informal symbols with crisp, professional **Lucide icons** (`LayoutDashboard`, `Search`, `Network`, `FileText`, `FlaskConical`, `PenTool`, `Lightbulb`, `Copy`, `Check`, `ExternalLink`, etc.).
+  * Supported system-wide **Light & Dark themes** using CSS custom properties with persistent `localStorage` synchronization.
+* **FastAPI SPA Integration & Production Build (`src/api/app.py`, `frontend/vite.config.js`)**:
+  * Configured Vite production bundling into `public_dist/` with automated static asset mounting and SPA fallback routing in FastAPI.

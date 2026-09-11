@@ -1,6 +1,10 @@
+import os
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
 from src.api.routes_chat import router as chat_router
 from src.api.routes_graph import router as graph_router
 from src.api.routes_intelligence import router as intelligence_router
@@ -13,6 +17,7 @@ from src.core.config import settings
 from src.core.database import init_db
 from src.core.logger import logger
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application startup and shutdown events."""
@@ -20,6 +25,7 @@ async def lifespan(app: FastAPI):
     await init_db()
     yield
     logger.info("Shutting down Research Copilot API Server...")
+
 
 def create_app() -> FastAPI:
     app = FastAPI(
@@ -53,6 +59,29 @@ def create_app() -> FastAPI:
     app.include_router(workbench_router)
     app.include_router(chat_router)
 
+    # Static Assets & React SPA Frontend Serving
+    dist_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "public_dist")
+    public_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "public")
+    assets_dir = os.path.join(dist_dir, "assets")
+
+    if os.path.exists(assets_dir):
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa_frontend(full_path: str, request: Request):
+        if full_path.startswith("api/"):
+            return None
+        # Check if dist index.html exists
+        dist_index = os.path.join(dist_dir, "index.html")
+        if os.path.exists(dist_index):
+            return FileResponse(dist_index)
+        # Fallback to public/index.html
+        public_index = os.path.join(public_dir, "index.html")
+        if os.path.exists(public_index):
+            return FileResponse(public_index)
+        return {"message": "Research Copilot Frontend"}
+
     return app
+
 
 app = create_app()
