@@ -410,3 +410,26 @@
   * Expanded test coverage with dedicated test suites: `test_canonical_resolver.py`, `test_multi_source_ingestion.py`, `test_pdf_intelligence.py`, `test_paper_repository.py`, and `test_paper_intelligence_engine.py`.
   * Full project test suite verified with **30 passing tests out of 30**.
 
+<br />
+
+## Implement Research Knowledge Graph Store, Dynamic Graph Builder, and Combinatorial Gap Detection Engine
+
+* **Graph Schemas & Pydantic v2 Models (`src/graph/schema.py`)**:
+  * Designed strongly-typed node models: `PaperNode`, `MethodNode` (slugified), `DatasetNode` (slugified), `MetricNode`, `ClaimNode`, `LimitationNode`, and `ResearchGapNode` using `ConfigDict(str_strip_whitespace=True)`.
+  * Defined `NodeType` (`PAPER`, `METHOD`, `DATASET`, `METRIC`, `CLAIM`, `LIMITATION`, `GAP`) and `Relation` enums (`CITES`, `USES_METHOD`, `EVALUATES_ON`, `ACHIEVES`, `COMPARED_TO`, `EXTENDS`, `CONTRADICTS`, `LIMITED_BY`, `HAS_GAP`, `HAS_CLAIM`).
+  * Implemented `ResearchEdge` schema with edge weighting and `parse_graph_node` typed deserializer.
+* **Persistent In-Memory DiGraph Store (`src/graph/store.py`)**:
+  * Implemented `ResearchGraphStore` utilizing NetworkX `DiGraph` for in-memory graph traversal and `aiosqlite` for persistent storage (`graph_nodes` and `graph_edges` tables).
+  * Built asynchronous operations: `add_node`, `add_edge`, `get_node` (memory-first with DB fallback), `get_neighbors` (with relation filtering), `find_papers_using(method_id, dataset_id)` (predecessor intersection), `load_from_db`, and `get_all_nodes_by_type`.
+* **Dynamic Graph Builder (`src/graph/builder.py`)**:
+  * Implemented `GraphBuilder` converting structured paper intelligence into normalized graph entities.
+  * Dynamically parses methods, datasets, metrics, benchmark evaluations, verified claims, limitations, and citations into directed graph edges with silent deduplication and structured logging.
+* **Combinatorial Gap Detection Engine (`src/graph/gap_engine.py`)**:
+  * Built `GapDetectionEngine` identifying real literature gaps by evaluating Cartesian pairs of `(Method, Dataset)`.
+  * Generates `ResearchGapNode` records (`gap-{method}-{dataset}`) for unexplored methodology-dataset intersections.
+  * Identifies underexplored methods and datasets (< 2 papers) and generates 2D research space coverage matrices (`Method x Dataset -> bool`).
+* **REST API Endpoints & Verification Suite (`src/api/routes_graph.py`, `tests/test_graph_engine_v2.py`)**:
+  * Added REST endpoints: `POST /api/v1/graph/ingest-paper`, `GET /api/v1/graph/summary`, `GET /api/v1/graph/gaps`, `GET /api/v1/graph/underexplored`, and `GET /api/v1/graph/nodes`.
+  * Created unit and HTTP integration test suite (`tests/test_graph_engine_v2.py`) with 100% pass rate (**34/34 passing tests across the entire project**).
+
+

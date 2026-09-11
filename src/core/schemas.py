@@ -111,6 +111,23 @@ class Paper(BaseModel):
     critique_concerns: List[str] = Field(default_factory=list)
     critique_questions: List[str] = Field(default_factory=list)
 
+class PaperIntelligence(BaseModel):
+    id: str
+    title: str
+    abstract: str = ""
+    year: Optional[int] = None
+    venue: Optional[str] = None
+    authors: List[Any] = Field(default_factory=list)
+    methods: List[Any] = Field(default_factory=list)
+    datasets: List[Any] = Field(default_factory=list)
+    metrics: Any = Field(default_factory=dict)
+    claims: List[Any] = Field(default_factory=list)
+    limitations: List[Any] = Field(default_factory=list)
+    cited_papers: List[str] = Field(default_factory=list)
+    referenced_works: List[str] = Field(default_factory=list)
+    benchmarks: List[Any] = Field(default_factory=list)
+    summary: Optional[Any] = None
+
 class ResearchArtifact(BaseModel):
     id: str
     kind: ResearchArtifactKind
