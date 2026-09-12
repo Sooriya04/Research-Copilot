@@ -3,7 +3,9 @@ import re
 import time
 import uuid
 from typing import Dict, List, Optional
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -150,6 +152,76 @@ async def resolve_paper_endpoint(identifier: str, fetch_full_text: bool = Query(
     return await resolver.resolve_identifier(identifier)
 
 
+@router.get("/pdf/proxy")
+async def proxy_pdf_stream(url: str = Query(..., description="Target PDF URL to stream inline")):
+    """Streams a remote scientific PDF inline to bypass browser X-Frame-Options and CORS restrictions."""
+    clean_url = url.strip()
+    if not (clean_url.startswith("http://") or clean_url.startswith("https://")):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid PDF URL protocol.")
+
+    # Check for malformed arXiv URLs (e.g. arxiv.org/pdf/openalex:...)
+    if "arxiv.org/pdf/" in clean_url:
+        match = re.search(r"arxiv\.org/pdf/([^/?#]+)", clean_url)
+        if match:
+            aid = match.group(1).replace(".pdf", "")
+            is_valid_arxiv = bool(re.match(r"^\d{4}\.\d{4,5}(v\d+)?$", aid) or re.match(r"^[a-z\-]+(\.[A-Z]{2})?/\d{7}$", aid))
+            if not is_valid_arxiv:
+                fallback_html = f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><style>body{{font-family:-apple-system,sans-serif;background:#18181b;color:#f4f4f5;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;padding:24px;text-align:center;}}.card{{background:#27272a;border:1px solid #3f3f46;border-radius:8px;padding:32px 24px;max-width:440px;}}h3{{margin:0 0 10px;font-size:16px;color:#f4f4f5;}}p{{font-size:12.5px;color:#a1a1aa;line-height:1.5;margin:0;}}</style></head>
+<body><div class="card"><h3>PDF Not Available on arXiv</h3><p>This identifier is not a standard arXiv paper ID. Please use the source publication link or upload a local PDF.</p></div></body></html>"""
+                return HTMLResponse(content=fallback_html, status_code=200)
+
+    client = httpx.AsyncClient(
+        timeout=35.0,
+        follow_redirects=True,
+        headers={
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "application/pdf,application/octet-stream,*/*",
+        },
+    )
+
+    try:
+        req = client.build_request("GET", clean_url)
+        resp = await client.send(req, stream=True)
+
+        if resp.status_code >= 400:
+            await resp.aclose()
+            await client.aclose()
+            fallback_html = f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><style>body{{font-family:-apple-system,sans-serif;background:#18181b;color:#f4f4f5;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;padding:24px;text-align:center;}}.card{{background:#27272a;border:1px solid #3f3f46;border-radius:8px;padding:32px 24px;max-width:460px;}}h3{{margin:0 0 10px;font-size:16px;color:#f4f4f5;}}p{{font-size:12.5px;color:#a1a1aa;line-height:1.5;margin:0 0 16px;}}.btn{{display:inline-block;padding:8px 16px;background:#3b82f6;color:#ffffff;text-decoration:none;border-radius:6px;font-size:12.5px;font-weight:500;}}.btn:hover{{background:#2563eb;}}</style></head>
+<body><div class="card"><h3>Direct PDF Stream Unavailable (HTTP {resp.status_code})</h3><p>The remote publisher or repository server returned HTTP {resp.status_code} for this PDF resource. It may require institutional authentication or subscriber access.</p><a class="btn" href="{clean_url}" target="_blank" rel="noopener noreferrer">Try Opening Link Directly</a></div></body></html>"""
+            return HTMLResponse(content=fallback_html, status_code=200)
+
+        async def stream_content():
+            try:
+                async for chunk in resp.aiter_bytes(chunk_size=65536):
+                    yield chunk
+            finally:
+                await resp.aclose()
+                await client.aclose()
+
+        headers = {
+            "Content-Type": "application/pdf",
+            "Content-Disposition": "inline",
+            "Cache-Control": "public, max-age=3600",
+        }
+        return StreamingResponse(stream_content(), media_type="application/pdf", headers=headers)
+    except HTTPException:
+        raise
+    except Exception as e:
+        await client.aclose()
+        logger.warning("[PDF PROXY] Error streaming '%s': %s", clean_url, e)
+        fallback_html = f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><style>body{{font-family:-apple-system,sans-serif;background:#18181b;color:#f4f4f5;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;padding:24px;text-align:center;}}.card{{background:#27272a;border:1px solid #3f3f46;border-radius:8px;padding:32px 24px;max-width:460px;}}h3{{margin:0 0 10px;font-size:16px;color:#f4f4f5;}}p{{font-size:12.5px;color:#a1a1aa;line-height:1.5;margin:0 0 16px;}}.btn{{display:inline-block;padding:8px 16px;background:#3b82f6;color:#ffffff;text-decoration:none;border-radius:6px;font-size:12.5px;font-weight:500;}}</style></head>
+<body><div class="card"><h3>Cannot Reach Remote PDF Server</h3><p>Connection to the remote document repository timed out or encountered a network error. You can try accessing the link directly.</p><a class="btn" href="{clean_url}" target="_blank" rel="noopener noreferrer">Try Direct Link</a></div></body></html>"""
+        return HTMLResponse(content=fallback_html, status_code=200)
+
+
+
+
 @router.get("/search/openalex")
 async def search_openalex_endpoint(q: str = Query(..., min_length=1), limit: int = Query(default=25, le=100)):
     """Direct search on OpenAlex index."""
@@ -238,14 +310,15 @@ async def search_unified_endpoint(req: UnifiedSearchRequest, db: AsyncSession = 
                 len(all_raw_papers), len(unique_papers), duration_ms, source_breakdown)
     logger.info("==================================================")
 
-    # Automatically populate the research graph with search results and hierarchical topic head node
+    # Initialize the topic head node in the research graph (clearing prior query state).
+    # Papers are NOT auto-added here; only papers explicitly added by the researcher via "+ Add to Graph" are ingested.
     try:
         from src.api.routes_graph import graph_store
         from src.graph.builder import GraphBuilder
         builder = GraphBuilder(store=graph_store)
-        await builder.build_topic_subgraph(topic=req.query, papers=unique_papers[:15], clear_existing=True)
+        await builder.build_topic_subgraph(topic=req.query, papers=[], clear_existing=True)
     except Exception as graph_err:
-        logger.warning("Could not auto-ingest papers into graph store: %s", graph_err)
+        logger.warning("Could not initialize topic head node in graph store: %s", graph_err)
 
     # Persist or update session in SQLite
     try:

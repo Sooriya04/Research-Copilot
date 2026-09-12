@@ -25,3 +25,11 @@ async def test_workbench_projects():
         list_resp = await client.get("/api/v1/workbench/projects")
         assert list_resp.status_code == 200
         assert len(list_resp.json()) >= 1
+
+@pytest.mark.asyncio
+async def test_pdf_proxy_invalid_url():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/api/v1/pdf/proxy", params={"url": "ftp://not-allowed.com/paper.pdf"})
+        assert resp.status_code == 400
+

@@ -638,6 +638,118 @@ body {
   gap: 14px;
 }
 
+/* Linear Papers Feed (Vertical Flow) */
+.papers-linear-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  margin-top: 14px;
+}
+
+.paper-linear-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: all 0.15s ease-in-out;
+  position: relative;
+  width: 100%;
+}
+
+.paper-linear-card:hover {
+  border-color: var(--border-hover);
+  box-shadow: var(--shadow-sm);
+}
+
+.paper-linear-card.in-graph {
+  border-left: 4px solid #10b981;
+}
+
+.paper-linear-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.paper-linear-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.paper-linear-title {
+  font-size: 15.5px;
+  font-weight: 650;
+  color: var(--text-primary);
+  line-height: 1.4;
+  cursor: pointer;
+  transition: color 0.15s ease;
+  margin: 0;
+}
+
+.paper-linear-title:hover {
+  color: var(--accent-blue);
+  text-decoration: underline;
+}
+
+.paper-linear-authors {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin: 0;
+}
+
+.paper-linear-abstract-box {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  margin: 0;
+}
+
+.paper-linear-abstract-toggle {
+  background: none;
+  border: none;
+  color: var(--accent-blue);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0 4px;
+  text-decoration: underline;
+}
+
+.paper-linear-topics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.paper-topic-tag {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+}
+
+.paper-linear-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .paper-card {
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);

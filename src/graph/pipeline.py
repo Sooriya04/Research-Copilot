@@ -112,7 +112,7 @@ class EvidenceSynthesisNode(BaseResearchNode):
         lines = [
             f"# Research Brief: {state.query}",
             f"\n*Session ID:* `{state.session_id}` | *Iteration:* {state.iteration}",
-            f"\n## 📊 Top Ranked Scientific Literature\n",
+            f"\n## Top Ranked Scientific Literature\n",
             "| Rank | Score | Title | Year | Citations | Code |",
             "| :---: | :---: | :--- | :---: | :---: | :---: |",
         ]
@@ -121,16 +121,16 @@ class EvidenceSynthesisNode(BaseResearchNode):
             code_badge = f"[Link]({p.checklist.code_url})" if (p.checklist and p.checklist.code_url) else ("Yes" if (p.checklist and p.checklist.has_code_repo) else "No")
             lines.append(f"| **#{idx}** | **{p.score}** | [{p.title}]({p.url or '#'}) | {p.year or 'N/A'} | {p.citation_count} | {code_badge} |")
 
-        lines.append("\n## 🔬 Methodology & Reproducibility Insights\n")
+        lines.append("\n## Methodology & Reproducibility Insights\n")
         for idx, p in enumerate(top_papers, 1):
             chk = p.checklist
             lines.append(f"### {idx}. {p.title}")
             lines.append(f"- **Authors:** {', '.join(a.name for a in p.authors[:4])}")
             lines.append(f"- **Key Metrics:** Relevance: {p.score_breakdown.topical_relevance if p.score_breakdown else 0}/100 | Prestige: {p.score_breakdown.graph_prestige if p.score_breakdown else 0}/100")
             if chk:
-                lines.append(f"- **Ablations:** {'✅ Present' if chk.has_ablation else '❌ Not detected'}")
-                lines.append(f"- **Baselines:** {'✅ Compared against SOTA' if chk.has_baselines else '❌ Not specified'}")
-                lines.append(f"- **Uncertainty Quantification:** {'✅ Error bars/variance' if chk.has_uncertainty_quant else '❌ None reported'}")
+                lines.append(f"- **Ablations:** {'Present' if chk.has_ablation else 'Not detected'}")
+                lines.append(f"- **Baselines:** {'Compared against SOTA' if chk.has_baselines else 'Not specified'}")
+                lines.append(f"- **Uncertainty Quantification:** {'Error bars/variance' if chk.has_uncertainty_quant else 'None reported'}")
                 if chk.compute_details:
                     lines.append(f"- **Compute Budget:** `{chk.compute_details}`")
             lines.append("")

@@ -74,6 +74,21 @@ export function AppProvider({ children }) {
     }
   });
 
+  // Persisted papers added to graph
+  const [addedToGraphPaperIds, setAddedToGraphPaperIds] = useState(() => {
+    try {
+      const saved = localStorage.getItem('rc_added_graph_papers');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Save added to graph papers
+  useEffect(() => {
+    localStorage.setItem('rc_added_graph_papers', JSON.stringify(addedToGraphPaperIds));
+  }, [addedToGraphPaperIds]);
+
   // Save session ID
   useEffect(() => {
     localStorage.setItem('rc_session_id', sessionId);
@@ -185,12 +200,61 @@ export function AppProvider({ children }) {
     setComparisonPapers([]);
   };
 
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState(null);
+
+  const performSearch = async (queryText, limitNum = 10, sourcesToUse = null) => {
+    const q = (queryText || searchQuery).trim();
+    if (!q) return [];
+
+    setSearchLoading(true);
+    setSearchError(null);
+    setSearchQuery(q);
+    setSearchResults([]);
+    setSourceCounts({});
+    setAddedToGraphPaperIds([]);
+
+    try {
+      const res = await fetch('/api/v1/search/unified', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: q,
+          sources: sourcesToUse || selectedSources,
+          limit_per_source: Number(limitNum),
+          session_id: sessionId,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const papers = data.papers || [];
+        setSearchResults(papers);
+        setSourceCounts(data.source_breakdown || {});
+        if (data.session_id) {
+          setSessionId(data.session_id);
+        }
+        return papers;
+      } else {
+        const err = await res.text();
+        setSearchError(`Search query error: ${err}`);
+        return [];
+      }
+    } catch (err) {
+      setSearchError(`Network error connecting to backend: ${err.message}`);
+      return [];
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
   const createNewSession = (newQuery = '') => {
     const newId = `sess-${Math.random().toString(36).substring(2, 9)}`;
     setSessionId(newId);
     setSearchQuery(newQuery);
     setSearchResults([]);
     setSourceCounts({});
+    setAddedToGraphPaperIds([]);
   };
 
   return (
@@ -209,6 +273,8 @@ export function AppProvider({ children }) {
         setSourceCounts,
         selectedSources,
         setSelectedSources,
+        addedToGraphPaperIds,
+        setAddedToGraphPaperIds,
         isCmdPaletteOpen,
         openCmdPalette: () => setIsCmdPaletteOpen(true),
         closeCmdPalette: () => setIsCmdPaletteOpen(false),
@@ -222,6 +288,11 @@ export function AppProvider({ children }) {
         clearComparisonPapers,
         activeReaderPaper,
         setActiveReaderPaper,
+        searchLoading,
+        setSearchLoading,
+        searchError,
+        setSearchError,
+        performSearch,
       }}
     >
       {children}

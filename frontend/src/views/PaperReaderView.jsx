@@ -12,6 +12,45 @@ import {
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
+function extractArxivId(idStr) {
+  if (!idStr) return null;
+  const s = String(idStr).trim();
+  const match = s.match(/(?:arxiv:)?(\d{4}\.\d{4,5}(?:v\d+)?|[a-z\-]+(?:\.[a-z]{2})?\/\d{7})/i);
+  return match ? match[1] : null;
+}
+
+function buildProxyPdfUrl(directUrl) {
+  if (!directUrl) return null;
+  const trimmed = String(directUrl).trim();
+  if (trimmed.startsWith('blob:') || trimmed.startsWith('data:')) {
+    return trimmed;
+  }
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    return `/api/v1/pdf/proxy?url=${encodeURIComponent(trimmed)}`;
+  }
+  return null;
+}
+
+function resolvePaperPdf(paper) {
+  if (!paper) return null;
+  // 1. If paper has a genuine arXiv ID, always prioritize arXiv's permanent PDF
+  const rawArxiv = paper.arxiv_id || extractArxivId(paper.id) || extractArxivId(paper.canonical_id) || extractArxivId(paper.url);
+  const cleanArxiv = extractArxivId(rawArxiv);
+  if (cleanArxiv) {
+    return buildProxyPdfUrl(`https://arxiv.org/pdf/${cleanArxiv}.pdf`);
+  }
+  // 2. Otherwise use paper.pdf_url if valid and not a malformed arXiv URL
+  if (paper.pdf_url && (paper.pdf_url.startsWith('http://') || paper.pdf_url.startsWith('https://'))) {
+    if (paper.pdf_url.includes('arxiv.org/pdf/')) {
+      const arxivMatch = extractArxivId(paper.pdf_url);
+      if (!arxivMatch) return null; // Bogus arXiv URL (e.g. openalex:...)
+      return buildProxyPdfUrl(`https://arxiv.org/pdf/${arxivMatch}.pdf`);
+    }
+    return buildProxyPdfUrl(paper.pdf_url);
+  }
+  return null;
+}
+
 export default function PaperReaderView() {
   const { activeReaderPaper } = useApp();
 
@@ -24,28 +63,48 @@ export default function PaperReaderView() {
   useEffect(() => {
     if (activeReaderPaper) {
       const pId = activeReaderPaper.id || activeReaderPaper.arxiv_id || activeReaderPaper.canonical_id || '';
-      const cleanId = pId.replace('arxiv:', '').replace('arXiv:', '');
+      const cleanArxiv = extractArxivId(pId) || extractArxivId(activeReaderPaper.arxiv_id);
       const authorsStr = (activeReaderPaper.authors || []).map(a => (typeof a === 'string' ? a : a.name)).join(', ');
-      const pdfLink = activeReaderPaper.pdf_url || (cleanId ? `https://arxiv.org/pdf/${cleanId}` : null);
+      const pdfLink = resolvePaperPdf(activeReaderPaper);
+      const sourceUrl = activeReaderPaper.url || (cleanArxiv ? `https://arxiv.org/abs/${cleanArxiv}` : (activeReaderPaper.doi ? `https://doi.org/${activeReaderPaper.doi}` : null));
 
       setCurrentDoc({
         id: pId || 'Document',
-        source: (activeReaderPaper.primary_source || 'ARXIV').toUpperCase(),
+        doi: activeReaderPaper.doi || null,
+        source: (activeReaderPaper.primary_source || (cleanArxiv ? 'ARXIV' : 'RESEARCH')).toUpperCase(),
         title: activeReaderPaper.title || 'Research Document',
         authors: authorsStr || 'Authors listed in source publication',
-        sourceUrl: activeReaderPaper.url || (cleanId ? `https://arxiv.org/abs/${cleanId}` : null),
+        sourceUrl: sourceUrl,
         pdfUrl: pdfLink,
         abstract: activeReaderPaper.abstract || 'No abstract preview available.',
         methodology: 'Structured methodology extracted from canonical paper ingestion.',
-        concepts: activeReaderPaper.topics && activeReaderPaper.topics.length > 0 ? activeReaderPaper.topics : ['MACHINE-LEARNING', 'METHODOLOGY', 'EVALUATION'],
-        bibtex: `@article{paper_${cleanId.replace(/[^a-zA-Z0-9]/g, '') || 'ref'},
+        concepts: activeReaderPaper.topics && activeReaderPaper.topics.length > 0 ? activeReaderPaper.topics.slice(0, 5) : ['MACHINE-LEARNING', 'METHODOLOGY'],
+        bibtex: `@article{paper_${(cleanArxiv || pId).replace(/[^a-zA-Z0-9]/g, '') || 'ref'},
   title={${activeReaderPaper.title || 'Untitled'}},
   author={${authorsStr || 'Author and others'}},
   journal={Research Copilot Intelligence Base},
   year={${activeReaderPaper.year || 2024}}
 }`,
       });
-      setInputVal(cleanId);
+      setInputVal(cleanArxiv || pId);
+
+      // If no direct PDF URL was found, attempt legal OA resolver in background
+      if (!pdfLink && pId) {
+        fetch(`/api/v1/paper/${encodeURIComponent(pId)}`)
+          .then(res => res.ok ? res.json() : null)
+          .then(data => {
+            if (data && data.candidates && data.candidates.length > 0) {
+              const bestCandidate = data.candidates.find(c => c.format === 'pdf') || data.candidates[0];
+              if (bestCandidate && bestCandidate.url) {
+                const proxied = buildProxyPdfUrl(bestCandidate.url);
+                if (proxied) {
+                  setCurrentDoc(prev => prev ? { ...prev, pdfUrl: proxied } : null);
+                }
+              }
+            }
+          })
+          .catch(() => {});
+      }
     }
   }, [activeReaderPaper]);
 
@@ -66,15 +125,23 @@ export default function PaperReaderView() {
         const data = await res.json();
         const cp = data.canonical_paper;
         const authorsStr = (cp.authors || []).map(a => (typeof a === 'string' ? a : a.name)).join(', ');
-        const cleanId = cp.arxiv_id || cp.canonical_id || query;
-        const pdfLink = cp.pdf_url || `https://arxiv.org/pdf/${cleanId.replace('arxiv:', '')}`;
+        const cleanArxiv = extractArxivId(cp.arxiv_id) || extractArxivId(cp.canonical_id) || extractArxivId(query);
+        const cleanId = cleanArxiv || cp.canonical_id || query;
+        
+        let pdfLink = null;
+        if (cp.pdf_url && (cp.pdf_url.startsWith('http://') || cp.pdf_url.startsWith('https://'))) {
+          pdfLink = buildProxyPdfUrl(cp.pdf_url);
+        } else if (cleanArxiv) {
+          pdfLink = buildProxyPdfUrl(`https://arxiv.org/pdf/${cleanArxiv}.pdf`);
+        }
 
         setCurrentDoc({
           id: cp.canonical_id || cleanId,
-          source: (cp.sources && cp.sources.length > 0 ? cp.sources[0].source_name : 'ARXIV').toUpperCase(),
+          doi: cp.doi || null,
+          source: (cp.sources && cp.sources.length > 0 ? cp.sources[0].source_name : (cleanArxiv ? 'ARXIV' : 'RESEARCH')).toUpperCase(),
           title: cp.title || query,
           authors: authorsStr || 'Author details in publication',
-          sourceUrl: cp.sources && cp.sources.length > 0 ? cp.sources[0].url : `https://arxiv.org/abs/${cleanId}`,
+          sourceUrl: cp.sources && cp.sources.length > 0 ? cp.sources[0].url : (cleanArxiv ? `https://arxiv.org/abs/${cleanArxiv}` : null),
           pdfUrl: pdfLink,
           abstract: cp.abstract || 'Extracted document content.',
           methodology: cp.summary ? cp.summary.methodology : 'Empirical methodology extracted from canonical paper.',
@@ -316,8 +383,45 @@ export default function PaperReaderView() {
                   style={{ width: '100%', height: '100%', border: 'none' }}
                 ></iframe>
               ) : (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)' }}>
-                  PDF preview not directly accessible for this source. Use "Source URL" above.
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: 24, textAlign: 'center' }}>
+                  <FileText size={44} style={{ color: 'var(--text-muted)', marginBottom: 12 }} />
+                  <h4 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>
+                    Direct PDF Stream Unavailable
+                  </h4>
+                  <p style={{ fontSize: 12.5, color: 'var(--text-muted)', maxWidth: 360, lineHeight: 1.5, marginBottom: 16 }}>
+                    This publication does not have a direct public PDF stream or is indexed behind publisher access. You can open the paper via its official landing page or upload a local copy.
+                  </p>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+                    {currentDoc.sourceUrl && (
+                      <a
+                        href={currentDoc.sourceUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="btn btn-secondary btn-sm"
+                        style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                      >
+                        <ExternalLink size={13} />
+                        <span>Open Source Page</span>
+                      </a>
+                    )}
+                    {currentDoc.doi && (
+                      <a
+                        href={`https://doi.org/${currentDoc.doi}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="btn btn-secondary btn-sm"
+                        style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                      >
+                        <ExternalLink size={13} />
+                        <span>Open via DOI</span>
+                      </a>
+                    )}
+                    <label className="btn btn-primary btn-sm" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <Upload size={13} />
+                      <span>+ Upload PDF to View</span>
+                      <input type="file" accept="application/pdf" onChange={handleFileUpload} style={{ display: 'none' }} />
+                    </label>
+                  </div>
                 </div>
               )}
             </div>

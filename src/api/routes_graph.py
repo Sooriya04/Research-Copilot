@@ -254,18 +254,6 @@ async def get_graph_elements(
             topic_node = TopicNode(id=target_topic_id, name=topic_clean, query=topic_clean)
             await graph_store.add_node(topic_node)
 
-        # Connect to existing paper nodes
-        for nid in list(graph_store.graph.nodes):
-            n = await graph_store.get_node(nid)
-            if n and (n.node_type == NodeType.PAPER or getattr(n, "node_type", "") == "paper"):
-                edge = ResearchEdge(
-                    source_id=target_topic_id,
-                    target_id=nid,
-                    relation=Relation.COVERS,
-                    weight=2.0,
-                )
-                await graph_store.add_edge(edge)
-
     # If scoped to a specific topic, only collect reachable nodes from that topic
     allowed_node_ids = None
     if scoped and target_topic_id and target_topic_id in graph_store.graph:
@@ -277,10 +265,41 @@ async def get_graph_elements(
             for child_id in graph_store.graph.successors(p_id):
                 allowed_node_ids.add(child_id)
     
+    # Identify paper nodes
+    paper_ids = set()
+    for nid in graph_store.graph.nodes:
+        n = await graph_store.get_node(nid)
+        if n and getattr(n, "node_type", None) == NodeType.PAPER:
+            paper_ids.add(nid)
+
+    edges_raw = await graph_store.get_all_edges()
+
+    # Rule: non-topic, non-paper nodes are CONNECTION nodes between papers.
+    # If a node connects to fewer than 2 distinct papers, exclude it completely.
+    valid_connection_node_ids = set()
+    for nid in graph_store.graph.nodes:
+        n = await graph_store.get_node(nid)
+        if not n:
+            continue
+        ntype = n.node_type.value if hasattr(n.node_type, "value") else str(n.node_type)
+        if ntype in ["topic", "paper"]:
+            valid_connection_node_ids.add(nid)
+        else:
+            connected_papers = set()
+            for e in edges_raw:
+                if e.source_id == nid and e.target_id in paper_ids:
+                    connected_papers.add(e.target_id)
+                elif e.target_id == nid and e.source_id in paper_ids:
+                    connected_papers.add(e.source_id)
+            if len(connected_papers) >= 2:
+                valid_connection_node_ids.add(nid)
+
     nodes = []
     node_type_counts = {}
     for nid in graph_store.graph.nodes:
         if allowed_node_ids is not None and nid not in allowed_node_ids:
+            continue
+        if nid not in valid_connection_node_ids:
             continue
         n = await graph_store.get_node(nid)
         if n:
@@ -295,11 +314,14 @@ async def get_graph_elements(
                 "title": f"[{ntype.upper()}] {label}",
                 "data": n_dict,
             })
+
             
-    edges_raw = await graph_store.get_all_edges()
+    node_id_set = {n["id"] for n in nodes}
     edges = []
     for e in edges_raw:
         if allowed_node_ids is not None and (e.source_id not in allowed_node_ids or e.target_id not in allowed_node_ids):
+            continue
+        if e.source_id not in node_id_set or e.target_id not in node_id_set:
             continue
         rel_str = e.relation.value if hasattr(e.relation, "value") else str(e.relation)
         edges.append({

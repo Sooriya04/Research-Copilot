@@ -223,7 +223,7 @@
 
 * **Universal Color-Coded Log Interception (`services/repair_worker/logger.go`)**:
   * Designed a thread-safe `ColorWriter` wrapping `os.Stderr`/`os.Stdout` to dynamically format standard log lines using ANSI escape codes.
-  * Colors errors and critical failures in bold red (`\033[1;31m`) and warnings in yellow/amber (`\033[33m`) with prominent visual symbols (🛑, ⚠️) to improve terminal readability.
+  * Colors errors and critical failures in bold red (`\033[1;31m`) and warnings in yellow/amber (`\033[33m`) with prominent visual indicators ([ERROR], [WARN]) to improve terminal readability.
   * Deployed color-coded logging globally across the Go repair worker service.
 * **Worker & Agent Timeout Mismatch Fix (`services/repair_worker/pipeline.go`)**:
   * Resolved a deadline deadlock where the Go worker aborted agent requests after 10 seconds, which was shorter than the Python agent's search APIs sequential timeouts (up to 22 seconds).
@@ -508,7 +508,42 @@
   * Updated `POST /api/v1/graph/ingest-paper` to accept flexible paper dictionaries and string lists, linking ingested papers directly to the active topic root node.
   * Configured `LiteratureSearchView` to pass active query topics, sanitized authors, and tags, giving real-time feedback with instant graph synchronization.
 * **Simplified Non-Technical Visuals & Physics Configuration (`frontend/src/views/KnowledgeGraphView.jsx`)**:
-  * Replaced raw technical code IDs with clean human-readable badges: `🎯 Topic: <Name>`, `📄 <Title> (<Year>)`, `💡 Method: <Name>`, `📊 Dataset: <Name>`, `🔍 Gap: <Name>`.
+  * Replaced raw technical code IDs with clean human-readable badges: `[Topic] <Name>`, `[Paper] <Title> (<Year>)`, `[Method] <Name>`, `[Dataset] <Name>`, `[Gap] <Name>`.
   * Plain-English relationship edge labels (`Explores`, `Uses Method`, `Tested On`, `References`, `Solves`).
   * Tuned anti-collision physics (`gravitationalConstant: -180`, `springLength: 260`, `avoidOverlap: 1.0`) preventing cluttered overlapping nodes.
   * Added quick canvas actions (`Reload`, `Fit View`, `Clear Graph`) and friendly 1-line guidance banner.
+
+<br />
+
+## Two-Page Literature Search Split, Selective Graph Ingestion, Sketch-Based Graph Pruning, Streaming PDF Proxy, and Vite HMR Stability
+
+* **Two-Page Literature Exploration Architecture (`frontend/src/views/LiteratureSearchView.jsx`, `frontend/src/views/LiteratureResultsView.jsx`, `frontend/src/App.jsx`)**:
+  * Decoupled the literature discovery workflow into two dedicated, distinct interfaces:
+    * **Search Page (`/search`)**: A focused landing interface for entering research queries, configuring retrieval limits (10, 25, 50, 100), selecting multi-repository connectors (arXiv, OpenAlex, Semantic Scholar, Crossref, PubMed), and one-click scientific prompt recommendations. Submitting a search or clicking a prompt automatically navigates to the results page.
+    * **Founded Papers View (`/search-results`, `/search/results`)**: A dedicated view displaying all retrieved research papers in a high-density, accessible linear card stream (replacing multi-column grid boxes).
+  * Implemented a top segmented sub-navigation toggle allowing seamless switching between `[ Search Page ]` and `[ View Founded Papers (N) ]`.
+* **In-Page Search Bar with Real-Time Filtering**:
+  * Integrated an interactive client-side search bar equipped with `<Search />` icons directly at the top of the Founded Papers page.
+  * Filters through retrieved papers with zero network latency across titles, author names, abstract contents, publication years, and source repositories.
+  * Provides real-time matching counter badges, instant clear button, and quick-filter chips for `All`, `Open Access`, `In Graph`, and individual repository counts.
+* **Selective Graph Ingestion & State Isolation**:
+  * Enforced user-controlled graph population: when a query retrieves research papers (e.g. 50 results), only papers explicitly clicked with `+ Add to Graph` (e.g. 10 papers) are registered into the graph.
+  * Resolved stale state persistence where prior query contents and previous searches remained visible across view transitions.
+  * Each linear paper card provides dedicated scientific actions: `+ Add to Graph`, `Reader`, `Cite`, `Compare`, and direct `Source Link`.
+* **Strict Topological Graph Layout & Unwanted Circle Pruning (`src/graph/builder.py`, `src/api/routes_graph.py`, `frontend/src/views/KnowledgeGraphView.jsx`)**:
+  * Aligned the Knowledge Graph canvas strictly with the user-defined topological design sketch.
+  * Pruned artificial intermediate circular nodes: non-paper entities (methods, datasets, tasks) are created and connected only if they form genuine bridge relationships between 2 or more papers (>= 2). Papers with no mutual connections do not produce extraneous intermediate connection nodes.
+  * Removed chaotic multi-color styling in favor of a focused, publication-grade dark canvas with plain-English relationship labels (`Explores`, `Uses Method`, `Tested On`, `References`, `Solves`).
+* **Streaming PDF Proxy Endpoint & Remote 404 Resolution (`src/api/routes_search.py`, `frontend/src/views/PaperReaderView.jsx`, `tests/test_api.py`)**:
+  * Implemented `GET /api/v1/pdf/proxy?url=...` with asynchronous streaming via `httpx.AsyncClient(follow_redirects=True)` to forward `Content-Type: application/pdf`, `Content-Length`, and permissive CORS headers (`Access-Control-Allow-Origin: *`).
+  * Resolved remote PDF server HTTP 404 errors and browser CSP iframe blocks by implementing automated candidate URL fallback resolution and streaming proxy integration in the Paper Reader.
+  * Added automated regression test `test_pdf_proxy_invalid_url` in `tests/test_api.py` (36/36 tests passing).
+* **Vite HMR WebSocket & React Router v7 Deprecation Resolution (`frontend/vite.config.js`, `frontend/src/main.jsx`)**:
+  * Resolved browser console `[vite] failed to connect to websocket` errors by configuring development server host to `0.0.0.0` and HMR `clientPort: 5173`.
+  * Enabled React Router v7 future flags (`v7_startTransition: true`, `v7_relativeSplatPath: true`) to resolve deprecation warnings.
+* **Global Search State & Sidebar Navigation Integration (`frontend/src/context/AppContext.jsx`, `frontend/src/components/layout/Sidebar.jsx`)**:
+  * Lifted search execution, query caching, and status tracking (`performSearch`, `searchLoading`, `searchError`) to `AppContext` for state synchronization across routes.
+  * Added `Founded Papers` (`/search-results`) directly to the sidebar navigation with a real-time badge indicating the count of retrieved papers.
+* **Strict Zero-Emoji Rule Enforcement**:
+  * Removed all emojis across UI components, views, buttons, logs, and documentation, replacing them with crisp Lucide SVG icons.
+

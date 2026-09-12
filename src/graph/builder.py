@@ -107,37 +107,44 @@ class GraphBuilder:
             await self.store.add_node(paper_node)
             logger.info("Added PaperNode: %s", paper_id)
 
-        # 2. Methods & Datasets derivation (Exclude generic stop-words)
+        # 2. Methods & Datasets derivation (Exclude generic stop-words and high-level taxonomy terms)
         STOP_WORDS = {
-            "impact", "general benchmark", "empirical method", "topic modeling", 
-            "general", "method", "dataset", "benchmark", "analysis", "study",
-            "advanced neural network application"
+            # Broad academic fields and disciplines
+            "computer science", "artificial intelligence", "machine learning", "deep learning",
+            "natural language processing", "natural language processing techniques",
+            "information retrieval", "topic modeling", "software engineering", "mathematics",
+            "algorithm", "algorithms", "neural network", "neural networks", "data science",
+            "statistics", "applied mathematics", "computation and language",
+            "artificial intelligence (cs.ai)", "machine learning (cs.lg)", "computation and language (cs.cl)",
+            "explainable artificial intelligence (xai)", "adversarial robustness in machine learning",
+            "advanced neural network application", "machine learning in image processing",
+            "engineering", "linguistics", "physics", "biology", "medicine",
+            # Generic placeholders & filler words
+            "empirical method", "benchmark evaluation", "general benchmark", "general",
+            "method", "methods", "dataset", "datasets", "benchmark", "benchmarks",
+            "analysis", "study", "studies", "overview", "survey", "surveys", "research",
+            "framework", "frameworks", "system", "systems", "technique", "techniques",
+            "approach", "approaches", "model", "models", "evaluation", "evaluations",
+            "experiment", "experiments", "task", "tasks", "performance", "impact",
+            "investigation", "review", "reasoning", "reasoning & empirical analysis",
         }
 
         methods = getattr(paper_intel, "methods", []) if not isinstance(paper_intel, dict) else paper_intel.get("methods", [])
         datasets = getattr(paper_intel, "datasets", []) if not isinstance(paper_intel, dict) else paper_intel.get("datasets", [])
-        topics = getattr(paper_intel, "topics", []) if not isinstance(paper_intel, dict) else paper_intel.get("topics", [])
+        benchmarks = getattr(paper_intel, "benchmarks", []) if not isinstance(paper_intel, dict) else paper_intel.get("benchmarks", [])
 
         derived_methods = list(methods)
         derived_datasets = list(datasets)
 
-        if not derived_methods and not derived_datasets and topics:
-            for top in topics:
-                t_str = str(top).strip()
-                t_lower = t_str.lower()
-                if t_lower in STOP_WORDS or len(t_str) < 3:
-                    continue
-                if any(kw in t_lower for kw in ["dataset", "benchmark", "corpus", "eval", "gsm", "svamp", "math", "glue", "squad", "mmlu", "imagenet", "wmt", "pile", "wikitext"]):
-                    derived_datasets.append(t_str)
-                else:
-                    derived_methods.append(t_str)
-
-        # Fallback if both still empty: derive from title
-        if not derived_methods and title:
-            clean_t = re.sub(r"^(a|an|the|towards|on)\s+", "", title, flags=re.I)
-            parts = [p.strip() for p in re.split(r"[:\-\–\—]", clean_t) if len(p.strip()) > 3]
-            if parts and parts[0].lower() not in STOP_WORDS:
-                derived_methods.append(parts[0][:40])
+        # Incorporate verified benchmarks from PapersWithCode or intelligence if present
+        for b in benchmarks:
+            if isinstance(b, dict):
+                d_name = b.get("dataset")
+                t_name = b.get("task")
+                if d_name and str(d_name).strip().lower() not in STOP_WORDS:
+                    derived_datasets.append(str(d_name).strip())
+                if t_name and str(t_name).strip().lower() not in STOP_WORDS:
+                    derived_methods.append(str(t_name).strip())
 
         for m in derived_methods:
             if isinstance(m, str):
@@ -194,7 +201,7 @@ class GraphBuilder:
             edge = ResearchEdge(source_id=paper_id, target_id=dataset_id, relation=Relation.EVALUATES_ON)
             await self.store.add_edge(edge)
 
-        # 4. Citations (Cross-Paper Links)
+        # 4. Citations (Cross-Paper Links strictly between papers that exist in the store)
         cited_list = (
             getattr(paper_intel, "cited_papers", [])
             or getattr(paper_intel, "referenced_works", [])
@@ -205,8 +212,41 @@ class GraphBuilder:
             cid_str = str(cited_id).strip()
             if not cid_str:
                 continue
-            edge = ResearchEdge(source_id=paper_id, target_id=cid_str, relation=Relation.CITES)
-            await self.store.add_edge(edge)
+
+            # Look up if the target paper node is already stored in our graph
+            target_node = await self.store.get_node(cid_str)
+            target_id = cid_str
+            if not target_node:
+                # Check all stored paper nodes for matching DOI, arXiv ID, or OpenAlex ID
+                for nid in self.store.graph.nodes:
+                    node_obj = await self.store.get_node(nid)
+                    if node_obj and getattr(node_obj, "node_type", None) == NodeType.PAPER:
+                        ndata = getattr(node_obj, "data", {}) or {}
+                        if (ndata.get("doi") and ndata.get("doi") == cid_str) or \
+                           (ndata.get("arxiv_id") and ndata.get("arxiv_id") == cid_str) or \
+                           (ndata.get("openalex_id") and ndata.get("openalex_id") == cid_str):
+                            target_node = node_obj
+                            target_id = nid
+                            break
+
+            if target_node and getattr(target_node, "node_type", None) == NodeType.PAPER:
+                edge = ResearchEdge(source_id=paper_id, target_id=target_id, relation=Relation.CITES)
+                await self.store.add_edge(edge)
+
+        # Check reverse citations: if any existing paper in the store cited this new paper
+        for nid in self.store.graph.nodes:
+            if nid == paper_id:
+                continue
+            node_obj = await self.store.get_node(nid)
+            if node_obj and getattr(node_obj, "node_type", None) == NodeType.PAPER:
+                ndata = getattr(node_obj, "data", {}) or {}
+                existing_cited = ndata.get("cited_papers") or ndata.get("referenced_works") or []
+                clean_existing_cited = [str(c).strip() for c in existing_cited]
+                if (paper_id in clean_existing_cited) or \
+                   (getattr(paper_node, "doi", None) and getattr(paper_node, "doi") in clean_existing_cited) or \
+                   (getattr(paper_node, "arxiv_id", None) and getattr(paper_node, "arxiv_id") in clean_existing_cited):
+                    rev_edge = ResearchEdge(source_id=nid, target_id=paper_id, relation=Relation.CITES)
+                    await self.store.add_edge(rev_edge)
 
         return paper_id
 

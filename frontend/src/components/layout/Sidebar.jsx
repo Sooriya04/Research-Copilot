@@ -3,6 +3,7 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard,
   Search,
+  BookOpen,
   Network,
   FileText,
   Lightbulb,
@@ -12,7 +13,7 @@ import {
 import { useApp } from '../../context/AppContext';
 
 export default function Sidebar() {
-  const { systemConnected } = useApp();
+  const { systemConnected, searchResults } = useApp();
 
   return (
     <aside className="sidebar">
@@ -53,6 +54,32 @@ export default function Sidebar() {
             </NavLink>
 
             <NavLink
+              to="/search-results"
+              className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+            >
+              <div className="nav-item-left">
+                <BookOpen size={15} />
+                <span>Founded Papers</span>
+              </div>
+              {searchResults && searchResults.length > 0 ? (
+                <span
+                  className="nav-shortcut"
+                  style={{
+                    fontSize: '0.68rem',
+                    padding: '1px 6px',
+                    borderRadius: '999px',
+                    color: 'var(--accent-primary, #6366f1)',
+                    borderColor: 'var(--accent-primary, #6366f1)',
+                  }}
+                >
+                  {searchResults.length}
+                </span>
+              ) : (
+                <span className="nav-shortcut">3</span>
+              )}
+            </NavLink>
+
+            <NavLink
               to="/knowledge-graph"
               className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
             >
@@ -60,7 +87,7 @@ export default function Sidebar() {
                 <Network size={15} />
                 <span>Knowledge Graph</span>
               </div>
-              <span className="nav-shortcut">3</span>
+              <span className="nav-shortcut">4</span>
             </NavLink>
 
             <NavLink
@@ -71,7 +98,7 @@ export default function Sidebar() {
                 <FileText size={15} />
                 <span>Paper Reader</span>
               </div>
-              <span className="nav-shortcut">4</span>
+              <span className="nav-shortcut">5</span>
             </NavLink>
           </div>
         </div>

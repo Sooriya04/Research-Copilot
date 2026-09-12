@@ -40,14 +40,14 @@ function wrapLabel(text, maxChars = 20) {
 }
 
 const NODE_THEMES = {
-  topic: { bg: '#0f172a', border: '#38bdf8', text: '#38bdf8', shape: 'box', size: 30 },
-  paper: { bg: '#2563eb', border: '#1d4ed8', text: '#ffffff', shape: 'box', size: 22 },
-  method: { bg: '#7c3aed', border: '#6d28d9', text: '#ffffff', shape: 'box', size: 18 },
-  dataset: { bg: '#d97706', border: '#b45309', text: '#ffffff', shape: 'box', size: 18 },
-  metric: { bg: '#059669', border: '#047857', text: '#ffffff', shape: 'box', size: 16 },
-  claim: { bg: '#0891b2', border: '#0e7490', text: '#ffffff', shape: 'box', size: 16 },
-  limitation: { bg: '#e11d48', border: '#be123c', text: '#ffffff', shape: 'box', size: 16 },
-  gap: { bg: '#dc2626', border: '#991b1b', text: '#ffffff', shape: 'box', size: 20 },
+  topic: { bg: '#e4e4e7', border: '#ffffff', text: '#09090b', shape: 'box', size: 30 },
+  paper: { bg: '#27272a', border: '#71717a', text: '#f4f4f5', shape: 'box', size: 22 },
+  method: { bg: '#3f3f46', border: '#a1a1aa', text: '#f4f4f5', shape: 'circle', size: 18 },
+  dataset: { bg: '#3f3f46', border: '#a1a1aa', text: '#f4f4f5', shape: 'circle', size: 18 },
+  metric: { bg: '#3f3f46', border: '#a1a1aa', text: '#f4f4f5', shape: 'circle', size: 16 },
+  claim: { bg: '#3f3f46', border: '#a1a1aa', text: '#f4f4f5', shape: 'circle', size: 16 },
+  limitation: { bg: '#3f3f46', border: '#a1a1aa', text: '#f4f4f5', shape: 'circle', size: 16 },
+  gap: { bg: '#3f3f46', border: '#a1a1aa', text: '#f4f4f5', shape: 'circle', size: 20 },
 };
 
 const FRIENDLY_RELATION_LABELS = {
@@ -67,19 +67,19 @@ const FRIENDLY_RELATION_LABELS = {
 };
 
 const EDGE_COLORS = {
-  covers: '#38bdf8',
-  investigates: '#38bdf8',
-  has_paper: '#38bdf8',
-  uses_method: '#a855f7',
-  evaluates_on: '#f59e0b',
-  achieves: '#10b981',
-  cites: '#3b82f6',
-  has_claim: '#06b6d4',
-  limited_by: '#f43f5e',
-  addresses: '#a855f7',
-  extends: '#ec4899',
-  compared_to: '#06b6d4',
-  relates_to: '#64748b',
+  covers: '#e4e4e7',
+  investigates: '#e4e4e7',
+  has_paper: '#e4e4e7',
+  uses_method: '#a1a1aa',
+  evaluates_on: '#a1a1aa',
+  achieves: '#a1a1aa',
+  cites: '#e4e4e7',
+  has_claim: '#a1a1aa',
+  limited_by: '#a1a1aa',
+  addresses: '#a1a1aa',
+  extends: '#a1a1aa',
+  compared_to: '#a1a1aa',
+  relates_to: '#a1a1aa',
 };
 
 export default function KnowledgeGraphView() {
@@ -178,8 +178,9 @@ export default function KnowledgeGraphView() {
     // 1. From active search results
     if (searchResults && searchResults.length > 0) {
       searchResults.forEach((p) => {
-        const methods = p.topics && p.topics.length > 0 ? p.topics.slice(0, 3) : ['Reasoning & Empirical Analysis'];
-        const datasets = p.topics && p.topics.length > 3 ? p.topics.slice(3, 5) : ['Benchmark Evaluation'];
+        const methods = p.methods && p.methods.length > 0 ? p.methods : [];
+        const datasets = p.datasets && p.datasets.length > 0 ? p.datasets : [];
+        if (methods.length === 0 || datasets.length === 0) return;
 
         methods.forEach((m) => {
           datasets.forEach((d) => {
@@ -234,102 +235,110 @@ export default function KnowledgeGraphView() {
     return [];
   }, [comparisonPapers, searchResults]);
 
-  // Filter nodes and edges with Scope and Collision Prevention
+  // Filter nodes and edges strictly following the user's sketch (Screenshot from 2026-09-12 19-18-20.png):
+  // 1. Center Head node: Topic Name (pill capsule)
+  // 2. Subnodes: Papers (rectangles) connected to Topic Name
+  // 3. Circles: Connection nodes that sit strictly BETWEEN 2 or more papers!
+  //    If there is no connection between papers, no circle node is created!
   const filteredData = useMemo(() => {
     let nodesPool = [];
     let edgesPool = [];
 
-    // When searchQuery is present, build cleanly around the active topic and its search results
-    if (searchQuery) {
-      const topicId = `topic-${searchQuery.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-')}`;
-      const activeTopicNode = {
+    const topicId = searchQuery
+      ? `topic-${searchQuery.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-')}`
+      : (rawNodes.find(n => (n.node_type || '').toLowerCase() === 'topic')?.id || 'topic-main');
+
+    nodesPool = [...rawNodes];
+    edgesPool = [...rawEdges];
+
+    // Ensure central topic node exists
+    if (!nodesPool.some(n => n.id === topicId)) {
+      const topicLabel = searchQuery || 'Research Topic';
+      nodesPool.unshift({
         id: topicId,
-        label: searchQuery,
+        label: topicLabel,
         node_type: 'topic',
-        title: `[TOPIC] ${searchQuery}`,
-        data: { name: searchQuery, id: topicId, query: searchQuery },
-      };
-      nodesPool.push(activeTopicNode);
-
-      // Collect papers from active searchResults or matching rawNodes
-      const paperMap = new Map();
-      (searchResults || []).forEach(p => {
-        const pid = p.id || p.canonical_id || `paper-${p.title?.slice(0, 20)}`;
-        paperMap.set(pid, {
-          id: pid,
-          label: p.title?.slice(0, 35) || 'Research Paper',
-          node_type: 'paper',
-          title: `[PAPER] ${p.title}`,
-          data: p,
-        });
+        title: `[TOPIC] ${topicLabel}`,
+        data: { name: topicLabel, id: topicId, query: topicLabel },
       });
-
-      // Also include any papers from rawNodes that are linked to this topic
-      rawEdges.forEach(e => {
-        if (e.source === topicId || e.relation === 'covers' || e.relation === 'investigates') {
-          const rawPaper = rawNodes.find(n => n.id === e.target && (n.node_type === 'paper' || n.node_type === 'Paper'));
-          if (rawPaper && !paperMap.has(rawPaper.id)) {
-            paperMap.set(rawPaper.id, rawPaper);
-          }
-        }
-      });
-
-      // Add all topic papers and edges
-      for (const [pid, pNode] of paperMap.entries()) {
-        nodesPool.push(pNode);
-        edgesPool.push({
-          source: topicId,
-          target: pid,
-          relation: 'covers',
-          label: 'Explores',
-          weight: 2.0,
-        });
-
-        // Add method/dataset subnodes from paper topics
-        const pData = pNode.data || {};
-        const topics = pData.topics || [];
-        if (Array.isArray(topics)) {
-          topics.slice(0, 2).forEach(mStr => {
-            const mId = `method-${mStr.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-')}`;
-            if (!nodesPool.some(n => n.id === mId)) {
-              nodesPool.push({
-                id: mId,
-                label: mStr.slice(0, 30),
-                node_type: 'method',
-                title: `[METHOD] ${mStr}`,
-                data: { name: mStr, id: mId },
-              });
-            }
-            edgesPool.push({
-              source: pid,
-              target: mId,
-              relation: 'uses_method',
-              label: 'Uses Method',
-              weight: 1.0,
-            });
-          });
-        }
-      }
-
-      // Add any existing rawEdges between our active nodes (e.g. citations, evaluations)
-      const validNodeIds = new Set(nodesPool.map(n => n.id));
-      rawEdges.forEach(e => {
-        if (validNodeIds.has(e.source) && validNodeIds.has(e.target) && !edgesPool.some(ep => ep.source === e.source && ep.target === e.target)) {
-          edgesPool.push(e);
-        }
-      });
-    } else {
-      // If no active search query, use rawNodes from backend
-      nodesPool = [...rawNodes];
-      edgesPool = [...rawEdges];
     }
 
-    let filteredNodes = nodesPool;
+    // Set of all paper node IDs in the pool
+    const paperIds = new Set(
+      nodesPool
+        .filter(n => (n.node_type || '').toLowerCase() === 'paper')
+        .map(n => n.id)
+    );
 
-    // Filter by Scope (Core = Topic, Paper, Method, Dataset, Gap)
+    // Reify direct inter-paper edges (e.g. Paper A cites Paper B) into explicit relationship circles
+    // matching the user's sketch: Paper A -> (Relationship Circle) -> Paper B
+    const finalNodes = [];
+    const finalEdges = [];
+    const reifiedRelNodes = new Map();
+
+    edgesPool.forEach(e => {
+      // Direct inter-paper edge (e.g. cites, compared_to, extends)
+      if (paperIds.has(e.source) && paperIds.has(e.target)) {
+        const pairKey = [e.source, e.target].sort().join('--');
+        const relNodeId = `rel-${pairKey}`;
+        if (!reifiedRelNodes.has(relNodeId)) {
+          const friendlyRel = FRIENDLY_RELATION_LABELS[(e.relation || '').toLowerCase()] || (e.label || 'Connected');
+          const relNode = {
+            id: relNodeId,
+            label: friendlyRel,
+            node_type: 'relationship',
+            title: `Relationship: ${friendlyRel}`,
+            data: { name: friendlyRel, source: e.source, target: e.target, relation: e.relation },
+          };
+          reifiedRelNodes.set(relNodeId, relNode);
+        }
+        // Link Paper A -> Rel Circle -> Paper B
+        finalEdges.push({ source: e.source, target: relNodeId, relation: e.relation, label: '' });
+        finalEdges.push({ source: relNodeId, target: e.target, relation: e.relation, label: '' });
+      } else {
+        finalEdges.push(e);
+      }
+    });
+
+    // Count connections to papers for every non-topic, non-paper node
+    const paperConnectionCount = new Map();
+    finalEdges.forEach(e => {
+      if (paperIds.has(e.source) && !paperIds.has(e.target)) {
+        if (!paperConnectionCount.has(e.target)) paperConnectionCount.set(e.target, new Set());
+        paperConnectionCount.get(e.target).add(e.source);
+      }
+      if (paperIds.has(e.target) && !paperIds.has(e.source)) {
+        if (!paperConnectionCount.has(e.source)) paperConnectionCount.set(e.source, new Set());
+        paperConnectionCount.get(e.source).add(e.target);
+      }
+    });
+
+    // Add topic and paper nodes
+    nodesPool.forEach(n => {
+      const ntype = (n.node_type || 'paper').toLowerCase();
+      if (ntype === 'topic' || ntype === 'paper') {
+        finalNodes.push(n);
+      } else {
+        // Strict Rule from user:
+        // "if there is no connection betweeen the paper don't make the connection node that circle"
+        // Circle nodes MUST connect >= 2 distinct papers. Leaf/single-paper circles are dropped.
+        const connectedPapers = paperConnectionCount.get(n.id);
+        if (connectedPapers && connectedPapers.size >= 2) {
+          finalNodes.push(n);
+        }
+      }
+    });
+
+    // Add the reified relationship circle nodes
+    reifiedRelNodes.forEach(rn => {
+      finalNodes.push(rn);
+    });
+
+    // Filter by Scope / Type / Search
+    let filteredNodes = finalNodes;
     if (graphScope === 'core') {
       filteredNodes = filteredNodes.filter(n =>
-        ['topic', 'paper', 'method', 'dataset', 'gap'].includes((n.node_type || 'paper').toLowerCase())
+        ['topic', 'paper', 'relationship', 'method', 'dataset', 'gap'].includes((n.node_type || 'paper').toLowerCase())
       );
     }
 
@@ -347,7 +356,7 @@ export default function KnowledgeGraphView() {
     }
 
     const validNodeIds = new Set(filteredNodes.map(n => n.id));
-    let filteredEdges = edgesPool.filter(e => validNodeIds.has(e.source) && validNodeIds.has(e.target));
+    let filteredEdges = finalEdges.filter(e => validNodeIds.has(e.source) && validNodeIds.has(e.target));
 
     if (relationFilter !== 'all') {
       filteredEdges = filteredEdges.filter(e => (e.relation || '').toLowerCase() === relationFilter.toLowerCase());
@@ -357,7 +366,12 @@ export default function KnowledgeGraphView() {
       nodes: filteredNodes,
       edges: filteredEdges,
     };
-  }, [rawNodes, rawEdges, graphScope, nodeTypeFilter, relationFilter, searchTerm, searchQuery, searchResults]);
+  }, [rawNodes, rawEdges, graphScope, nodeTypeFilter, relationFilter, searchTerm, searchQuery]);
+
+
+  const paperNodesCount = useMemo(() => {
+    return (filteredData.nodes || []).filter(n => (n.node_type || '').toLowerCase() === 'paper').length;
+  }, [filteredData]);
 
   // Render Vis Network with forceAtlas2 collision avoidance
   useEffect(() => {
@@ -373,52 +387,73 @@ export default function KnowledgeGraphView() {
 
     const nodes = filteredData.nodes.map(n => {
       const ntype = (n.node_type || 'paper').toLowerCase();
-      const style = NODE_THEMES[ntype] || NODE_THEMES.paper;
       const rawLabel = n.data?.name || n.data?.title || n.data?.text || n.label || n.id;
       
       let formattedLabel;
+      let shape = 'box';
+      let borderRadius = 4;
+      let mass = 1;
+      let bg, border, textColor, highlightBg, highlightBorder;
+
       if (ntype === 'topic') {
-        formattedLabel = `🎯 TOPIC\n${wrapLabel(rawLabel, 22)}`;
+        formattedLabel = wrapLabel(rawLabel, 20);
+        shape = 'box';
+        borderRadius = 22; // Pill capsule matching sketch
+        mass = 8; // Central anchor
+        bg = isDark ? '#e4e4e7' : '#18181b';
+        border = isDark ? '#ffffff' : '#000000';
+        textColor = isDark ? '#09090b' : '#ffffff';
+        highlightBg = isDark ? '#ffffff' : '#000000';
+        highlightBorder = isDark ? '#a1a1aa' : '#52525b';
       } else if (ntype === 'paper') {
         const yearPart = n.data?.year ? `\n(${n.data.year})` : '';
-        formattedLabel = `📄 ${wrapLabel(rawLabel, 20)}${yearPart}`;
-      } else if (ntype === 'method') {
-        formattedLabel = `💡 ${wrapLabel(rawLabel, 18)}`;
-      } else if (ntype === 'dataset') {
-        formattedLabel = `📊 ${wrapLabel(rawLabel, 18)}`;
-      } else if (ntype === 'gap') {
-        formattedLabel = `🔍 ${wrapLabel(rawLabel, 18)}`;
+        formattedLabel = wrapLabel(rawLabel, 22) + yearPart;
+        shape = 'box';
+        borderRadius = 3; // Crisp rectangle matching sketch
+        mass = 2;
+        bg = isDark ? '#27272a' : '#f8fafc';
+        border = isDark ? '#71717a' : '#94a3b8';
+        textColor = isDark ? '#f4f4f5' : '#0f172a';
+        highlightBg = isDark ? '#3f3f46' : '#e2e8f0';
+        highlightBorder = isDark ? '#d4d4d8' : '#334155';
       } else {
-        formattedLabel = wrapLabel(rawLabel, 18);
+        // Inter-paper relationship, method, dataset: circular node matching sketch
+        formattedLabel = wrapLabel(rawLabel, 14);
+        shape = 'circle';
+        borderRadius = 0;
+        mass = 1;
+        bg = isDark ? '#3f3f46' : '#e2e8f0';
+        border = isDark ? '#a1a1aa' : '#64748b';
+        textColor = isDark ? '#f4f4f5' : '#0f172a';
+        highlightBg = isDark ? '#52525b' : '#cbd5e1';
+        highlightBorder = isDark ? '#f4f4f5' : '#1e293b';
       }
-
-      const mass = ntype === 'topic' ? 4 : ntype === 'paper' ? 2 : 1;
 
       return {
         id: n.id,
         label: formattedLabel,
         title: `${ntype.toUpperCase()}: ${rawLabel}`,
-        shape: 'box',
-        borderRadius: ntype === 'topic' ? 10 : 6,
+        shape,
+        borderRadius,
         mass,
         color: {
-          background: ntype === 'topic' ? (isDark ? '#0b132b' : '#f0fdf4') : (isDark && ntype === 'paper' ? '#1e3a8a' : style.bg),
-          border: ntype === 'topic' ? '#38bdf8' : (isDark && ntype === 'paper' ? '#60a5fa' : style.border),
-          highlight: { background: '#2563eb', border: '#1d4ed8' },
-          hover: { background: '#3b82f6', border: '#1d4ed8' },
+          background: bg,
+          border: border,
+          highlight: { background: highlightBg, border: highlightBorder },
+          hover: { background: highlightBg, border: highlightBorder },
         },
         font: {
-          color: ntype === 'topic' ? (isDark ? '#38bdf8' : '#0369a1') : style.text,
-          size: ntype === 'topic' ? 13 : ntype === 'paper' ? 11.5 : 10.5,
+          color: textColor,
+          size: ntype === 'topic' ? 13 : ntype === 'paper' ? 11.5 : 10,
           face: 'Plus Jakarta Sans, -apple-system, sans-serif',
-          bold: { mod: 'bold' },
+          bold: ntype === 'topic' ? { mod: 'bold' } : undefined,
         },
-        margin: ntype === 'topic' ? { top: 12, right: 16, bottom: 12, left: 16 } : { top: 8, right: 12, bottom: 8, left: 12 },
+        margin: ntype === 'topic' ? { top: 12, right: 20, bottom: 12, left: 20 } : { top: 8, right: 12, bottom: 8, left: 12 },
         borderWidth: ntype === 'topic' ? 2.5 : 1.5,
         shadow: {
           enabled: true,
-          color: ntype === 'topic' ? 'rgba(56, 189, 248, 0.4)' : 'rgba(0,0,0,0.15)',
-          size: ntype === 'topic' ? 12 : 6,
+          color: 'rgba(0, 0, 0, 0.25)',
+          size: ntype === 'topic' ? 10 : 4,
           x: 0,
           y: 2,
         },
@@ -429,47 +464,57 @@ export default function KnowledgeGraphView() {
 
     const edges = filteredData.edges.map(e => {
       const rel = (e.relation || 'relates_to').toLowerCase();
-      const color = EDGE_COLORS[rel] || EDGE_COLORS.relates_to;
       const isTopicEdge = rel === 'covers' || rel === 'investigates' || rel === 'has_paper';
-      const friendlyLabel = FRIENDLY_RELATION_LABELS[rel] || (e.label || rel.replace('_', ' '));
+      const isRelNodeEdge = (e.source && String(e.source).startsWith('rel-')) || (e.target && String(e.target).startsWith('rel-'));
+      const friendlyLabel = isRelNodeEdge ? '' : (FRIENDLY_RELATION_LABELS[rel] || (e.label || rel.replace('_', ' ')));
+
+      // Clean chalk line color matching sketch
+      const edgeLineColor = isDark
+        ? (isTopicEdge ? '#e4e4e7' : '#a1a1aa')
+        : (isTopicEdge ? '#1e293b' : '#64748b');
 
       return {
         id: `${e.source}->${e.target}:${e.relation}`,
         from: e.source,
         to: e.target,
         label: friendlyLabel,
-        color: { color, highlight: '#2563eb', hover: '#3b82f6', opacity: isTopicEdge ? 0.95 : 0.8 },
+        color: {
+          color: edgeLineColor,
+          highlight: isDark ? '#ffffff' : '#000000',
+          hover: isDark ? '#ffffff' : '#000000',
+          opacity: isTopicEdge ? 0.9 : 0.7,
+        },
         font: {
-          color: isDark ? '#94a3b8' : '#64748b',
-          size: isTopicEdge ? 10.5 : 9.5,
+          color: isDark ? '#d4d4d8' : '#475569',
+          size: 9.5,
           face: 'Plus Jakarta Sans, sans-serif',
           align: 'middle',
-          background: isDark ? '#18181b' : '#ffffff',
+          background: isDark ? '#141416' : '#ffffff',
           strokeWidth: 0,
         },
         arrows: {
-          to: { enabled: true, scaleFactor: isTopicEdge ? 0.8 : 0.65 },
+          to: { enabled: true, scaleFactor: isTopicEdge ? 0.7 : 0.55 },
         },
-        smooth: { type: 'continuous', roundness: 0.25 },
-        width: isTopicEdge ? 2.2 : 1.5,
+        smooth: { type: 'continuous', roundness: 0.15 },
+        width: isTopicEdge ? 2.0 : 1.5,
       };
     });
 
-    // forceAtlas2 with anti-collision and spacious node repulsion
+    // forceAtlas2 with spacious node repulsion matching user drawing
     const options = {
       physics: {
         solver: 'forceAtlas2Based',
         forceAtlas2Based: {
-          gravitationalConstant: -180,
-          centralGravity: 0.005,
-          springLength: 260,
-          springConstant: 0.05,
-          damping: 0.45,
-          avoidOverlap: 1.0, // Strict collision prevention
+          gravitationalConstant: -220,
+          centralGravity: 0.008,
+          springLength: 240,
+          springConstant: 0.06,
+          damping: 0.5,
+          avoidOverlap: 1.0,
         },
         stabilization: {
           enabled: true,
-          iterations: 250,
+          iterations: 300,
           updateInterval: 25,
         },
       },
@@ -737,6 +782,8 @@ export default function KnowledgeGraphView() {
         <div style={{
           display: 'flex',
           alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
           gap: 10,
           padding: '10px 14px',
           background: 'var(--bg-secondary)',
@@ -746,10 +793,29 @@ export default function KnowledgeGraphView() {
           fontSize: 12.5,
           color: 'var(--text-secondary)',
         }}>
-          <Sparkles size={15} style={{ color: 'var(--accent-blue)', flexShrink: 0 }} />
-          <span>
-            <strong>How to read:</strong> The central blue node is the <strong>Research Topic</strong>. It connects to the <strong>Research Papers</strong> studying it. Each paper branches into the <strong>Techniques</strong> it uses and <strong>Datasets</strong> it tested on. Click any node to inspect details.
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <Sparkles size={15} style={{ color: 'var(--accent-blue)', flexShrink: 0 }} />
+            <span>
+              <strong>Active Topic:</strong> {searchQuery ? <em>"{searchQuery}"</em> : 'Literature Graph'} &bull;{' '}
+              {paperNodesCount === 0 ? (
+                <span>No papers added yet. Go to <strong>Literature Search</strong> and click <strong>+ Add to Graph</strong> on papers to include them here.</span>
+              ) : (
+                <span><strong>{paperNodesCount}</strong> {paperNodesCount === 1 ? 'paper' : 'papers'} added &bull; Showing connections to methods and datasets.</span>
+              )}
+            </span>
+          </div>
+
+          {searchQuery && (
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => navigate(`/search?q=${encodeURIComponent(searchQuery)}`)}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}
+            >
+              <Search size={12} />
+              <span>Back to Literature Search</span>
+            </button>
+          )}
         </div>
       )}
 
@@ -783,18 +849,10 @@ export default function KnowledgeGraphView() {
 
             {filteredData.nodes.length > 0 && (
               <div className="graph-legend-strip">
-                <div><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: '#38bdf8', marginRight: 4 }}></span> 🎯 Topic (Main Theme)</div>
-                <div><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: NODE_THEMES.paper.bg, marginRight: 4 }}></span> 📄 Papers (Articles)</div>
-                <div><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: NODE_THEMES.method.bg, marginRight: 4 }}></span> 💡 Methods (Techniques)</div>
-                <div><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: NODE_THEMES.dataset.bg, marginRight: 4 }}></span> 📊 Datasets (Test Data)</div>
-                <div><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: NODE_THEMES.gap.bg, marginRight: 4 }}></span> 🔍 Gaps (Open Ideas)</div>
-                {graphScope === 'all' && (
-                  <>
-                    <div><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: NODE_THEMES.metric.bg, marginRight: 4 }}></span> 📈 Metrics</div>
-                    <div><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: NODE_THEMES.claim.bg, marginRight: 4 }}></span> 💬 Claims</div>
-                    <div><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: NODE_THEMES.limitation.bg, marginRight: 4 }}></span> ⚠️ Limitations</div>
-                  </>
-                )}
+                <div><span style={{ display: 'inline-block', width: 18, height: 10, borderRadius: 10, background: theme === 'dark' ? '#e4e4e7' : '#18181b', border: '1px solid #71717a', marginRight: 6, verticalAlign: 'middle' }}></span> Topic (Center)</div>
+                <div><span style={{ display: 'inline-block', width: 14, height: 10, borderRadius: 2, background: theme === 'dark' ? '#27272a' : '#f8fafc', border: '1px solid #71717a', marginRight: 6, verticalAlign: 'middle' }}></span> Research Paper (Box)</div>
+                <div><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: theme === 'dark' ? '#3f3f46' : '#e2e8f0', border: '1px solid #a1a1aa', marginRight: 6, verticalAlign: 'middle' }}></span> Relationship (Circle)</div>
+                <div><span style={{ display: 'inline-block', width: 16, height: 2, background: theme === 'dark' ? '#d4d4d8' : '#475569', marginRight: 6, verticalAlign: 'middle' }}></span> Connection</div>
               </div>
             )}
           </div>
@@ -1010,7 +1068,7 @@ export default function KnowledgeGraphView() {
                     className={`btn btn-sm ${isSelected ? 'btn-primary' : 'btn-secondary'}`}
                     style={{ fontSize: 11, padding: '2px 8px' }}
                   >
-                    {isSelected ? '✓ ' : '+ '} {p.title.slice(0, 20)}...
+                    {isSelected ? 'Selected: ' : '+ Add: '} {p.title.slice(0, 20)}...
                   </button>
                 );
               })}

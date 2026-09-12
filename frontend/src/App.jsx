@@ -7,6 +7,7 @@ import PaperDetailModal from './components/modals/PaperDetailModal';
 
 import OverviewView from './views/OverviewView';
 import LiteratureSearchView from './views/LiteratureSearchView';
+import LiteratureResultsView from './views/LiteratureResultsView';
 import KnowledgeGraphView from './views/KnowledgeGraphView';
 import PaperReaderView from './views/PaperReaderView';
 import BenchmarksView from './views/BenchmarksView';
@@ -38,6 +39,8 @@ export default function App() {
             <Route path="/" element={<OverviewView />} />
             <Route path="/overview" element={<OverviewView />} />
             <Route path="/search" element={<LiteratureSearchView />} />
+            <Route path="/search-results" element={<LiteratureResultsView />} />
+            <Route path="/search/results" element={<LiteratureResultsView />} />
             <Route path="/knowledge-graph" element={<KnowledgeGraphView />} />
             <Route path="/pdf-inspector" element={<PaperReaderView />} />
             <Route path="/experiment-studio" element={<BenchmarksView />} />

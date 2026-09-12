@@ -1,363 +1,365 @@
-import React, { useState, useEffect } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
-import { Search, Loader2, Copy, Check, FileText, Network, AlertCircle, Sparkles } from 'lucide-react';
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import {
+  Search,
+  Loader2,
+  FileText,
+  Network,
+  Sparkles,
+  ArrowRight,
+  Database,
+  SlidersHorizontal,
+  Check,
+  RotateCw,
+} from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
-const DEFAULT_SOURCES = [
-  'arxiv',
-  'openalex',
-  'semanticscholar',
-  'crossref',
-  'europepmc',
-  'pubmed',
-  'huggingface',
-  'paperswithcode',
+const AVAILABLE_SOURCES = [
+  { id: 'arxiv', name: 'arXiv', desc: 'Preprints & CS/AI papers' },
+  { id: 'openalex', name: 'OpenAlex', desc: '250M+ global research corpus' },
+  { id: 'semanticscholar', name: 'Semantic Scholar', desc: 'Citation graph & influence' },
+  { id: 'crossref', name: 'Crossref', desc: 'Official DOI publisher metadata' },
+  { id: 'europepmc', name: 'Europe PMC', desc: 'Biomedical & life sciences' },
+  { id: 'pubmed', name: 'PubMed', desc: 'NIH National Library of Medicine' },
+  { id: 'huggingface', name: 'Hugging Face', desc: 'Model weights & datasets' },
+  { id: 'paperswithcode', name: 'Papers with Code', desc: 'SOTA benchmarks & repos' },
+];
+
+const SUGGESTED_TOPICS = [
+  'Attention Is All You Need',
+  'Direct Preference Optimization (DPO)',
+  'Diffusion Models for Image Synthesis',
+  'Mamba: Linear-Time Sequence Modeling',
+  'Retrieval-Augmented Generation (RAG)',
+  'Graph Neural Networks for Drug Discovery',
+  'Chain-of-Thought Prompting in LLMs',
+  'Self-Rewarding Language Models',
 ];
 
 export default function LiteratureSearchView() {
-  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const {
-    openPaperModal,
-    setActiveReaderPaper,
-    addComparisonPaper,
-    comparisonPapers,
-    sessionId,
-    setSessionId,
     searchQuery: globalQuery,
-    setSearchQuery: setGlobalQuery,
     searchResults: results,
-    setSearchResults: setResults,
-    sourceCounts,
-    setSourceCounts,
     selectedSources,
     setSelectedSources,
+    performSearch,
+    searchLoading,
+    searchError,
   } = useApp();
 
-  const [query, setQuery] = useState(searchParams.get('q') || globalQuery || '');
-  const [limit, setLimit] = useState(5);
-  const [loading, setLoading] = useState(false);
-  const [searched, setSearched] = useState(results.length > 0 || !!globalQuery);
-  const [copiedBibId, setCopiedBibId] = useState(null);
-  const [ingestedMap, setIngestedMap] = useState({});
-  const [errorMessage, setErrorMessage] = useState(null);
+  const [query, setQuery] = useState(globalQuery || '');
+  const [limit, setLimit] = useState(10);
 
-  useEffect(() => {
-    const q = searchParams.get('q');
-    if (q && q !== globalQuery) {
-      setQuery(q);
-      setGlobalQuery(q);
-      executeSearch(q);
-    }
-  }, [searchParams]);
-
-  const toggleSource = (src) => {
+  const toggleSource = (srcId) => {
     setSelectedSources(prev =>
-      prev.includes(src) ? prev.filter(s => s !== src) : [...prev, src]
+      prev.includes(srcId) ? prev.filter(s => s !== srcId) : [...prev, srcId]
     );
   };
 
-  const executeSearch = async (searchQueryText) => {
-    const q = (searchQueryText || query).trim();
+  const selectAllSources = () => {
+    setSelectedSources(AVAILABLE_SOURCES.map(s => s.id));
+  };
+
+  const handleSearchSubmit = async (e) => {
+    if (e) e.preventDefault();
+    const q = query.trim();
     if (!q) return;
 
-    setLoading(true);
-    setSearched(true);
-    setErrorMessage(null);
-    setGlobalQuery(q);
-
-    try {
-      const res = await fetch('/api/v1/search/unified', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query: q,
-          sources: selectedSources,
-          limit_per_source: Number(limit),
-          session_id: sessionId,
-        }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        setResults(data.papers || []);
-        setSourceCounts(data.source_breakdown || {});
-        if (data.session_id) {
-          setSessionId(data.session_id);
-        }
-      } else {
-        const err = await res.text();
-        setErrorMessage(`Search query returned an error: ${err}`);
-      }
-    } catch (err) {
-      setErrorMessage(`Network error connecting to backend: ${err.message}`);
-    } finally {
-      setLoading(false);
-    }
+    // Navigate to the View Results page immediately; performSearch runs in background/context
+    performSearch(q, limit, selectedSources);
+    navigate('/search-results');
   };
 
-
-  const handleFormSubmit = (e) => {
-    e.preventDefault();
-    if (query.trim()) {
-      setSearchParams({ q: query.trim() });
-      executeSearch(query.trim());
-    }
-  };
-
-  const copyBibTeX = (paper) => {
-    const paperId = paper.id || paper.arxiv_id || 'paper2024';
-    const cleanKey = paperId.replace(/[^a-zA-Z0-9]/g, '');
-    const firstAuthor = paper.authors && paper.authors.length > 0
-      ? (typeof paper.authors[0] === 'string' ? paper.authors[0] : paper.authors[0].name || 'Author')
-      : 'Author';
-    const bibtex = `@article{${cleanKey || 'ref'},
-  title={${paper.title || 'Untitled'}},
-  author={${firstAuthor} and others},
-  journal={Research Copilot Knowledge Base},
-  year={${paper.year || 2024}}
-}`;
-    navigator.clipboard.writeText(bibtex);
-    setCopiedBibId(paperId);
-    setTimeout(() => setCopiedBibId(null), 2000);
-  };
-
-  const openInReader = (paper) => {
-    setActiveReaderPaper(paper);
-    navigate('/pdf-inspector');
-  };
-
-  const handleIngestToGraph = async (paper) => {
-    const pId = paper.id || paper.arxiv_id || paper.canonical_id || `paper-${paper.title?.slice(0, 15)}`;
-    const currentTopic = query || searchQuery || 'General Research Literature';
-    setIngestedMap(prev => ({ ...prev, [pId]: 'loading' }));
-
-    try {
-      const res = await fetch('/api/v1/graph/ingest-paper', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          topic: currentTopic,
-          paper_data: {
-            id: pId,
-            title: paper.title,
-            year: paper.year,
-            authors: (paper.authors || []).map(a => typeof a === 'string' ? a : a.name || String(a)),
-            methods: paper.topics && paper.topics.length > 0 ? paper.topics.slice(0, 3) : ['Empirical Method'],
-            datasets: paper.topics && paper.topics.length > 3 ? paper.topics.slice(3, 5) : ['Benchmark Evaluation'],
-            metrics: { Impact: String(paper.citation_count || 1) },
-            claims: paper.abstract ? [{ claim: paper.abstract.slice(0, 100), verified: true }] : [],
-            limitations: [],
-            cited_papers: paper.referenced_works || [],
-          }
-        }),
-      });
-
-      if (res.ok) {
-        setIngestedMap(prev => ({ ...prev, [pId]: 'done' }));
-      } else {
-        setIngestedMap(prev => ({ ...prev, [pId]: 'error' }));
-      }
-    } catch {
-      setIngestedMap(prev => ({ ...prev, [pId]: 'error' }));
-    }
+  const handleSelectSuggestedTopic = (topic) => {
+    setQuery(topic);
+    performSearch(topic, limit, selectedSources);
+    navigate('/search-results');
   };
 
   return (
-    <section id="view-search" className="view-panel active">
-      <div className="panel-header">
+    <section id="view-search-home" className="view-panel active">
+      {/* Top 2-Page Segmented Navigation */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, borderBottom: '1px solid var(--border-subtle)', paddingBottom: 10 }}>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button
+            className="btn btn-primary btn-sm"
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <Search size={13} />
+            <span>Search Page</span>
+          </button>
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={() => navigate('/search-results')}
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <FileText size={13} />
+            <span>View Founded Papers ({results.length})</span>
+          </button>
+        </div>
+
+        {results.length > 0 && (
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={() => navigate('/search-results')}
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <span>View Results ({results.length})</span>
+            <ArrowRight size={13} />
+          </button>
+        )}
+      </div>
+
+      {/* Main Panel Header */}
+      <div className="panel-header" style={{ marginBottom: 20 }}>
         <div>
-          <h1>Scientific Literature Search</h1>
+          <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>
+            Scientific Literature Search
+          </h1>
           <p className="panel-subtitle">
-            Query 8 scientific database connectors with automated deduplication & citation schema normalization.
+            Search across 8 scientific databases in parallel with automated deduplication, citation mapping, and legal open-access full-text retrieval.
           </p>
         </div>
       </div>
 
-      <div className="search-bar-box">
-        <form onSubmit={handleFormSubmit} className="search-input-row">
-          <div className="search-input-wrapper">
-            <Search size={15} style={{ color: 'var(--text-muted)' }} />
-            <input
-              type="text"
-              id="search-query-input"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Enter research topic, paper title, or DOI (e.g. 'diffusion models protein backbone')..."
-            />
+      {/* Active Session Notification if results already exist */}
+      {results.length > 0 && (
+        <div
+          className="card"
+          style={{
+            marginBottom: 20,
+            padding: '12px 16px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            background: 'var(--bg-subtle)',
+            border: '1px solid var(--border-subtle)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <FileText size={16} style={{ color: 'var(--accent-blue)' }} />
+            <span style={{ fontSize: 13, color: 'var(--text-primary)' }}>
+              You currently have <strong>{results.length} founded research papers</strong> loaded for "<em>{globalQuery}</em>".
+            </span>
           </div>
-          <button type="submit" className="btn btn-primary" id="btn-execute-search">
-            Execute Search
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={() => navigate('/search-results')}
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <span>Go to Results View</span>
+            <ArrowRight size={13} />
           </button>
+        </div>
+      )}
+
+      {/* PRIMARY SEARCH BOX CARD */}
+      <div className="card" style={{ padding: '24px 22px', marginBottom: 24 }}>
+        <form onSubmit={handleSearchSubmit}>
+          {/* Main Search Input */}
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 18 }}>
+            <div
+              style={{
+                flex: 1,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                background: 'var(--bg-input)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: 'var(--radius-sm)',
+                padding: '4px 14px',
+              }}
+            >
+              <Search size={18} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+              <input
+                type="text"
+                id="literature-search-input"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Enter scientific topic, paper title, DOI, or arXiv identifier (e.g. Attention Is All You Need)..."
+                autoFocus
+                style={{
+                  flex: 1,
+                  background: 'transparent',
+                  border: 'none',
+                  outline: 'none',
+                  color: 'var(--text-primary)',
+                  fontSize: 14.5,
+                  padding: '10px 0',
+                }}
+              />
+              {query && (
+                <button
+                  type="button"
+                  onClick={() => setQuery('')}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 13 }}
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={searchLoading || !query.trim()}
+              style={{ padding: '12px 22px', fontSize: 14, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}
+            >
+              {searchLoading ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" />
+                  <span>Searching...</span>
+                </>
+              ) : (
+                <>
+                  <Search size={16} />
+                  <span>Search Research Papers</span>
+                  <ArrowRight size={14} />
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* Database Connectors Selector */}
+          <div style={{ paddingTop: 14, borderTop: '1px solid var(--border-subtle)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Database size={13} style={{ color: 'var(--text-muted)' }} />
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>
+                  Scientific Database Connectors ({selectedSources.length} Active)
+                </span>
+              </div>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                <button
+                  type="button"
+                  onClick={selectAllSources}
+                  style={{ background: 'none', border: 'none', color: 'var(--accent-blue)', fontSize: 11.5, cursor: 'pointer', fontWeight: 500 }}
+                >
+                  Select All
+                </button>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>|</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Limit/source:</span>
+                  <select
+                    value={limit}
+                    onChange={(e) => setLimit(Number(e.target.value))}
+                    style={{
+                      padding: '3px 8px',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: 'var(--radius-sm)',
+                      background: 'var(--bg-input)',
+                      color: 'var(--text-primary)',
+                      fontSize: 12,
+                    }}
+                  >
+                    <option value={5}>5 papers</option>
+                    <option value={10}>10 papers</option>
+                    <option value={15}>15 papers</option>
+                    <option value={20}>20 papers</option>
+                    <option value={25}>25 papers</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Source Pill Chips */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {AVAILABLE_SOURCES.map(source => {
+                const isSelected = selectedSources.includes(source.id);
+                return (
+                  <button
+                    key={source.id}
+                    type="button"
+                    onClick={() => toggleSource(source.id)}
+                    className={`btn btn-sm ${isSelected ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{
+                      padding: '4px 12px',
+                      fontSize: 12,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      borderRadius: 'var(--radius-pill)',
+                    }}
+                    title={source.desc}
+                  >
+                    {isSelected && <Check size={11} />}
+                    <span>{source.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </form>
 
-        <div className="filter-chips-row">
-          <div className="chip-list">
-            {DEFAULT_SOURCES.map((src) => (
-              <label key={src} className="filter-chip">
-                <input
-                  type="checkbox"
-                  value={src}
-                  checked={selectedSources.includes(src)}
-                  onChange={() => toggleSource(src)}
-                />
-                <span style={{ textTransform: 'capitalize' }}>
-                  {src === 'huggingface' ? 'HuggingFace' : src === 'paperswithcode' ? 'PapersWithCode' : src === 'semanticscholar' ? 'Semantic Scholar' : src === 'europepmc' ? 'Europe PMC' : src}
-                </span>
-              </label>
-            ))}
+        {searchError && (
+          <div style={{ marginTop: 14, fontSize: 12.5, color: 'var(--accent-rose)' }}>
+            {searchError}
           </div>
+        )}
+      </div>
 
-          <div className="limit-selector" style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            Limit per source: <strong id="limit-val" style={{ color: 'var(--text-primary)' }}>{limit}</strong>
-            <input
-              type="range"
-              id="search-limit"
-              min="1"
-              max="20"
-              value={limit}
-              onChange={(e) => setLimit(e.target.value)}
-              style={{ marginLeft: 6, verticalAlign: 'middle' }}
-            />
-          </div>
+      {/* SUGGESTED / TRENDING RESEARCH TOPICS */}
+      <div className="card" style={{ marginBottom: 24, padding: '18px 20px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <Sparkles size={15} style={{ color: 'var(--accent-blue)' }} />
+          <h3 style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>
+            Suggested Research Topics (Click to Run Search)
+          </h3>
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {SUGGESTED_TOPICS.map((topic, i) => (
+            <button
+              key={i}
+              className="btn btn-secondary btn-sm"
+              onClick={() => handleSelectSuggestedTopic(topic)}
+              style={{
+                fontSize: 12,
+                padding: '6px 12px',
+                borderRadius: 'var(--radius-sm)',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+              }}
+            >
+              <Search size={11} style={{ color: 'var(--text-muted)' }} />
+              <span>{topic}</span>
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Loading Indicator */}
-      {loading && (
-        <div className="loading-box" id="search-loading">
-          <Loader2 size={20} className="animate-spin" style={{ color: 'var(--accent-blue)', marginBottom: 8 }} />
-          <p>Aggregating and deduplicating results across scientific database connectors...</p>
-        </div>
-      )}
-
-      {/* Error Message */}
-      {errorMessage && (
-        <div style={{ padding: 12, background: 'rgba(239, 68, 68, 0.1)', border: '1px solid var(--accent-rose)', borderRadius: 'var(--radius-sm)', marginTop: 16, color: 'var(--accent-rose)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <AlertCircle size={16} />
-          <span>{errorMessage}</span>
-        </div>
-      )}
-
-      {/* Results Header */}
-      {!loading && results.length > 0 && (
-        <div className="panel-header" id="results-header-summary" style={{ marginTop: 16 }}>
-          <h2 style={{ fontSize: 15 }}>
-            Search Results <span id="total-results-tag" className="badge badge-neutral">{results.length} Items Found</span>
-          </h2>
-          <div id="source-breakdown-tags" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {Object.entries(sourceCounts).map(([src, count]) => (
-              <span key={src} className="badge badge-blue">
-                {src}: {count}
-              </span>
-            ))}
+      {/* ARCHITECTURAL CAPABILITIES GRID */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14 }}>
+        <div className="card" style={{ padding: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <Database size={15} style={{ color: 'var(--accent-blue)' }} />
+            <h4 style={{ margin: 0, fontSize: 13.5, fontWeight: 600 }}>Multi-Source Deduplication</h4>
           </div>
+          <p style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+            Merges duplicate scientific entries across arXiv preprints, publisher DOIs, and OpenAlex records into a unified research record.
+          </p>
         </div>
-      )}
 
-      {/* Empty State */}
-      {!loading && searched && results.length === 0 && !errorMessage && (
-        <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>
-          <Search size={32} style={{ margin: '0 auto 12px', display: 'block' }} />
-          <h3 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>No papers found</h3>
-          <p style={{ fontSize: 13 }}>Try refining your search terms or enabling additional source providers.</p>
+        <div className="card" style={{ padding: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <FileText size={15} style={{ color: 'var(--accent-emerald)' }} />
+            <h4 style={{ margin: 0, fontSize: 13.5, fontWeight: 600 }}>Open Access Resolver</h4>
+          </div>
+          <p style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+            Identifies legal, unrestricted PDF full-text streams through Unpaywall, Europe PMC, and arXiv repository links.
+          </p>
         </div>
-      )}
 
-      {!searched && !loading && (
-        <div style={{ padding: 60, textAlign: 'center', color: 'var(--text-muted)' }}>
-          <Sparkles size={36} style={{ margin: '0 auto 12px', display: 'block', color: 'var(--accent-blue)' }} />
-          <h3 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6 }}>Ready to Explore Scientific Literature</h3>
-          <p style={{ fontSize: 13 }}>Enter any research query, DOI, or author name above to execute parallel multi-source search.</p>
+        <div className="card" style={{ padding: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <Network size={15} style={{ color: 'var(--accent-violet)' }} />
+            <h4 style={{ margin: 0, fontSize: 13.5, fontWeight: 600 }}>Selective Graph Ingestion</h4>
+          </div>
+          <p style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+            Only papers you explicitly choose via "+ Add to Graph" are imported into the Knowledge Graph topology.
+          </p>
         </div>
-      )}
-
-      {/* Papers Grid */}
-      <div className="papers-grid" id="papers-results-grid" style={{ marginTop: 12 }}>
-        {results.map((paper, idx) => {
-          const pId = paper.id || paper.canonical_id || `p-${idx}`;
-          const isComparing = comparisonPapers.some(p => (p.id || p.canonical_id) === pId);
-          const ingestState = ingestedMap[pId];
-
-          return (
-            <div key={pId} className="card paper-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-                  <span className="badge badge-violet" style={{ textTransform: 'uppercase' }}>
-                    {paper.primary_source || paper.source || 'Literature'}
-                  </span>
-                  {paper.year && (
-                    <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{paper.year}</span>
-                  )}
-                </div>
-
-                <h3
-                  style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6, cursor: 'pointer' }}
-                  onClick={() => openPaperModal(paper)}
-                >
-                  {paper.title}
-                </h3>
-
-                <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
-                  {(paper.authors || []).map(a => (typeof a === 'string' ? a : a.name)).slice(0, 3).join(', ')}
-                  {(paper.authors || []).length > 3 ? ' et al.' : ''}
-                </p>
-
-                <p style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.45, marginBottom: 12 }}>
-                  {paper.abstract ? paper.abstract.slice(0, 200) + '...' : 'No abstract preview provided in metadata.'}
-                </p>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 10, borderTop: '1px solid var(--border-subtle)', flexWrap: 'wrap', gap: 6 }}>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <button className="btn btn-secondary btn-sm" onClick={() => openPaperModal(paper)}>
-                    Details
-                  </button>
-                  <button className="btn btn-secondary btn-sm" onClick={() => copyBibTeX(paper)} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    {copiedBibId === pId ? (
-                      <>
-                        <Check size={12} />
-                        <span>Copied</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy size={12} />
-                        <span>BibTeX</span>
-                      </>
-                    )}
-                  </button>
-                  <button
-                    className="btn btn-primary btn-sm"
-                    onClick={() => openInReader(paper)}
-                    style={{ display: 'flex', alignItems: 'center', gap: 4 }}
-                  >
-                    <FileText size={12} />
-                    <span>Reader</span>
-                  </button>
-                  <button
-                    className="btn btn-secondary btn-sm"
-                    onClick={() => handleIngestToGraph(paper)}
-                    disabled={ingestState === 'loading' || ingestState === 'done'}
-                    style={{ display: 'flex', alignItems: 'center', gap: 4 }}
-                    title="Ingest paper into Knowledge Graph"
-                  >
-                    <Network size={12} />
-                    <span>{ingestState === 'loading' ? '...' : ingestState === 'done' ? '✓ Graph' : '+ Graph'}</span>
-                  </button>
-                </div>
-
-                <label style={{ fontSize: 11.5, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={isComparing}
-                    onChange={() => addComparisonPaper(paper)}
-                  />
-                  Compare
-                </label>
-              </div>
-            </div>
-          );
-        })}
       </div>
     </section>
   );
