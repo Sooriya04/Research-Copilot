@@ -547,3 +547,26 @@
 * **Strict Zero-Emoji Rule Enforcement**:
   * Removed all emojis across UI components, views, buttons, logs, and documentation, replacing them with crisp Lucide SVG icons.
 
+<br />
+
+## Cross-Source Open-Access PDF Resolution, Compliant Stream Proxying, and Reader Grid Layout Stability
+
+* **Cross-Source OA PDF Resolution Fallback (`src/engines/access_resolver.py`)**:
+  * Resolved missing PDF streams for OpenAlex and DOI-only documents (such as CacheGen `W4401176373` / DOI `10.1145/3651890.3672274`).
+  * Implemented automated multi-repository fallback in `resolve_identifier`: queries Semantic Scholar via DOI (`api.semanticscholar.org/graph/v1/paper/{doi}?fields=externalIds,openAccessPdf`) to resolve linked arXiv preprints (`2310.07240`) and open access locations.
+  * Added fallback title lookup on arXiv to guarantee retrieval of preprint full-text PDFs when publisher portals lack direct PDF streams.
+  * Updated OpenAlex parser to search all locations in `item.get("locations")` and clean arXiv IDs in `item.get("ids")`.
+* **Standard-Compliant PDF Proxy Engine (`src/api/routes_search.py`)**:
+  * Upgraded `GET /api/v1/pdf/proxy?url=...` to return fully buffered HTTP responses with exact `Content-Length`, `Accept-Ranges: bytes`, `Content-Type: application/pdf`, `Content-Disposition: inline; filename="paper.pdf"`, and `X-Content-Type-Options: nosniff`.
+  * Resolved browser inline canvas initialization failures in Firefox and Chromium caused by missing `Content-Length` in chunked streaming.
+  * Added automatic mirror failover to `https://export.arxiv.org/pdf/{aid}.pdf` if primary arXiv gateways are delayed or rate-limited.
+  * Managed HTTP client lifecycles using `async with httpx.AsyncClient(...) as client:`.
+* **Paper Reader Responsive Grid & Layout Fix (`frontend/src/views/PaperReaderView.jsx`, `frontend/src/styles/styles.css`)**:
+  * Fixed CSS Grid blowout where long unbreaking author lists in BibTeX blocks forced the left column to stretch to 100% width, crushing the PDF viewer column into a 5% unusable sliver.
+  * Configured `#reader-grid-container` to `grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr)` with `align-items: start`, and added `min-width: 0` and `overflow: hidden` on `#pdf-sections-content`.
+  * Set `white-space: pre-wrap`, `word-break: break-word`, and `max-width: 100%` on BibTeX code blocks to wrap long author sequences cleanly onto multiple lines.
+  * Expanded PDF viewer container to `height: 720px` with cross-browser `<object>` and fallback `<iframe>` embedding plus viewer toolbar with "Open In Tab" controls.
+  * Added real-time `resolvingPdf` loading indicator during background mirror lookup.
+  * Added on-demand **"Locate Open Access PDF"** action button in the fallback card to trigger immediate multi-source resolution.
+
+

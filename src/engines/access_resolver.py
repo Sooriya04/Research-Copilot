@@ -153,6 +153,41 @@ class AccessResolver:
                     paper = papers[0]
 
         if paper:
+            # Multi-source fallback candidate resolution if PDF or arXiv ID is missing
+            if not paper.pdf_url and not paper.arxiv_id:
+                async with httpx.AsyncClient(timeout=self.timeout, headers=self.headers) as client:
+                    # 1. Resolve DOI via Semantic Scholar to check for open access PDF or linked arXiv ID
+                    if paper.doi:
+                        try:
+                            s2_url = f"https://api.semanticscholar.org/graph/v1/paper/{paper.doi}?fields=externalIds,openAccessPdf"
+                            s2_resp = await client.get(s2_url)
+                            if s2_resp.status_code == 200:
+                                s2_data = s2_resp.json()
+                                ext_ids = s2_data.get("externalIds", {})
+                                if ext_ids.get("ArXiv"):
+                                    paper.arxiv_id = ext_ids["ArXiv"]
+                                    paper.pdf_url = f"https://arxiv.org/pdf/{paper.arxiv_id}.pdf"
+                                elif s2_data.get("openAccessPdf", {}).get("url"):
+                                    paper.pdf_url = s2_data["openAccessPdf"]["url"]
+                        except Exception as e:
+                            logger.debug("[AccessResolver] S2 DOI fallback failed: %s", e)
+
+                    # 2. If still missing, try title search on arXiv
+                    if not paper.pdf_url and not paper.arxiv_id and paper.title:
+                        try:
+                            clean_title = re.sub(r"[^a-zA-Z0-9\s]", " ", paper.title.split(":")[0]).strip()
+                            if len(clean_title) >= 4:
+                                arxiv_matches = await self.search_arxiv(clean_title, limit=3)
+                                for am in arxiv_matches:
+                                    t1 = re.sub(r"\W+", "", am.title.lower())
+                                    t2 = re.sub(r"\W+", "", paper.title.lower())
+                                    if t1 in t2 or t2 in t1 or am.title.lower().startswith(clean_title.lower()):
+                                        paper.arxiv_id = am.arxiv_id
+                                        paper.pdf_url = am.pdf_url or f"https://arxiv.org/pdf/{am.arxiv_id}.pdf"
+                                        break
+                        except Exception as e:
+                            logger.debug("[AccessResolver] arXiv title fallback search failed: %s", e)
+
             # Build access candidates
             if paper.pdf_url:
                 candidates.append(PaperAccessCandidate(
@@ -232,6 +267,9 @@ class AccessResolver:
         arxiv_id = None
         if arxiv_raw:
             arxiv_id = arxiv_raw.split("arxiv.org/abs/")[-1] if "arxiv.org/abs/" in arxiv_raw else arxiv_raw
+            if "/pdf/" in arxiv_id:
+                arxiv_id = arxiv_id.split("/pdf/")[-1]
+            arxiv_id = arxiv_id.replace(".pdf", "").replace("arxiv:", "").strip()
             
         pmid = ids.get("pmid")
         pmcid = ids.get("pmcid")
@@ -239,6 +277,13 @@ class AccessResolver:
         # Primary / Best OA Location
         best_oa = item.get("best_oa_location") or item.get("primary_location") or {}
         pdf_url = best_oa.get("pdf_url")
+        if not pdf_url:
+            for loc in item.get("locations", []):
+                if loc and loc.get("pdf_url"):
+                    pdf_url = loc.get("pdf_url")
+                    break
+        if not pdf_url and arxiv_id:
+            pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
         url = best_oa.get("landing_page_url") or item.get("id")
         is_oa = item.get("open_access", {}).get("is_oa", False) or bool(pdf_url)
         

@@ -911,6 +911,24 @@ body {
   padding: 24px;
 }
 
+#reader-grid-container {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  gap: 24px;
+  align-items: start;
+}
+
+#pdf-sections-content {
+  min-width: 0;
+  overflow: hidden;
+}
+
+@media (max-width: 1024px) {
+  #reader-grid-container {
+    grid-template-columns: 1fr;
+  }
+}
+
 .doc-section {
   margin-bottom: 18px;
 }
