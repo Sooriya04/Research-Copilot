@@ -304,7 +304,7 @@ export default function PaperReaderView() {
           </button>
           <label className="btn btn-secondary" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
             <Upload size={14} />
-            <span>+ Upload PDF</span>
+            <span>Upload PDF</span>
             <input type="file" accept="application/pdf" onChange={handleFileUpload} style={{ display: 'none' }} />
           </label>
         </div>
@@ -569,7 +569,7 @@ export default function PaperReaderView() {
                     )}
                     <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
                       <Upload size={13} />
-                      <span>+ Upload PDF</span>
+                      <span>Upload PDF</span>
                       <input type="file" accept="application/pdf" onChange={handleFileUpload} style={{ display: 'none' }} />
                     </label>
                   </div>

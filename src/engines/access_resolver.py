@@ -133,6 +133,32 @@ class AccessResolver:
                     logger.warning("[arXiv] Search failed with status %d", resp.status_code)
         except Exception as e:
             logger.error("[arXiv] Search exception: %s", e)
+
+        # Resilient fallback if arXiv API timed out for a direct arXiv ID
+        if not papers and is_arxiv_id:
+            try:
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    s2_url = f"https://api.semanticscholar.org/graph/v1/paper/arXiv:{clean_id}?fields=title,abstract,authors,year,isOpenAccess,openAccessPdf"
+                    resp = await client.get(s2_url)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        title = data.get("title")
+                        if title:
+                            papers.append(Paper(
+                                id=f"arxiv:{clean_id}",
+                                title=title,
+                                abstract=data.get("abstract") or "",
+                                authors=[Author(name=a.get("name", "Author")) for a in data.get("authors", [])],
+                                year=data.get("year"),
+                                arxiv_id=clean_id,
+                                primary_source="arxiv",
+                                url=f"https://arxiv.org/abs/{clean_id}",
+                                pdf_url=f"https://arxiv.org/pdf/{clean_id}.pdf",
+                                is_open_access=True,
+                            ))
+            except Exception:
+                pass
+
         return papers
 
     async def resolve_identifier(self, identifier: str) -> PaperAccessResponse:

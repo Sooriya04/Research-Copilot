@@ -1,6 +1,8 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 
 const AppContext = createContext(null);
+
+const getWsKey = (wsId, key) => (wsId ? `rc_ws_${wsId}_${key}` : `rc_${key}`);
 
 export function AppProvider({ children }) {
   const [theme, setTheme] = useState(() => localStorage.getItem('rc_theme') || 'light');
@@ -8,25 +10,53 @@ export function AppProvider({ children }) {
   const [isCmdPaletteOpen, setIsCmdPaletteOpen] = useState(false);
   const [selectedPaper, setSelectedPaper] = useState(null);
   const [systemConnected, setSystemConnected] = useState(true);
-  
-  // Persisted search & literature state
-  const [searchQuery, setSearchQuery] = useState(() => localStorage.getItem('rc_search_query') || '');
+
+  // Workspace Management State
+  const [workspaces, setWorkspaces] = useState([]);
+  const [activeWorkspace, setActiveWorkspace] = useState(() => {
+    try {
+      const saved = localStorage.getItem('rc_active_workspace');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [isWorkspaceModalOpen, setIsWorkspaceModalOpen] = useState(false);
+  const [workspaceModalInitialTitle, setWorkspaceModalInitialTitle] = useState('');
+
+  // Active Workspace ID reference for state scoping
+  const activeWsId = activeWorkspace?.id || null;
+
+  // Workspace-Scoped States
+  const [searchQuery, setSearchQuery] = useState(() => {
+    try {
+      const ws = JSON.parse(localStorage.getItem('rc_active_workspace') || 'null');
+      return localStorage.getItem(getWsKey(ws?.id, 'search_query')) || (ws?.title || '');
+    } catch {
+      return '';
+    }
+  });
+
   const [searchResults, setSearchResults] = useState(() => {
     try {
-      const saved = localStorage.getItem('rc_search_results');
+      const ws = JSON.parse(localStorage.getItem('rc_active_workspace') || 'null');
+      const saved = localStorage.getItem(getWsKey(ws?.id, 'search_results'));
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
     }
   });
+
   const [sourceCounts, setSourceCounts] = useState(() => {
     try {
-      const saved = localStorage.getItem('rc_source_counts');
+      const ws = JSON.parse(localStorage.getItem('rc_active_workspace') || 'null');
+      const saved = localStorage.getItem(getWsKey(ws?.id, 'source_counts'));
       return saved ? JSON.parse(saved) : {};
     } catch {
       return {};
     }
   });
+
   const [selectedSources, setSelectedSources] = useState(() => {
     try {
       const saved = localStorage.getItem('rc_sources');
@@ -54,79 +84,193 @@ export function AppProvider({ children }) {
     }
   });
 
-  // Persisted comparisons
   const [comparisonPapers, setComparisonPapers] = useState(() => {
     try {
-      const saved = localStorage.getItem('rc_comparison_papers');
+      const ws = JSON.parse(localStorage.getItem('rc_active_workspace') || 'null');
+      const saved = localStorage.getItem(getWsKey(ws?.id, 'comparison_papers'));
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
     }
   });
 
-  // Persisted reader paper
   const [activeReaderPaper, setActiveReaderPaperState] = useState(() => {
     try {
-      const saved = localStorage.getItem('rc_reader_paper');
+      const ws = JSON.parse(localStorage.getItem('rc_active_workspace') || 'null');
+      const saved = localStorage.getItem(getWsKey(ws?.id, 'reader_paper'));
       return saved ? JSON.parse(saved) : null;
     } catch {
       return null;
     }
   });
 
-  // Persisted papers added to graph
   const [addedToGraphPaperIds, setAddedToGraphPaperIds] = useState(() => {
     try {
-      const saved = localStorage.getItem('rc_added_graph_papers');
+      const ws = JSON.parse(localStorage.getItem('rc_active_workspace') || 'null');
+      const saved = localStorage.getItem(getWsKey(ws?.id, 'added_graph_papers'));
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
     }
   });
 
-  // Save added to graph papers
-  useEffect(() => {
-    localStorage.setItem('rc_added_graph_papers', JSON.stringify(addedToGraphPaperIds));
-  }, [addedToGraphPaperIds]);
+  // Fetch workspaces on initial mount
+  const fetchWorkspaces = async () => {
+    try {
+      const res = await fetch('/api/v1/workbench/workspaces');
+      if (res.ok) {
+        const list = await res.json();
+        setWorkspaces(list);
+        if (list.length > 0) {
+          const storedId = localStorage.getItem('rc_active_workspace_id');
+          const found = list.find((w) => w.id === storedId) || list[0];
+          setActiveWorkspace(found);
+          localStorage.setItem('rc_active_workspace', JSON.stringify(found));
+          localStorage.setItem('rc_active_workspace_id', found.id);
+          loadWorkspaceState(found.id, found.title);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch workspaces:', err);
+    }
+  };
 
-  // Save session ID
   useEffect(() => {
-    localStorage.setItem('rc_session_id', sessionId);
-  }, [sessionId]);
+    fetchWorkspaces();
+  }, []);
 
-  // Save search query
-  useEffect(() => {
-    localStorage.setItem('rc_search_query', searchQuery);
-  }, [searchQuery]);
+  // Helper to load scoped state for a workspace
+  const loadWorkspaceState = (wsId, defaultTitle = '') => {
+    try {
+      const q = localStorage.getItem(getWsKey(wsId, 'search_query')) ?? (defaultTitle || '');
+      const savedResults = localStorage.getItem(getWsKey(wsId, 'search_results'));
+      const savedCounts = localStorage.getItem(getWsKey(wsId, 'source_counts'));
+      const savedGraphs = localStorage.getItem(getWsKey(wsId, 'added_graph_papers'));
+      const savedReader = localStorage.getItem(getWsKey(wsId, 'reader_paper'));
+      const savedComparisons = localStorage.getItem(getWsKey(wsId, 'comparison_papers'));
 
-  // Save search results
-  useEffect(() => {
-    localStorage.setItem('rc_search_results', JSON.stringify(searchResults));
-  }, [searchResults]);
+      setSearchQuery(q);
+      setSearchResults(savedResults ? JSON.parse(savedResults) : []);
+      setSourceCounts(savedCounts ? JSON.parse(savedCounts) : {});
+      setAddedToGraphPaperIds(savedGraphs ? JSON.parse(savedGraphs) : []);
+      setActiveReaderPaperState(savedReader ? JSON.parse(savedReader) : null);
+      setComparisonPapers(savedComparisons ? JSON.parse(savedComparisons) : []);
+    } catch (e) {
+      console.error('Error loading workspace state:', e);
+    }
+  };
 
-  // Save source counts
+  // Helper to persist scoped state for active workspace
   useEffect(() => {
-    localStorage.setItem('rc_source_counts', JSON.stringify(sourceCounts));
-  }, [sourceCounts]);
+    if (activeWsId) {
+      localStorage.setItem(getWsKey(activeWsId, 'search_query'), searchQuery);
+      localStorage.setItem(getWsKey(activeWsId, 'search_results'), JSON.stringify(searchResults));
+      localStorage.setItem(getWsKey(activeWsId, 'source_counts'), JSON.stringify(sourceCounts));
+      localStorage.setItem(getWsKey(activeWsId, 'added_graph_papers'), JSON.stringify(addedToGraphPaperIds));
+      localStorage.setItem(getWsKey(activeWsId, 'comparison_papers'), JSON.stringify(comparisonPapers));
+      if (activeReaderPaper) {
+        localStorage.setItem(getWsKey(activeWsId, 'reader_paper'), JSON.stringify(activeReaderPaper));
+      } else {
+        localStorage.removeItem(getWsKey(activeWsId, 'reader_paper'));
+      }
+    }
+  }, [activeWsId, searchQuery, searchResults, sourceCounts, addedToGraphPaperIds, comparisonPapers, activeReaderPaper]);
+
+  const openWorkspaceModal = (initialTitle = '') => {
+    setWorkspaceModalInitialTitle(initialTitle || '');
+    setIsWorkspaceModalOpen(true);
+  };
+
+  const closeWorkspaceModal = () => {
+    setIsWorkspaceModalOpen(false);
+    setWorkspaceModalInitialTitle('');
+  };
+
+  const createWorkspace = async (title, description = '') => {
+    try {
+      const res = await fetch('/api/v1/workbench/workspaces', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, description }),
+      });
+      if (res.ok) {
+        const newWs = await res.json();
+        setWorkspaces((prev) => [newWs, ...prev.filter((w) => w.id !== newWs.id)]);
+        setActiveWorkspace(newWs);
+        localStorage.setItem('rc_active_workspace', JSON.stringify(newWs));
+        localStorage.setItem('rc_active_workspace_id', newWs.id);
+
+        // Initialize clean state for this fresh workspace
+        const initialQuery = title.trim();
+        setSearchQuery(initialQuery);
+        setSearchResults([]);
+        setSourceCounts({});
+        setAddedToGraphPaperIds([]);
+        setActiveReaderPaperState(null);
+        setComparisonPapers([]);
+
+        localStorage.setItem(getWsKey(newWs.id, 'search_query'), initialQuery);
+        localStorage.setItem(getWsKey(newWs.id, 'search_results'), '[]');
+        localStorage.setItem(getWsKey(newWs.id, 'source_counts'), '{}');
+        localStorage.setItem(getWsKey(newWs.id, 'added_graph_papers'), '[]');
+        localStorage.setItem(getWsKey(newWs.id, 'comparison_papers'), '[]');
+        localStorage.removeItem(getWsKey(newWs.id, 'reader_paper'));
+
+        closeWorkspaceModal();
+        return newWs;
+      }
+    } catch (err) {
+      console.error('Failed to create workspace:', err);
+    }
+    return null;
+  };
+
+  const switchWorkspace = (wsId) => {
+    const found = workspaces.find((w) => w.id === wsId);
+    if (found) {
+      setActiveWorkspace(found);
+      localStorage.setItem('rc_active_workspace', JSON.stringify(found));
+      localStorage.setItem('rc_active_workspace_id', found.id);
+      loadWorkspaceState(found.id, found.title);
+    }
+  };
+
+  const deleteWorkspace = async (wsId) => {
+    try {
+      await fetch(`/api/v1/workbench/workspaces/${wsId}`, { method: 'DELETE' });
+      const filtered = workspaces.filter((w) => w.id !== wsId);
+      setWorkspaces(filtered);
+      if (activeWorkspace && activeWorkspace.id === wsId) {
+        if (filtered.length > 0) {
+          setActiveWorkspace(filtered[0]);
+          localStorage.setItem('rc_active_workspace', JSON.stringify(filtered[0]));
+          localStorage.setItem('rc_active_workspace_id', filtered[0].id);
+          loadWorkspaceState(filtered[0].id, filtered[0].title);
+        } else {
+          setActiveWorkspace(null);
+          localStorage.removeItem('rc_active_workspace');
+          localStorage.removeItem('rc_active_workspace_id');
+          setSearchQuery('');
+          setSearchResults([]);
+          setSourceCounts({});
+          setAddedToGraphPaperIds([]);
+          setActiveReaderPaperState(null);
+          setComparisonPapers([]);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to delete workspace:', err);
+    }
+  };
 
   // Save selected sources
   useEffect(() => {
     localStorage.setItem('rc_sources', JSON.stringify(selectedSources));
   }, [selectedSources]);
 
-  // Save comparison papers
-  useEffect(() => {
-    localStorage.setItem('rc_comparison_papers', JSON.stringify(comparisonPapers));
-  }, [comparisonPapers]);
-
-  // Save active reader paper
+  // Save active reader paper helper
   const setActiveReaderPaper = (paper) => {
     setActiveReaderPaperState(paper);
-    if (paper) {
-      localStorage.setItem('rc_reader_paper', JSON.stringify(paper));
-    } else {
-      localStorage.removeItem('rc_reader_paper');
-    }
   };
 
   // Apply theme to document.body
@@ -143,7 +287,7 @@ export function AppProvider({ children }) {
 
   // Toggle theme
   const toggleTheme = () => {
-    setTheme(prev => (prev === 'light' ? 'dark' : 'light'));
+    setTheme((prev) => (prev === 'light' ? 'dark' : 'light'));
   };
 
   // Check system health
@@ -174,7 +318,7 @@ export function AppProvider({ children }) {
       }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
-        setIsCmdPaletteOpen(prev => !prev);
+        setIsCmdPaletteOpen((prev) => !prev);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -183,17 +327,17 @@ export function AppProvider({ children }) {
 
   const addComparisonPaper = (paper) => {
     if (comparisonPapers.length >= 5) {
-      alert("Maximum 5 papers can be compared simultaneously.");
+      alert('Maximum 5 papers can be compared simultaneously.');
       return;
     }
     const pId = paper.id || paper.canonical_id;
-    if (!comparisonPapers.some(p => (p.id || p.canonical_id) === pId)) {
-      setComparisonPapers(prev => [...prev, paper]);
+    if (!comparisonPapers.some((p) => (p.id || p.canonical_id) === pId)) {
+      setComparisonPapers((prev) => [...prev, paper]);
     }
   };
 
   const removeComparisonPaper = (paperId) => {
-    setComparisonPapers(prev => prev.filter(p => (p.id || p.canonical_id) !== paperId));
+    setComparisonPapers((prev) => prev.filter((p) => (p.id || p.canonical_id) !== paperId));
   };
 
   const clearComparisonPapers = () => {
@@ -206,6 +350,11 @@ export function AppProvider({ children }) {
   const performSearch = async (queryText, limitNum = 10, sourcesToUse = null) => {
     const q = (queryText || searchQuery).trim();
     if (!q) return [];
+
+    let wsToUse = activeWorkspace;
+    if (!wsToUse) {
+      wsToUse = await createWorkspace(q, `Scientific investigation on "${q}".`);
+    }
 
     setSearchLoading(true);
     setSearchError(null);
@@ -221,7 +370,7 @@ export function AppProvider({ children }) {
           query: q,
           sources: sourcesToUse || selectedSources,
           limit_per_source: Number(limitNum),
-          session_id: sessionId,
+          session_id: wsToUse ? wsToUse.id : sessionId,
         }),
       });
 
@@ -253,7 +402,6 @@ export function AppProvider({ children }) {
     setSearchQuery(newQuery);
     setSearchResults([]);
     setSourceCounts({});
-    setAddedToGraphPaperIds([]);
   };
 
   return (
@@ -264,6 +412,16 @@ export function AppProvider({ children }) {
         sessionId,
         setSessionId,
         createNewSession,
+        workspaces,
+        activeWorkspace,
+        isWorkspaceModalOpen,
+        workspaceModalInitialTitle,
+        openWorkspaceModal,
+        closeWorkspaceModal,
+        createWorkspace,
+        switchWorkspace,
+        deleteWorkspace,
+        fetchWorkspaces,
         searchQuery,
         setSearchQuery,
         searchResults,
@@ -306,4 +464,3 @@ export function useApp() {
   }
   return context;
 }
-

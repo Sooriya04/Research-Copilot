@@ -230,138 +230,180 @@ export default function LiteratureResultsView() {
         </div>
       </div>
 
-      {/* IN-PAGE SEARCH & FILTER TOOLBAR WITH SEARCH ICONS */}
-      <div className="card" style={{ marginBottom: 18, padding: '14px 16px' }}>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          {/* Search Input with Search Icon */}
-          <div
-            style={{
-              flex: 1,
-              minWidth: 280,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              background: 'var(--bg-input)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: 'var(--radius-sm)',
-              padding: '0 12px',
-            }}
-          >
-            <Search size={15} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
-            <input
-              type="text"
-              id="filter-founded-papers-input"
-              value={filterTerm}
-              onChange={(e) => setFilterTerm(e.target.value)}
-              placeholder="Search within founded research papers (filter by title, author, keyword, abstract)..."
+      {/* IN-PAGE SEARCH & FILTER TOOLBAR (Appears only once papers are found) */}
+      {!searchLoading && results.length > 0 && (
+        <div className="card" style={{ marginBottom: 18, padding: '14px 16px' }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            {/* Search Input with Search Icon */}
+            <div
               style={{
                 flex: 1,
-                background: 'transparent',
-                border: 'none',
-                outline: 'none',
-                color: 'var(--text-primary)',
-                fontSize: 13,
-                padding: '8px 0',
-              }}
-            />
-            {filterTerm && (
-              <button
-                onClick={() => setFilterTerm('')}
-                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 0 }}
-                title="Clear filter"
-              >
-                <X size={14} />
-              </button>
-            )}
-          </div>
-
-          {/* Sort Selector */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Sort:</span>
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
-              style={{
-                padding: '6px 10px',
+                minWidth: 280,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                background: 'var(--bg-input)',
                 border: '1px solid var(--border-subtle)',
                 borderRadius: 'var(--radius-sm)',
-                background: 'var(--bg-input)',
-                color: 'var(--text-primary)',
-                fontSize: 12.5,
+                padding: '0 12px',
               }}
             >
-              <option value="relevance">Relevance</option>
-              <option value="citations">Citations (High to Low)</option>
-              <option value="year">Publication Year (Newest)</option>
-            </select>
-          </div>
-        </div>
+              <Search size={15} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+              <input
+                type="text"
+                id="filter-founded-papers-input"
+                value={filterTerm}
+                onChange={(e) => setFilterTerm(e.target.value)}
+                placeholder="Search within founded research papers (filter by title, author, keyword, abstract)..."
+                style={{
+                  flex: 1,
+                  background: 'transparent',
+                  border: 'none',
+                  outline: 'none',
+                  color: 'var(--text-primary)',
+                  fontSize: 13,
+                  padding: '8px 0',
+                }}
+              />
+              {filterTerm && (
+                <button
+                  onClick={() => setFilterTerm('')}
+                  style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 0 }}
+                  title="Clear filter"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
 
-        {/* Filter Chips Row */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--border-subtle)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 11.5, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', marginRight: 4 }}>
-              Filter:
-            </span>
-
-            <button
-              className={`btn btn-sm ${sourceFilter === 'all' && !onlyOpenAccess && !onlyInGraph ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => {
-                setSourceFilter('all');
-                setOnlyOpenAccess(false);
-                setOnlyInGraph(false);
-              }}
-              style={{ padding: '3px 10px', fontSize: 11.5 }}
-            >
-              All ({results.length})
-            </button>
-
-            <button
-              className={`btn btn-sm ${onlyOpenAccess ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => setOnlyOpenAccess(prev => !prev)}
-              style={{ padding: '3px 10px', fontSize: 11.5 }}
-            >
-              Open Access ({openAccessCount})
-            </button>
-
-            <button
-              className={`btn btn-sm ${onlyInGraph ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => setOnlyInGraph(prev => !prev)}
-              style={{ padding: '3px 10px', fontSize: 11.5 }}
-            >
-              Added to Graph ({inGraphCount})
-            </button>
-
-            {availableSources.map(src => (
-              <button
-                key={src}
-                className={`btn btn-sm ${sourceFilter === src ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => setSourceFilter(prev => (prev === src ? 'all' : src))}
-                style={{ padding: '3px 10px', fontSize: 11.5, textTransform: 'uppercase' }}
+            {/* Sort Selector */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Sort:</span>
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value)}
+                style={{
+                  padding: '6px 10px',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-sm)',
+                  background: 'var(--bg-input)',
+                  color: 'var(--text-primary)',
+                  fontSize: 12.5,
+                }}
               >
-                {src}
-              </button>
-            ))}
+                <option value="relevance">Relevance</option>
+                <option value="citations">Citations (High to Low)</option>
+                <option value="year">Publication Year (Newest)</option>
+              </select>
+            </div>
           </div>
 
-          {filterTerm && (
-            <span style={{ fontSize: 12, color: 'var(--accent-blue)' }}>
-              Filtering by "{filterTerm}" ({filteredPapers.length} matches)
-            </span>
-          )}
-        </div>
-      </div>
+          {/* Filter Chips Row */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--border-subtle)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 11.5, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', marginRight: 4 }}>
+                Filter:
+              </span>
 
-      {/* Loading Indicator */}
+              <button
+                className={`btn btn-sm ${sourceFilter === 'all' && !onlyOpenAccess && !onlyInGraph ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => {
+                  setSourceFilter('all');
+                  setOnlyOpenAccess(false);
+                  setOnlyInGraph(false);
+                }}
+                style={{ padding: '3px 10px', fontSize: 11.5 }}
+              >
+                All ({results.length})
+              </button>
+
+              <button
+                className={`btn btn-sm ${onlyOpenAccess ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setOnlyOpenAccess(prev => !prev)}
+                style={{ padding: '3px 10px', fontSize: 11.5 }}
+              >
+                Open Access ({openAccessCount})
+              </button>
+
+              <button
+                className={`btn btn-sm ${onlyInGraph ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setOnlyInGraph(prev => !prev)}
+                style={{ padding: '3px 10px', fontSize: 11.5 }}
+              >
+                Added to Graph ({inGraphCount})
+              </button>
+
+              {availableSources.map(src => (
+                <button
+                  key={src}
+                  className={`btn btn-sm ${sourceFilter === src ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => setSourceFilter(prev => (prev === src ? 'all' : src))}
+                  style={{ padding: '3px 10px', fontSize: 11.5, textTransform: 'uppercase' }}
+                >
+                  {src}
+                </button>
+              ))}
+            </div>
+
+            {filterTerm && (
+              <span style={{ fontSize: 12, color: 'var(--accent-blue)' }}>
+                Filtering by "{filterTerm}" ({filteredPapers.length} matches)
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Modern Animated Loading Indicator */}
       {searchLoading && (
-        <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>
-          <Loader2 size={28} className="animate-spin" style={{ margin: '0 auto 12px', display: 'block', color: 'var(--accent-blue)' }} />
-          <h3 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
-            Querying Scientific Databases...
+        <div
+          className="card"
+          style={{
+            padding: '52px 32px',
+            textAlign: 'center',
+            color: 'var(--text-muted)',
+            marginBottom: 20,
+            background: 'linear-gradient(135deg, var(--bg-card) 0%, var(--bg-subtle) 100%)',
+            border: '1px solid var(--border-subtle)',
+          }}
+        >
+          <div
+            style={{
+              width: 56,
+              height: 56,
+              borderRadius: '50%',
+              backgroundColor: 'rgba(99, 102, 241, 0.1)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 16px',
+            }}
+          >
+            <Loader2 size={30} className="animate-spin" style={{ color: 'var(--accent-primary)' }} />
+          </div>
+          <h3 style={{ fontSize: 17, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 6 }}>
+            Searching Scientific Literature...
           </h3>
-          <p style={{ fontSize: 13 }}>
-            Retrieving, normalizing, and deduplicating papers across academic repositories.
+          <p style={{ fontSize: 13.5, color: 'var(--text-secondary)', maxWidth: 520, margin: '0 auto 14px', lineHeight: 1.5 }}>
+            Querying arXiv, OpenAlex, Semantic Scholar, Crossref, and PubMed in parallel with automated deduplication.
           </p>
+          <div
+            className="animate-pulse"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              fontSize: 12,
+              color: 'var(--accent-primary)',
+              fontWeight: 600,
+              padding: '4px 14px',
+              borderRadius: 'var(--radius-pill)',
+              backgroundColor: 'rgba(99, 102, 241, 0.08)',
+            }}
+          >
+            <span style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: 'currentColor' }} />
+            <span>Fetching real-time records & resolving open-access PDFs...</span>
+          </div>
         </div>
       )}
 

@@ -17,21 +17,47 @@ import {
   CheckCircle2,
   Clock,
   Compass,
+  Plus,
+  Check,
+  FolderKanban,
+  Calendar,
+  PenTool,
+  Terminal,
 } from 'lucide-react';
+import { useApp } from '../context/AppContext';
+
+const CONNECTED_SOURCES = [
+  { name: 'arXiv', desc: 'Computer science, AI, machine learning, physics preprints', tag: 'Free Open Access' },
+  { name: 'OpenAlex', desc: 'Universal scholarly bibliographic catalog (250M+ scientific works)', tag: 'Live Index' },
+  { name: 'Semantic Scholar', desc: 'AI-backed citation graph analysis and influential citations', tag: 'AI Search' },
+  { name: 'Crossref', desc: 'Official international digital object identifier (DOI) registry', tag: 'Metadata' },
+  { name: 'Europe PMC / PubMed', desc: 'Biomedical, clinical, and life sciences scientific literature', tag: 'Full Text' },
+  { name: 'Hugging Face', desc: 'Pre-trained neural models, open datasets, and eval spaces', tag: 'Artifacts' },
+  { name: 'Papers with Code', desc: 'State-of-the-art benchmark tables and official repositories', tag: 'Benchmarks' },
+  { name: 'GitHub', desc: 'Open-source scientific model implementations and codebases', tag: 'Code' },
+];
 
 export default function OverviewView() {
   const navigate = useNavigate();
-  const [quickQuery, setQuickQuery] = useState('');
+  const {
+    workspaces,
+    activeWorkspace,
+    switchWorkspace,
+    openWorkspaceModal,
+    performSearch,
+    searchResults,
+    addedToGraphPaperIds,
+  } = useApp();
+
+  const [heroQuery, setHeroQuery] = useState('');
   const [graphStats, setGraphStats] = useState({
     total_papers: 0,
     total_methods: 0,
     total_datasets: 0,
     total_gaps: 0,
   });
-  const [recentSessions, setRecentSessions] = useState([]);
 
   useEffect(() => {
-    // 1. Fetch real graph summary
     fetch('/api/v1/graph/summary')
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
@@ -45,400 +71,589 @@ export default function OverviewView() {
         }
       })
       .catch(() => {});
-
-    // 2. Fetch real sessions
-    fetch('/api/v1/workbench/sessions')
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data && Array.isArray(data)) {
-          setRecentSessions(data.slice(0, 5));
-        }
-      })
-      .catch(() => {});
   }, []);
 
   const handleHeroSearch = (e) => {
-    e.preventDefault();
-    if (!quickQuery.trim()) {
-      navigate('/search');
-    } else {
-      navigate(`/search?q=${encodeURIComponent(quickQuery.trim())}`);
-    }
+    if (e) e.preventDefault();
+    const q = heroQuery.trim();
+    if (!q) return;
+    performSearch(q);
+    navigate('/search-results');
   };
 
-  const handleRecentSession = (query) => {
-    navigate(`/search?q=${encodeURIComponent(query)}`);
+  const handleTopicClick = (topic) => {
+    setHeroQuery(topic);
+    performSearch(topic);
+    navigate('/search-results');
   };
 
   return (
-    <section id="view-dashboard" className="view-panel active">
-      {/* Hero / Mission Statement Section */}
-      <div className="homepage-hero-card">
-        <div className="hero-pill-badge">
-          <Sparkles size={12} />
-          <span>Autonomous AI Research Engineering Platform</span>
+    <section id="view-overview" className="view-panel active">
+      {/* 1. HERO / MISSION SECTION */}
+      <div className="card homepage-hero-card" style={{ marginBottom: 24, padding: '32px 36px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
+          <span className="hero-pill-badge" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <Sparkles size={13} style={{ color: 'var(--accent-primary, #6366f1)' }} />
+            <span>AI-Powered Autonomous Research Engineering</span>
+          </span>
+          {activeWorkspace && (
+            <span className="badge badge-emerald" style={{ fontSize: 11.5 }}>
+              Active Workspace: {activeWorkspace.title}
+            </span>
+          )}
         </div>
-        <h1 className="hero-title-text">
-          Scientific Research Lifecycle, from Literature Discovery to Reproducible Execution
+
+        <h1 style={{ fontSize: 26, fontWeight: 800, margin: '0 0 10px', color: 'var(--text-primary)', letterSpacing: '-0.02em', lineHeight: 1.25 }}>
+          Research Copilot: From Scientific Literature to Reproducible Research
         </h1>
-        <p className="hero-mission-statement">
-          Research Copilot is an intelligent research assistant built for scientists and engineers.
-          Unlike traditional conversational chatbots that merely summarize text, Research Copilot
-          ingests verified scientific literature across eight global repositories, constructs relational
-          knowledge graphs, detects unexplored research gaps, plans reproducible experiments, and drafts
-          publication-ready scientific manuscripts without hallucination.
+
+        <p style={{ fontSize: 14, color: 'var(--text-secondary)', margin: '0 0 24px', maxWidth: 840, lineHeight: 1.6 }}>
+          Research Copilot is an intelligent scientific assistant engineered to assist researchers across the entire research lifecycle: discover multi-source literature, construct topological knowledge graphs, analyze open research gaps, resolve legal full-text PDFs, and prepare publication-ready manuscripts.
         </p>
 
-        {/* Quick Search Launch Bar */}
-        <form className="hero-quick-search-box" onSubmit={handleHeroSearch}>
-          <div className="search-input-wrapper" style={{ flex: 1 }}>
-            <Search size={16} color="var(--text-muted)" style={{ marginRight: 8 }} />
-            <input
-              type="text"
-              placeholder="Explore research topics (e.g., 'Liquid neural networks for time-series forecasting')..."
-              value={quickQuery}
-              onChange={(e) => setQuickQuery(e.target.value)}
-            />
+        {/* Primary Search Input */}
+        <form onSubmit={handleHeroSearch} style={{ marginBottom: 16 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div
+              style={{
+                flex: 1,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                background: 'var(--bg-input, #18181b)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: 'var(--radius-md, 8px)',
+                padding: '0 14px',
+              }}
+            >
+              <Search size={17} style={{ color: 'var(--text-muted)' }} />
+              <input
+                type="text"
+                value={heroQuery}
+                onChange={(e) => setHeroQuery(e.target.value)}
+                placeholder="Enter scientific topic, paper title, DOI, or arXiv identifier (e.g. Attention Is All You Need)..."
+                style={{
+                  flex: 1,
+                  background: 'transparent',
+                  border: 'none',
+                  outline: 'none',
+                  color: 'var(--text-primary)',
+                  fontSize: 14,
+                  padding: '12px 0',
+                }}
+              />
+            </div>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={!heroQuery.trim()}
+              style={{ padding: '12px 24px', fontSize: 13.5, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}
+            >
+              <span>Explore Literature</span>
+              <ArrowRight size={15} />
+            </button>
           </div>
-          <button type="submit" className="btn btn-primary">
-            <span>Explore Literature</span>
-            <ArrowRight size={14} />
-          </button>
         </form>
 
-        {/* Quick Route Action Buttons */}
-        <div className="hero-cta-row">
-          <button className="btn btn-secondary btn-sm" onClick={() => navigate('/search')}>
-            <Search size={13} />
-            <span>Literature Search</span>
+        {/* 5 Fast Action Navigation Buttons */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, paddingTop: 16, borderTop: '1px solid var(--border-subtle)' }}>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => navigate('/search')}
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <Search size={13} style={{ color: 'var(--accent-primary)' }} />
+            <span>1. Literature Search</span>
           </button>
-          <button className="btn btn-secondary btn-sm" onClick={() => navigate('/search-results')}>
-            <BookOpen size={13} />
-            <span>Founded Papers Stream</span>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => navigate('/search-results')}
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <BookOpen size={13} style={{ color: 'var(--accent-emerald)' }} />
+            <span>2. Founded Papers ({searchResults.length})</span>
           </button>
-          <button className="btn btn-secondary btn-sm" onClick={() => navigate('/knowledge-graph')}>
-            <Network size={13} />
-            <span>Knowledge Graph</span>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => navigate('/knowledge-graph')}
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <Network size={13} style={{ color: 'var(--accent-violet)' }} />
+            <span>3. Knowledge Graph</span>
           </button>
-          <button className="btn btn-secondary btn-sm" onClick={() => navigate('/pdf-inspector')}>
-            <FileText size={13} />
-            <span>Paper Reader & PDF</span>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => navigate('/pdf-inspector')}
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <FileText size={13} style={{ color: 'var(--accent-amber)' }} />
+            <span>4. Paper Reader & PDF</span>
           </button>
-          <button className="btn btn-secondary btn-sm" onClick={() => navigate('/research-gaps')}>
-            <Lightbulb size={13} />
-            <span>Research Gap Matrix</span>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => navigate('/research-gaps')}
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <Lightbulb size={13} style={{ color: 'var(--accent-rose)' }} />
+            <span>5. Research Gap Finder</span>
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => navigate('/workspaces')}
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <FolderKanban size={13} style={{ color: 'var(--text-primary)' }} />
+            <span>Workspaces Hub ({workspaces.length})</span>
           </button>
         </div>
       </div>
 
-      {/* Real-time System Metrics Ribbon */}
-      <div className="metrics-strip">
-        <div className="metric-box">
-          <span className="metric-label">Indexed Scientific Papers</span>
-          <span className="metric-val">{graphStats.total_papers}</span>
-        </div>
-        <div className="metric-box">
-          <span className="metric-label">Extracted Methods</span>
-          <span className="metric-val">{graphStats.total_methods}</span>
-        </div>
-        <div className="metric-box">
-          <span className="metric-label">Benchmark Datasets</span>
-          <span className="metric-val">{graphStats.total_datasets}</span>
-        </div>
-        <div className="metric-box">
-          <span className="metric-label">Identified Research Gaps</span>
-          <span className="metric-val">{graphStats.total_gaps}</span>
-        </div>
-      </div>
-
-      {/* Step-by-Step User Guide */}
-      <div className="section-headline-block">
-        <h2>
-          <Compass size={18} color="var(--accent-primary, #6366f1)" />
-          <span>How to Use Research Copilot</span>
-        </h2>
-        <p>
-          Follow this 5-step operational workflow to navigate through scientific literature, inspect evidence,
-          and discover high-impact research directions.
-        </p>
-      </div>
-
-      <div className="guide-steps-grid">
-        <div className="guide-step-card" onClick={() => navigate('/search')}>
-          <div className="guide-step-number">1</div>
-          <div className="guide-step-title">Query Scientific Literature</div>
-          <div className="guide-step-desc">
-            Enter research questions, model architectures, or domain keywords in <strong>Literature Search</strong>.
-            The engine harvests and deduplicates publications from arXiv, Semantic Scholar, OpenAlex, Crossref, and PubMed.
+      {/* 2. REAL-TIME STATS RIBBON */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14, marginBottom: 24 }}>
+        <div className="card stat-ribbon-card" style={{ padding: '16px 20px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>Indexed Papers</span>
+            <BookOpen size={17} style={{ color: 'var(--accent-primary, #6366f1)' }} />
           </div>
-          <div className="guide-step-link">
-            <span>Open Literature Search</span>
-            <ArrowRight size={12} />
+          <div style={{ fontSize: 24, fontWeight: 700, marginTop: 4, color: 'var(--text-primary)' }}>
+            {graphStats.total_papers || searchResults.length || 0}
           </div>
+          <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>Registered scientific records</span>
         </div>
 
-        <div className="guide-step-card" onClick={() => navigate('/search-results')}>
-          <div className="guide-step-number">2</div>
-          <div className="guide-step-title">Browse Founded Papers Feed</div>
-          <div className="guide-step-desc">
-            Examine discovered papers in a dedicated linear reading stream. Filter by title, keywords, or authors.
-            Inspect open-access DOIs, download PDFs directly, and selectively click <strong>+ Add to Graph</strong>.
+        <div className="card stat-ribbon-card" style={{ padding: '16px 20px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>Active Workspaces</span>
+            <FolderKanban size={17} style={{ color: 'var(--accent-emerald, #10b981)' }} />
           </div>
-          <div className="guide-step-link">
-            <span>Open Founded Papers</span>
-            <ArrowRight size={12} />
+          <div style={{ fontSize: 24, fontWeight: 700, marginTop: 4, color: 'var(--text-primary)' }}>
+            {workspaces.length}
           </div>
+          <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>Isolated research environments</span>
         </div>
 
-        <div className="guide-step-card" onClick={() => navigate('/knowledge-graph')}>
-          <div className="guide-step-number">3</div>
-          <div className="guide-step-title">Explore Knowledge Graph</div>
-          <div className="guide-step-desc">
-            Visualize the interactive relational graph. Inspect topic root nodes, ingested papers, extracted methods,
-            benchmark datasets, and cross-paper bridges with real-time entity inspectors.
+        <div className="card stat-ribbon-card" style={{ padding: '16px 20px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>Graph Methods</span>
+            <Layers size={17} style={{ color: 'var(--accent-violet, #a855f7)' }} />
           </div>
-          <div className="guide-step-link">
-            <span>Open Knowledge Graph</span>
-            <ArrowRight size={12} />
+          <div style={{ fontSize: 24, fontWeight: 700, marginTop: 4, color: 'var(--text-primary)' }}>
+            {graphStats.total_methods || 0}
           </div>
+          <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>Extracted methodologies</span>
         </div>
 
-        <div className="guide-step-card" onClick={() => navigate('/pdf-inspector')}>
-          <div className="guide-step-number">4</div>
-          <div className="guide-step-title">Inspect Sections & PDF Streams</div>
-          <div className="guide-step-desc">
-            Read structured parsed sections (Abstract, Methodology, Empirical Results) side-by-side with original
-            peer-reviewed PDF streams, complete with automated BibTeX export and citation attribution.
+        <div className="card stat-ribbon-card" style={{ padding: '16px 20px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>Literature Gaps</span>
+            <Lightbulb size={17} style={{ color: 'var(--accent-amber, #f59e0b)' }} />
           </div>
-          <div className="guide-step-link">
-            <span>Open Paper Reader</span>
-            <ArrowRight size={12} />
+          <div style={{ fontSize: 24, fontWeight: 700, marginTop: 4, color: 'var(--text-primary)' }}>
+            {graphStats.total_gaps || 0}
           </div>
-        </div>
-
-        <div className="guide-step-card" onClick={() => navigate('/research-gaps')}>
-          <div className="guide-step-number">5</div>
-          <div className="guide-step-title">Uncover Research Gaps</div>
-          <div className="guide-step-desc">
-            Run combinatorial analysis across extracted methods and datasets to detect unaddressed intersections,
-            formulate grounded novel hypotheses, and plan reproducible validation experiments.
-          </div>
-          <div className="guide-step-link">
-            <span>Open Research Gap Finder</span>
-            <ArrowRight size={12} />
-          </div>
+          <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>Combinatorial opportunities</span>
         </div>
       </div>
 
-      {/* End-to-End Architectural Pipeline */}
-      <div className="section-headline-block">
-        <h2>
-          <Layers size={18} color="var(--accent-primary, #6366f1)" />
-          <span>Overall End-to-End Workflow Pipeline</span>
-        </h2>
-        <p>
-          Research Copilot orchestrates six specialized engineering stages to convert scientific curiosity
-          into verified, publication-grade outcomes.
-        </p>
-      </div>
-
-      <div className="workflow-pipeline-grid">
-        <div className="workflow-stage-card">
-          <div className="workflow-stage-pill">Stage 01</div>
-          <div className="workflow-stage-name">Multi-Source Harvesting</div>
-          <div className="workflow-stage-desc">
-            Concurrent querying across arXiv, OpenAlex, Semantic Scholar, Crossref, Hugging Face, and PubMed with DOI deduplication.
-          </div>
+      {/* 3. STEP-BY-STEP INTERACTIVE USAGE GUIDE */}
+      <div className="card" style={{ marginBottom: 24, padding: '24px 28px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+          <Compass size={17} style={{ color: 'var(--accent-primary, #6366f1)' }} />
+          <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
+            How to Use Research Copilot: 5-Step Research Guide
+          </h2>
         </div>
 
-        <div className="workflow-stage-card">
-          <div className="workflow-stage-pill">Stage 02</div>
-          <div className="workflow-stage-name">Document Parsing & Ingestion</div>
-          <div className="workflow-stage-desc">
-            Full-text PDF stream resolution, LaTeX parsing, semantic chunking, and token-budgeted embedding generation.
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14 }}>
+          <div
+            className="guide-step-card"
+            style={{
+              padding: '16px 18px',
+              borderRadius: 'var(--radius-md, 8px)',
+              background: 'var(--bg-subtle)',
+              border: '1px solid var(--border-subtle)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+              <span className="badge badge-neutral" style={{ fontSize: 11, fontWeight: 700 }}>STEP 1</span>
+              <FolderKanban size={15} style={{ color: 'var(--accent-primary)' }} />
+            </div>
+            <h4 style={{ margin: '0 0 6px', fontSize: 13.5, fontWeight: 700, color: 'var(--text-primary)' }}>
+              Create a Research Workspace
+            </h4>
+            <p style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              Name your workspace after your research question or paper. Workspaces isolate your queries, graph nodes, and reader notes.
+            </p>
           </div>
-        </div>
 
-        <div className="workflow-stage-card">
-          <div className="workflow-stage-pill">Stage 03</div>
-          <div className="workflow-stage-name">Knowledge Graph Linking</div>
-          <div className="workflow-stage-desc">
-            Autonomous entity extraction connecting papers, proposed architectures, benchmark datasets, and multi-paper bridges.
+          <div
+            className="guide-step-card"
+            style={{
+              padding: '16px 18px',
+              borderRadius: 'var(--radius-md, 8px)',
+              background: 'var(--bg-subtle)',
+              border: '1px solid var(--border-subtle)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+              <span className="badge badge-neutral" style={{ fontSize: 11, fontWeight: 700 }}>STEP 2</span>
+              <Search size={15} style={{ color: 'var(--accent-emerald)' }} />
+            </div>
+            <h4 style={{ margin: '0 0 6px', fontSize: 13.5, fontWeight: 700, color: 'var(--text-primary)' }}>
+              Multi-Source Literature Search
+            </h4>
+            <p style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              Search across 8 scientific repositories in parallel with 8s timeout budgets, automatic deduplication, and open-access PDF resolution.
+            </p>
           </div>
-        </div>
 
-        <div className="workflow-stage-card">
-          <div className="workflow-stage-pill">Stage 04</div>
-          <div className="workflow-stage-name">Combinatorial Gap Analysis</div>
-          <div className="workflow-stage-desc">
-            Cartesian evaluation of method-dataset matrix to uncover zero-coverage intersections and formulate novel hypotheses.
+          <div
+            className="guide-step-card"
+            style={{
+              padding: '16px 18px',
+              borderRadius: 'var(--radius-md, 8px)',
+              background: 'var(--bg-subtle)',
+              border: '1px solid var(--border-subtle)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+              <span className="badge badge-neutral" style={{ fontSize: 11, fontWeight: 700 }}>STEP 3</span>
+              <Network size={15} style={{ color: 'var(--accent-violet)' }} />
+            </div>
+            <h4 style={{ margin: '0 0 6px', fontSize: 13.5, fontWeight: 700, color: 'var(--text-primary)' }}>
+              Selective Graph Topology Ingestion
+            </h4>
+            <p style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              Click "+ Add to Graph" on founded papers. The graph links Topic → Papers → Inter-paper Method/Dataset bridges cleanly.
+            </p>
           </div>
-        </div>
 
-        <div className="workflow-stage-card">
-          <div className="workflow-stage-pill">Stage 05</div>
-          <div className="workflow-stage-name">Sandboxed Reproduction</div>
-          <div className="workflow-stage-desc">
-            Delegation to AI coding agents (Claude Code, Codex) for repository cloning, dependency resolution, and benchmark execution.
+          <div
+            className="guide-step-card"
+            style={{
+              padding: '16px 18px',
+              borderRadius: 'var(--radius-md, 8px)',
+              background: 'var(--bg-subtle)',
+              border: '1px solid var(--border-subtle)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+              <span className="badge badge-neutral" style={{ fontSize: 11, fontWeight: 700 }}>STEP 4</span>
+              <FileText size={15} style={{ color: 'var(--accent-amber)' }} />
+            </div>
+            <h4 style={{ margin: '0 0 6px', fontSize: 13.5, fontWeight: 700, color: 'var(--text-primary)' }}>
+              Interactive Paper Reader & PDF
+            </h4>
+            <p style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              Inspect live PDF streams, extract structured methodology, examine technical concepts, and copy formatted BibTeX citation code.
+            </p>
           </div>
-        </div>
 
-        <div className="workflow-stage-card">
-          <div className="workflow-stage-pill">Stage 06</div>
-          <div className="workflow-stage-name">Manuscript Dissemination</div>
-          <div className="workflow-stage-desc">
-            Automated structured LaTeX generation with verified BibTeX citations, empirical figures, and reproducible artifacts.
+          <div
+            className="guide-step-card"
+            style={{
+              padding: '16px 18px',
+              borderRadius: 'var(--radius-md, 8px)',
+              background: 'var(--bg-subtle)',
+              border: '1px solid var(--border-subtle)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+              <span className="badge badge-neutral" style={{ fontSize: 11, fontWeight: 700 }}>STEP 5</span>
+              <Lightbulb size={15} style={{ color: 'var(--accent-rose)' }} />
+            </div>
+            <h4 style={{ margin: '0 0 6px', fontSize: 13.5, fontWeight: 700, color: 'var(--text-primary)' }}>
+              Find Literature Gaps & Hypotheses
+            </h4>
+            <p style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              Discover unproven Method × Dataset combinatorial pairs and generate grounded novel research hypotheses.
+            </p>
           </div>
-        </div>
-      </div>
-
-      {/* Roadmap / Coming Soon Features */}
-      <div className="section-headline-block">
-        <h2>
-          <Clock size={18} color="var(--accent-primary, #6366f1)" />
-          <span>Roadmap & Upcoming Modules</span>
-        </h2>
-        <p>
-          Next-generation capabilities currently in active engineering for upcoming platform releases.
-        </p>
-      </div>
-
-      <div className="roadmap-grid">
-        <div className="roadmap-card">
-          <div className="roadmap-status-badge">
-            <Cpu size={11} />
-            <span>Coming Soon • Phase 2</span>
-          </div>
-          <div className="roadmap-title">Experiment Studio & Cloud Sandbox</div>
-          <div className="roadmap-desc">
-            Isolated Docker and Firecracker microVM compute environment designed for autonomous coding agents.
-            Allows automated git repository cloning, dependency resolution, GPU cluster dispatching, and hyperparameter sweeps.
-          </div>
-          <ul className="roadmap-items-list">
-            <li>Automated Conda and Poetry dependency conflict resolution</li>
-            <li>Sandboxed CUDA acceleration and distributed training monitoring</li>
-            <li>Bidirectional telemetry with Weights & Biases and TensorBoard</li>
-          </ul>
-        </div>
-
-        <div className="roadmap-card">
-          <div className="roadmap-status-badge">
-            <FlaskConical size={11} />
-            <span>Coming Soon • Phase 2</span>
-          </div>
-          <div className="roadmap-title">Standardized SOTA Benchmark Leaderboards</div>
-          <div className="roadmap-desc">
-            Automated empirical comparison suite tracking state-of-the-art baselines across Hugging Face Datasets
-            and Papers with Code benchmarks with verifiable provenance.
-          </div>
-          <ul className="roadmap-items-list">
-            <li>Strict metric parity verification against published author checkpoints</li>
-            <li>Statistical significance testing with multi-seed bootstrap confidence intervals</li>
-            <li>Direct ingestion of evaluation results into paper figures and tables</li>
-          </ul>
-        </div>
-
-        <div className="roadmap-card">
-          <div className="roadmap-status-badge">
-            <FileText size={11} />
-            <span>Coming Soon • Phase 3</span>
-          </div>
-          <div className="roadmap-title">Publication-Ready LaTeX Manuscript Engine</div>
-          <div className="roadmap-desc">
-            Comprehensive manuscript drafting engine producing camera-ready LaTeX code configured for NeurIPS, ICML,
-            ICLR, IEEE, and ACM conference styles with zero-hallucination citation enforcement.
-          </div>
-          <ul className="roadmap-items-list">
-            <li>Automated related work synthesis with linked BibTeX cross-references</li>
-            <li>Export to Overleaf, ZIP archives, and compiled camera-ready PDF</li>
-            <li>Algorithmic pseudocode and TikZ architecture diagram generation</li>
-          </ul>
         </div>
       </div>
 
-      {/* Supported Scientific Repositories and Recent Sessions */}
-      <div className="dashboard-grid">
-        <div className="card">
-          <h3>Connected Scientific Knowledge Sources</h3>
-          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 14 }}>
-            Aggregated real-time via dedicated API connectors, metadata scrapers, and open access resolvers.
-          </p>
-          <div className="sources-grid">
-            <div className="source-chip">
-              <strong>arXiv</strong>
-              <span>Preprints in CS, AI, Math & Physics</span>
+      {/* 4. END-TO-END RESEARCH PIPELINE WORKFLOW (6 STAGES) */}
+      <div className="card" style={{ marginBottom: 24, padding: '24px 28px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+          <Layers size={17} style={{ color: 'var(--accent-primary, #6366f1)' }} />
+          <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
+            Complete End-to-End Scientific Architecture Workflow
+          </h2>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
+          <div className="workflow-card" style={{ padding: 16, background: 'var(--bg-subtle)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <Database size={15} style={{ color: 'var(--accent-primary)' }} />
+              <h4 style={{ margin: 0, fontSize: 13.5, fontWeight: 700 }}>Stage 1: Multi-Source Literature Discovery</h4>
             </div>
-            <div className="source-chip">
-              <strong>Hugging Face</strong>
-              <span>Pretrained Models, Datasets & Spaces</span>
+            <p style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              Executes parallel async queries across arXiv, OpenAlex, Semantic Scholar, Crossref, and Europe PMC with unified entity deduplication.
+            </p>
+          </div>
+
+          <div className="workflow-card" style={{ padding: 16, background: 'var(--bg-subtle)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <FileText size={15} style={{ color: 'var(--accent-emerald)' }} />
+              <h4 style={{ margin: 0, fontSize: 13.5, fontWeight: 700 }}>Stage 2: Open Access Resolver & PDF Proxy</h4>
             </div>
-            <div className="source-chip">
-              <strong>Papers with Code</strong>
-              <span>SOTA Leaderboards & Repositories</span>
+            <p style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              Locates legal open-access full-text streams (Unpaywall, AlphaXiv, PMC) and streams PDFs via high-performance proxy to bypass browser CORS.
+            </p>
+          </div>
+
+          <div className="workflow-card" style={{ padding: 16, background: 'var(--bg-subtle)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <Network size={15} style={{ color: 'var(--accent-violet)' }} />
+              <h4 style={{ margin: 0, fontSize: 13.5, fontWeight: 700 }}>Stage 3: Topological Knowledge Graph</h4>
             </div>
-            <div className="source-chip">
-              <strong>GitHub</strong>
-              <span>Open-Source Implementation Codebases</span>
+            <p style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              Builds typed DiGraph networks linking topic pills, paper rectangles, and inter-paper relationship circles using SQLite async persistence.
+            </p>
+          </div>
+
+          <div className="workflow-card" style={{ padding: 16, background: 'var(--bg-subtle)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <Lightbulb size={15} style={{ color: 'var(--accent-amber)' }} />
+              <h4 style={{ margin: 0, fontSize: 13.5, fontWeight: 700 }}>Stage 4: Combinatorial Gap Engine</h4>
             </div>
-            <div className="source-chip">
-              <strong>OpenAlex</strong>
-              <span>Global Open Bibliographic Knowledge Graph</span>
+            <p style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              Analyzes graph matrices to find unproven Method × Dataset pairs, evaluating underexplored scientific opportunities.
+            </p>
+          </div>
+
+          <div className="workflow-card" style={{ padding: 16, background: 'var(--bg-subtle)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <Terminal size={15} style={{ color: 'var(--accent-rose)' }} />
+              <h4 style={{ margin: 0, fontSize: 13.5, fontWeight: 700 }}>Stage 5: Autonomous Coding Agent Execution</h4>
             </div>
-            <div className="source-chip">
-              <strong>Semantic Scholar</strong>
-              <span>Citation Velocity & Influential Citations</span>
+            <p style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              Executes sandboxed scripts to download GitHub repositories, resolve dependencies, and replicate experiments autonomously.
+            </p>
+          </div>
+
+          <div className="workflow-card" style={{ padding: 16, background: 'var(--bg-subtle)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <PenTool size={15} style={{ color: 'var(--accent-primary)' }} />
+              <h4 style={{ margin: 0, fontSize: 13.5, fontWeight: 700 }}>Stage 6: Manuscript Drafting & Citations</h4>
             </div>
-            <div className="source-chip">
-              <strong>Crossref</strong>
-              <span>Publisher DOIs & Metadata Registration</span>
-            </div>
-            <div className="source-chip">
-              <strong>PubMed / Europe PMC</strong>
-              <span>Biomedical & Life Sciences Literature</span>
-            </div>
+            <p style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              Compiles structured LaTeX papers with automated BibTeX citation tracking, formatted abstract, and empirical benchmark tables.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* 5. YOUR RESEARCH WORKSPACES */}
+      <div className="card" style={{ marginBottom: 24, padding: '22px 26px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
+          <div>
+            <h2 style={{ fontSize: 16.5, fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
+              Your Research Workspaces
+            </h2>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '2px 0 0' }}>
+              Switch between isolated scientific environments to continue literature searches, graph nodes, and reader notes.
+            </p>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => navigate('/workspaces')}
+              style={{ fontSize: 12 }}
+            >
+              <span>View All ({workspaces.length})</span>
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={() => openWorkspaceModal()}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}
+            >
+              <Plus size={13} />
+              <span>New Workspace</span>
+            </button>
           </div>
         </div>
 
-        <div className="card">
-          <h3>Recent Research Sessions</h3>
-          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 14 }}>
-            Saved literature investigations and research sessions ready to be restored.
-          </p>
-          <div className="session-list" id="recent-sessions-container">
-            {recentSessions.length > 0 ? (
-              recentSessions.map((sess) => (
-                <div
-                  key={sess.id}
-                  className="session-row"
-                  onClick={() => handleRecentSession(sess.query || '')}
-                  style={{ cursor: 'pointer' }}
-                >
-                  <div>
-                    <span className="session-title">{sess.query}</span>
-                    <span className="session-sub">
-                      Session {sess.id} • {sess.status}
-                    </span>
-                  </div>
-                  <span className="badge badge-blue">Restore</span>
-                </div>
-              ))
-            ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
+          {workspaces.slice(0, 6).map((ws) => {
+            const isActive = activeWorkspace && activeWorkspace.id === ws.id;
+            return (
               <div
+                key={ws.id}
+                onClick={() => {
+                  switchWorkspace(ws.id);
+                  navigate('/search');
+                }}
+                className="card"
                 style={{
-                  padding: '24px 0',
-                  textAlign: 'center',
-                  color: 'var(--text-muted)',
-                  fontSize: 13,
+                  padding: '14px 16px',
+                  cursor: 'pointer',
+                  borderLeft: isActive ? '3px solid var(--accent-primary, #6366f1)' : '1px solid var(--border-subtle)',
+                  background: isActive ? 'var(--bg-subtle)' : 'var(--bg-card)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  transition: 'border-color 0.2s',
                 }}
               >
-                <BookOpen
-                  size={24}
-                  style={{ display: 'block', margin: '0 auto 8px', color: 'var(--text-muted)' }}
-                />
-                No prior search sessions found. Run a query in <strong>Literature Search</strong> to begin.
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <FolderKanban size={14} style={{ color: isActive ? 'var(--accent-primary)' : 'var(--text-muted)' }} />
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-code)' }}>
+                        {ws.id}
+                      </span>
+                    </div>
+                    {isActive ? (
+                      <span className="badge badge-emerald" style={{ fontSize: 10, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                        <Check size={10} />
+                        <span>Active</span>
+                      </span>
+                    ) : (
+                      <span className="badge badge-neutral" style={{ fontSize: 10 }}>Saved</span>
+                    )}
+                  </div>
+
+                  <h3 style={{ fontSize: 14, fontWeight: 700, margin: '0 0 4px', color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {ws.title}
+                  </h3>
+
+                  <p
+                    style={{
+                      fontSize: 12,
+                      color: 'var(--text-secondary)',
+                      margin: 0,
+                      display: '-webkit-box',
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical',
+                      overflow: 'hidden',
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    {ws.description || 'No description provided.'}
+                  </p>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12, paddingTop: 8, borderTop: '1px solid var(--border-subtle)' }}>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                    {ws.created_at ? ws.created_at.slice(0, 10) : 'Active'}
+                  </span>
+                  <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--accent-primary)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span>{isActive ? 'Continue' : 'Open'}</span>
+                    <ArrowRight size={11} />
+                  </span>
+                </div>
               </div>
-            )}
+            );
+          })}
+
+          {workspaces.length === 0 && (
+            <div
+              style={{
+                gridColumn: '1 / -1',
+                padding: '28px 16px',
+                textAlign: 'center',
+                color: 'var(--text-muted)',
+              }}
+            >
+              <FolderKanban size={30} style={{ margin: '0 auto 8px', display: 'block', color: 'var(--text-muted)' }} />
+              <p style={{ margin: '0 0 10px', fontSize: 13 }}>No research workspaces created yet.</p>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => openWorkspaceModal()}
+              >
+                + Create First Workspace
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 6. UPCOMING FEATURES & ROADMAP */}
+      <div className="card" style={{ marginBottom: 24, padding: '24px 28px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+          <Clock size={17} style={{ color: 'var(--accent-primary, #6366f1)' }} />
+          <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
+            Platform Roadmap & Upcoming Engineering Modules
+          </h2>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
+          <div style={{ padding: 16, background: 'var(--bg-subtle)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+              <span className="badge badge-neutral" style={{ fontSize: 10 }}>Phase 2</span>
+              <FlaskConical size={16} style={{ color: 'var(--accent-emerald)' }} />
+            </div>
+            <h4 style={{ margin: '0 0 4px', fontSize: 13.5, fontWeight: 700 }}>Experiment Studio & SOTA Baselines</h4>
+            <p style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              Benchmark tracking and automatic metric extraction against state-of-the-art baselines across Papers with Code leaderboards.
+            </p>
           </div>
+
+          <div style={{ padding: 16, background: 'var(--bg-subtle)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+              <span className="badge badge-neutral" style={{ fontSize: 10 }}>Phase 3</span>
+              <Terminal size={16} style={{ color: 'var(--accent-violet)' }} />
+            </div>
+            <h4 style={{ margin: '0 0 4px', fontSize: 13.5, fontWeight: 700 }}>AI Coding Agent Execution Engine</h4>
+            <p style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              Sandboxed execution pipeline integrating Claude Code, OpenCode, and local runners to reproduce published paper codebases.
+            </p>
+          </div>
+
+          <div style={{ padding: 16, background: 'var(--bg-subtle)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+              <span className="badge badge-neutral" style={{ fontSize: 10 }}>Phase 4</span>
+              <PenTool size={16} style={{ color: 'var(--accent-amber)' }} />
+            </div>
+            <h4 style={{ margin: '0 0 4px', fontSize: 13.5, fontWeight: 700 }}>LaTeX Manuscript Generator</h4>
+            <p style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              Automated compilation of NeurIPS, ICML, and ICLR template manuscripts with citation trees, LaTeX tables, and empirical figures.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* 7. CONNECTED SCIENTIFIC DATABASES (8 SOURCES) */}
+      <div className="card" style={{ padding: '20px 24px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+          <Database size={17} style={{ color: 'var(--accent-primary, #6366f1)' }} />
+          <h3 style={{ fontSize: 14, fontWeight: 700, margin: 0, color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+            Connected Scientific Databases (8 Parallel Connectors)
+          </h3>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 10 }}>
+          {CONNECTED_SOURCES.map((db, idx) => (
+            <div
+              key={idx}
+              style={{
+                padding: '12px 14px',
+                borderRadius: 'var(--radius-sm)',
+                background: 'var(--bg-subtle)',
+                border: '1px solid var(--border-subtle)',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                <strong style={{ fontSize: 13, color: 'var(--text-primary)' }}>{db.name}</strong>
+                <span className="badge badge-neutral" style={{ fontSize: 9.5 }}>{db.tag}</span>
+              </div>
+              <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{db.desc}</span>
+            </div>
+          ))}
         </div>
       </div>
     </section>

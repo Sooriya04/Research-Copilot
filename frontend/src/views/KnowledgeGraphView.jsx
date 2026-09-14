@@ -92,6 +92,8 @@ export default function KnowledgeGraphView() {
     setActiveReaderPaper,
     searchQuery,
     searchResults,
+    activeWorkspace,
+    addedToGraphPaperIds,
   } = useApp();
   const navigate = useNavigate();
   const [graphMode, setGraphMode] = useState('graph'); // 'graph' | 'matrix' | 'compare'
@@ -105,7 +107,6 @@ export default function KnowledgeGraphView() {
   const [summaryData, setSummaryData] = useState(null);
 
   // Filter & Layout states
-  const [graphScope, setGraphScope] = useState('core'); // 'core' (topic, papers, methods, datasets) | 'all'
   const [nodeTypeFilter, setNodeTypeFilter] = useState('all');
   const [relationFilter, setRelationFilter] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
@@ -115,17 +116,140 @@ export default function KnowledgeGraphView() {
 
   const fetchGraphData = async () => {
     setLoading(true);
+    const activeTopic = (activeWorkspace?.title || searchQuery || '').trim();
+
     try {
-      // 1. Fetch graph elements strictly scoped to active topic query
-      const url = searchQuery
-        ? `/api/v1/graph/elements?topic=${encodeURIComponent(searchQuery)}&scoped=true`
+      const url = activeTopic
+        ? `/api/v1/graph/elements?topic=${encodeURIComponent(activeTopic)}`
         : '/api/v1/graph/elements';
       const elemRes = await fetch(url);
+      let loadedNodes = [];
+      let loadedEdges = [];
+
       if (elemRes.ok) {
         const elemData = await elemRes.json();
-        setRawNodes(elemData.nodes || []);
-        setRawEdges(elemData.edges || []);
+        loadedNodes = elemData.nodes || [];
+        loadedEdges = elemData.edges || [];
       }
+
+      const backendPaperNodes = loadedNodes.filter(n => (n.node_type || '').toLowerCase() === 'paper');
+
+      // If backend has no paper nodes but the workspace has searchResults, build visualization dynamically
+      if (backendPaperNodes.length === 0 && searchResults && searchResults.length > 0) {
+        const topicId = `topic-${activeTopic ? activeTopic.toLowerCase().replace(/[^a-z0-9]+/g, '-') : 'main'}`;
+        const topicLabel = activeTopic || 'Research Topic';
+        const generatedNodes = [{
+          id: topicId,
+          label: topicLabel.slice(0, 35),
+          node_type: 'topic',
+          title: `[TOPIC] ${topicLabel}`,
+          data: { name: topicLabel, id: topicId, query: topicLabel },
+        }];
+        const generatedEdges = [];
+
+        // Track shared methods and datasets across papers to create mutual bridge circles
+        const methodPapersMap = new Map();
+        const datasetPapersMap = new Map();
+
+        searchResults.slice(0, 20).forEach((p, idx) => {
+          const pId = p.id || p.canonical_id || p.arxiv_id || `paper-${idx}`;
+          const pTitle = p.title || `Paper ${idx + 1}`;
+          
+          generatedNodes.push({
+            id: pId,
+            label: pTitle.slice(0, 35),
+            node_type: 'paper',
+            title: `[PAPER] ${pTitle} (${p.year || 2024})`,
+            data: {
+              id: pId,
+              title: pTitle,
+              year: p.year || 2024,
+              authors: p.authors || [],
+              pdf_url: p.pdf_url || p.open_access_pdf,
+              methods: p.methods || [],
+              datasets: p.datasets || [],
+            },
+          });
+
+          // Connect topic to paper
+          generatedEdges.push({
+            source: topicId,
+            target: pId,
+            relation: 'covers',
+            label: 'Explores',
+          });
+
+          // Map methods
+          (p.methods || []).forEach(m => {
+            if (!methodPapersMap.has(m)) methodPapersMap.set(m, []);
+            methodPapersMap.get(m).push(pId);
+          });
+
+          // Map datasets
+          (p.datasets || []).forEach(d => {
+            if (!datasetPapersMap.has(d)) datasetPapersMap.set(d, []);
+            datasetPapersMap.get(d).push(pId);
+          });
+        });
+
+        // Add shared method bridge circle nodes (connecting >= 2 papers)
+        methodPapersMap.forEach((pIds, mName) => {
+          if (pIds.length >= 2) {
+            const mId = `method-${mName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+            generatedNodes.push({
+              id: mId,
+              label: mName.slice(0, 25),
+              node_type: 'method',
+              title: `[METHOD] ${mName}`,
+              data: { name: mName, id: mId },
+            });
+            pIds.forEach(pId => {
+              generatedEdges.push({
+                source: pId,
+                target: mId,
+                relation: 'uses_method',
+                label: 'Uses Method',
+              });
+            });
+          }
+        });
+
+        // Add shared dataset bridge circle nodes (connecting >= 2 papers)
+        datasetPapersMap.forEach((pIds, dName) => {
+          if (pIds.length >= 2) {
+            const dId = `dataset-${dName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+            generatedNodes.push({
+              id: dId,
+              label: dName.slice(0, 25),
+              node_type: 'dataset',
+              title: `[DATASET] ${dName}`,
+              data: { name: dName, id: dId },
+            });
+            pIds.forEach(pId => {
+              generatedEdges.push({
+                source: pId,
+                target: dId,
+                relation: 'evaluates_on',
+                label: 'Evaluates On',
+              });
+            });
+          }
+        });
+
+        loadedNodes = generatedNodes;
+        loadedEdges = generatedEdges;
+      } else if (loadedNodes.length === 0 && activeTopic) {
+        loadedNodes = [{
+          id: `topic-${activeTopic.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+          label: activeTopic.slice(0, 35),
+          node_type: 'topic',
+          title: `[TOPIC] ${activeTopic}`,
+          data: { name: activeTopic },
+        }];
+      }
+
+      setRawNodes(loadedNodes);
+      setRawEdges(loadedEdges);
 
       // 2. Fetch summary & coverage
       const sumRes = await fetch('/api/v1/graph/summary');
@@ -142,7 +266,7 @@ export default function KnowledgeGraphView() {
 
   useEffect(() => {
     fetchGraphData();
-  }, [searchQuery]);
+  }, [searchQuery, activeWorkspace?.id, searchResults?.length, addedToGraphPaperIds?.length]);
 
   const handleClearGraph = async () => {
     try {
@@ -334,13 +458,10 @@ export default function KnowledgeGraphView() {
       finalNodes.push(rn);
     });
 
-    // Filter by Scope / Type / Search
-    let filteredNodes = finalNodes;
-    if (graphScope === 'core') {
-      filteredNodes = filteredNodes.filter(n =>
-        ['topic', 'paper', 'relationship', 'method', 'dataset', 'gap'].includes((n.node_type || 'paper').toLowerCase())
-      );
-    }
+    // Clean filter: Keep only meaningful research entities (topic, paper, relationship, method, dataset, gap)
+    let filteredNodes = finalNodes.filter(n =>
+      ['topic', 'paper', 'relationship', 'method', 'dataset', 'gap'].includes((n.node_type || 'paper').toLowerCase())
+    );
 
     if (nodeTypeFilter !== 'all') {
       filteredNodes = filteredNodes.filter(n => (n.node_type || 'paper').toLowerCase() === nodeTypeFilter.toLowerCase());
@@ -366,7 +487,7 @@ export default function KnowledgeGraphView() {
       nodes: filteredNodes,
       edges: filteredEdges,
     };
-  }, [rawNodes, rawEdges, graphScope, nodeTypeFilter, relationFilter, searchTerm, searchQuery]);
+  }, [rawNodes, rawEdges, nodeTypeFilter, relationFilter, searchTerm, searchQuery]);
 
 
   const paperNodesCount = useMemo(() => {
@@ -375,10 +496,15 @@ export default function KnowledgeGraphView() {
 
   // Render Vis Network with forceAtlas2 collision avoidance
   useEffect(() => {
-    if (graphMode === 'graph' && containerRef.current && filteredData.nodes.length > 0) {
-      renderVisGraph();
+    let timer;
+    if (graphMode === 'graph' && filteredData.nodes.length > 0) {
+      // Delay briefly to ensure containerRef is accurately measured in the DOM
+      timer = setTimeout(() => {
+        renderVisGraph();
+      }, 50);
     }
     return () => {
+      if (timer) clearTimeout(timer);
       if (networkRef.current) {
         try {
           networkRef.current.destroy();
@@ -386,7 +512,7 @@ export default function KnowledgeGraphView() {
         networkRef.current = null;
       }
     };
-  }, [graphMode, theme, filteredData]);
+  }, [graphMode, theme, filteredData, loading]);
 
   const renderVisGraph = () => {
     if (!containerRef.current || filteredData.nodes.length === 0) return;
@@ -548,30 +674,110 @@ export default function KnowledgeGraphView() {
     const network = new Network(containerRef.current, { nodes, edges }, options);
     networkRef.current = network;
 
+    const handleSelectNode = async (foundNode) => {
+      const nodeId = foundNode.id;
+      const ntype = (foundNode.node_type || 'ENTITY').toUpperCase();
+
+      // 1. Compute local connections from filteredEdges & filteredNodes
+      const outgoing = (filteredData.edges || [])
+        .filter(e => e.source === nodeId)
+        .map(e => {
+          const targetNode = filteredData.nodes.find(n => n.id === e.target) || rawNodes.find(n => n.id === e.target);
+          return {
+            direction: 'outgoing',
+            relation: e.relation || 'connected_to',
+            target: e.target,
+            neighbor: targetNode,
+          };
+        });
+
+      const incoming = (filteredData.edges || [])
+        .filter(e => e.target === nodeId)
+        .map(e => {
+          const sourceNode = filteredData.nodes.find(n => n.id === e.source) || rawNodes.find(n => n.id === e.source);
+          return {
+            direction: 'incoming',
+            relation: e.relation || 'connected_to',
+            source: e.source,
+            neighbor: sourceNode,
+          };
+        });
+
+      const localEdges = [...outgoing, ...incoming];
+      const localNeighbors = localEdges.map(le => le.neighbor).filter(Boolean);
+
+      setSelectedEntity({
+        id: foundNode.id,
+        title: foundNode.data?.name || foundNode.data?.title || foundNode.data?.text || foundNode.label,
+        type: ntype,
+        raw: foundNode.data,
+        source: foundNode.data?.source,
+        target: foundNode.data?.target,
+        relation: foundNode.data?.relation || foundNode.label,
+      });
+
+      setNeighborhood({
+        node: foundNode,
+        edges: localEdges,
+        neighbors: localNeighbors,
+        total_neighbors: localEdges.length,
+      });
+
+      // 2. If it's a persistent backend node, fetch additional metadata in background
+      if (!nodeId.startsWith('rel-') && !nodeId.startsWith('topic-')) {
+        try {
+          const neighRes = await fetch(`/api/v1/graph/node/${encodeURIComponent(nodeId)}/neighborhood`);
+          if (neighRes.ok) {
+            const neighData = await neighRes.json();
+            if (neighData && neighData.edges && neighData.edges.length > 0) {
+              setNeighborhood(prev => ({
+                ...prev,
+                ...neighData,
+                edges: neighData.edges.length > 0 ? neighData.edges : prev.edges,
+              }));
+            }
+          }
+        } catch {
+          // Graceful local neighborhood fallback
+        }
+      }
+    };
+
     network.on('click', async (params) => {
       if (params.nodes.length > 0) {
         const nodeId = params.nodes[0];
         const foundNode = filteredData.nodes.find(n => n.id === nodeId) || rawNodes.find(n => n.id === nodeId);
         if (foundNode) {
+          handleSelectNode(foundNode);
+        }
+      } else if (params.edges.length > 0) {
+        const edgeId = params.edges[0];
+        const foundEdge = filteredData.edges.find(e => `${e.source}->${e.target}:${e.relation}` === edgeId) ||
+          filteredData.edges.find(e => e.source === edgeId || e.target === edgeId);
+        if (foundEdge) {
+          const srcNode = filteredData.nodes.find(n => n.id === foundEdge.source);
+          const tgtNode = filteredData.nodes.find(n => n.id === foundEdge.target);
+          const relLabel = FRIENDLY_RELATION_LABELS[(foundEdge.relation || '').toLowerCase()] || foundEdge.relation;
+
           setSelectedEntity({
-            id: foundNode.id,
-            title: foundNode.data?.name || foundNode.data?.title || foundNode.data?.text || foundNode.label,
-            type: (foundNode.node_type || 'ENTITY').toUpperCase(),
-            raw: foundNode.data,
+            id: edgeId,
+            title: `Relationship: ${relLabel}`,
+            type: 'RELATIONSHIP',
+            raw: { relation: foundEdge.relation, source: foundEdge.source, target: foundEdge.target },
+            source: foundEdge.source,
+            target: foundEdge.target,
+            relation: relLabel,
           });
 
-          // Fetch neighborhood
-          try {
-            const neighRes = await fetch(`/api/v1/graph/node/${encodeURIComponent(nodeId)}/neighborhood`);
-            if (neighRes.ok) {
-              const neighData = await neighRes.json();
-              setNeighborhood(neighData);
-            } else {
-              setNeighborhood(null);
-            }
-          } catch {
-            setNeighborhood(null);
-          }
+          setNeighborhood({
+            node: { id: edgeId, label: relLabel },
+            edges: [
+              { direction: 'incoming', relation: foundEdge.relation, source: foundEdge.source, neighbor: srcNode },
+              { direction: 'outgoing', relation: foundEdge.relation, target: foundEdge.target, neighbor: tgtNode },
+            ],
+            neighbors: [srcNode, tgtNode].filter(Boolean),
+            total_neighbors: 2,
+          });
         }
       }
     });
@@ -584,12 +790,49 @@ export default function KnowledgeGraphView() {
   };
 
   const handleFocusNode = (nodeId) => {
-    if (networkRef.current) {
+    if (networkRef.current && nodeId) {
       networkRef.current.focus(nodeId, {
         scale: 1.2,
         animation: { duration: 800, easingFunction: 'easeInOutQuad' },
       });
       networkRef.current.selectNodes([nodeId]);
+      const found = filteredData.nodes.find(n => n.id === nodeId) || rawNodes.find(n => n.id === nodeId);
+      if (found) {
+        // Automatically select the node in inspector as well
+        const ntype = (found.node_type || 'ENTITY').toUpperCase();
+        const outgoing = (filteredData.edges || [])
+          .filter(e => e.source === nodeId)
+          .map(e => ({
+            direction: 'outgoing',
+            relation: e.relation || 'connected_to',
+            target: e.target,
+            neighbor: filteredData.nodes.find(n => n.id === e.target) || rawNodes.find(n => n.id === e.target),
+          }));
+        const incoming = (filteredData.edges || [])
+          .filter(e => e.target === nodeId)
+          .map(e => ({
+            direction: 'incoming',
+            relation: e.relation || 'connected_to',
+            source: e.source,
+            neighbor: filteredData.nodes.find(n => n.id === e.source) || rawNodes.find(n => n.id === e.source),
+          }));
+        const localEdges = [...outgoing, ...incoming];
+        setSelectedEntity({
+          id: found.id,
+          title: found.data?.name || found.data?.title || found.data?.text || found.label,
+          type: ntype,
+          raw: found.data,
+          source: found.data?.source,
+          target: found.data?.target,
+          relation: found.data?.relation || found.label,
+        });
+        setNeighborhood({
+          node: found,
+          edges: localEdges,
+          neighbors: localEdges.map(le => le.neighbor).filter(Boolean),
+          total_neighbors: localEdges.length,
+        });
+      }
     }
   };
 
@@ -706,26 +949,6 @@ export default function KnowledgeGraphView() {
           </div>
 
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            {/* Complexity Scope Selector */}
-            <div style={{ display: 'flex', background: 'var(--bg-secondary)', padding: 2, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
-              <button
-                onClick={() => setGraphScope('core')}
-                className={`btn btn-sm ${graphScope === 'core' ? 'btn-primary' : 'btn-ghost'}`}
-                style={{ fontSize: 11, padding: '2px 8px' }}
-                title="Show Papers, Methods & Datasets (Clean Architecture)"
-              >
-                Core Architecture
-              </button>
-              <button
-                onClick={() => setGraphScope('all')}
-                className={`btn btn-sm ${graphScope === 'all' ? 'btn-primary' : 'btn-ghost'}`}
-                style={{ fontSize: 11, padding: '2px 8px' }}
-                title="Show Full Detail including Claims & Metrics"
-              >
-                Full Detail
-              </button>
-            </div>
-
             <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
               <Filter size={12} />
               Type:
@@ -742,14 +965,11 @@ export default function KnowledgeGraphView() {
                 }}
               >
                 <option value="all">All Entity Types</option>
-                <option value="topic">Topic (Head Node)</option>
-                <option value="paper">Papers (Subnodes)</option>
+                <option value="topic">Topic</option>
+                <option value="paper">Papers</option>
                 <option value="method">Methods</option>
                 <option value="dataset">Datasets</option>
                 <option value="gap">Research Gaps</option>
-                <option value="metric">Metrics</option>
-                <option value="claim">Claims</option>
-                <option value="limitation">Limitations</option>
               </select>
             </label>
 
@@ -768,13 +988,11 @@ export default function KnowledgeGraphView() {
                 }}
               >
                 <option value="all">All Relationships</option>
-                <option value="covers">COVERS (Topic → Paper)</option>
-                <option value="uses_method">USES_METHOD</option>
-                <option value="evaluates_on">EVALUATES_ON</option>
-                <option value="cites">CITES</option>
-                <option value="achieves">ACHIEVES</option>
-                <option value="has_claim">HAS_CLAIM</option>
-                <option value="limited_by">LIMITED_BY</option>
+                <option value="covers">Topic Focus (COVERS)</option>
+                <option value="uses_method">Uses Method</option>
+                <option value="evaluates_on">Evaluates On</option>
+                <option value="cites">Cites</option>
+                <option value="solves">Solves</option>
               </select>
             </label>
 
@@ -785,15 +1003,8 @@ export default function KnowledgeGraphView() {
         </div>
       )}
 
-      {loading && (
-        <div className="loading-box">
-          <Loader2 size={24} className="animate-spin" style={{ color: 'var(--accent-blue)', marginBottom: 8 }} />
-          <p>Loading Knowledge Graph entities & semantic relationships...</p>
-        </div>
-      )}
-
       {/* Friendly Plain-English Guide Banner */}
-      {graphMode === 'graph' && !loading && (
+      {graphMode === 'graph' && (
         <div style={{
           display: 'flex',
           alignItems: 'center',
@@ -835,9 +1046,30 @@ export default function KnowledgeGraphView() {
       )}
 
       {/* 1. Graph Canvas View */}
-      {graphMode === 'graph' && !loading && (
+      {graphMode === 'graph' && (
         <div className="graph-workspace" id="graph-workspace-view">
           <div className="card graph-canvas-box" style={{ height: 620, position: 'relative' }}>
+            {loading && (
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  background: 'rgba(15, 23, 42, 0.45)',
+                  backdropFilter: 'blur(2px)',
+                  zIndex: 20,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderRadius: 'inherit',
+                }}
+              >
+                <Loader2 size={28} className="animate-spin" style={{ color: 'var(--accent-blue)', marginBottom: 8 }} />
+                <p style={{ fontSize: 13, color: '#f8fafc', fontWeight: 500, margin: 0 }}>
+                  Loading Knowledge Graph entities & semantic relationships...
+                </p>
+              </div>
+            )}
             {filteredData.nodes.length > 0 ? (
               <div ref={containerRef} style={{ width: '100%', height: '100%' }}></div>
             ) : (
@@ -882,7 +1114,7 @@ export default function KnowledgeGraphView() {
             {selectedEntity ? (
               <div id="inspector-details-content" style={{ marginTop: 14 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span className={`badge ${selectedEntity.type === 'TOPIC' ? 'badge-blue' : selectedEntity.type === 'METHOD' ? 'badge-purple' : selectedEntity.type === 'DATASET' ? 'badge-amber' : 'badge-neutral'}`}>
+                  <span className={`badge ${selectedEntity.type === 'TOPIC' ? 'badge-blue' : selectedEntity.type === 'METHOD' ? 'badge-purple' : selectedEntity.type === 'DATASET' ? 'badge-amber' : selectedEntity.type === 'RELATIONSHIP' ? 'badge-emerald' : 'badge-neutral'}`}>
                     {selectedEntity.type}
                   </span>
                   <button
@@ -890,13 +1122,85 @@ export default function KnowledgeGraphView() {
                     onClick={() => handleFocusNode(selectedEntity.id)}
                     style={{ fontSize: 11, padding: '2px 6px' }}
                   >
-                    Focus
+                    Focus Node
                   </button>
                 </div>
 
                 <h4 style={{ fontSize: 14, fontWeight: 600, margin: '10px 0 6px', color: 'var(--text-primary)' }}>
                   {selectedEntity.title}
                 </h4>
+
+                {/* RELATIONSHIP NODE SPECIFIC CARD */}
+                {selectedEntity.type === 'RELATIONSHIP' && (
+                  <div style={{ marginBottom: 14 }}>
+                    <div
+                      style={{
+                        padding: '12px 14px',
+                        borderRadius: 'var(--radius-sm)',
+                        background: 'var(--bg-secondary)',
+                        border: '1px solid var(--border-subtle)',
+                        marginBottom: 10,
+                      }}
+                    >
+                      <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--accent-primary)', textTransform: 'uppercase', marginBottom: 4 }}>
+                        Inter-Paper Semantic Link
+                      </div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 10 }}>
+                        {selectedEntity.relation || selectedEntity.title}
+                      </div>
+
+                      {selectedEntity.source && (
+                        <div style={{ marginBottom: 8 }}>
+                          <span style={{ fontSize: 10.5, color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Source Entity:</span>
+                          <div
+                            onClick={() => handleFocusNode(selectedEntity.source)}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '6px 8px',
+                              borderRadius: 4,
+                              background: 'var(--bg-card)',
+                              border: '1px solid var(--border-subtle)',
+                              marginTop: 3,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <span style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {filteredData.nodes.find(n => n.id === selectedEntity.source)?.label || selectedEntity.source}
+                            </span>
+                            <ArrowRight size={11} style={{ color: 'var(--accent-primary)', flexShrink: 0, marginLeft: 4 }} />
+                          </div>
+                        </div>
+                      )}
+
+                      {selectedEntity.target && (
+                        <div>
+                          <span style={{ fontSize: 10.5, color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Target Entity:</span>
+                          <div
+                            onClick={() => handleFocusNode(selectedEntity.target)}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '6px 8px',
+                              borderRadius: 4,
+                              background: 'var(--bg-card)',
+                              border: '1px solid var(--border-subtle)',
+                              marginTop: 3,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <span style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {filteredData.nodes.find(n => n.id === selectedEntity.target)?.label || selectedEntity.target}
+                            </span>
+                            <ArrowRight size={11} style={{ color: 'var(--accent-primary)', flexShrink: 0, marginLeft: 4 }} />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 {selectedEntity.type === 'TOPIC' && (
                   <div style={{ marginBottom: 14 }}>
@@ -943,18 +1247,20 @@ export default function KnowledgeGraphView() {
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                       {neighborhood.edges.map((edge, idx) => {
-                        const targetNeighbor = neighborhood.neighbors?.find(
-                          n => n.id === (edge.direction === 'outgoing' ? edge.target : edge.source)
-                        );
-                        const neighborLabel = targetNeighbor?.title || targetNeighbor?.name || targetNeighbor?.text || (edge.direction === 'outgoing' ? edge.target : edge.source);
-                        const relColor = EDGE_COLORS[edge.relation] || '#64748b';
+                        const neighborId = edge.direction === 'outgoing' ? edge.target : edge.source;
+                        const targetNeighbor = neighborhood.neighbors?.find(n => n?.id === neighborId) ||
+                          filteredData.nodes.find(n => n.id === neighborId) ||
+                          rawNodes.find(n => n.id === neighborId);
+
+                        const neighborLabel = targetNeighbor?.title || targetNeighbor?.name || targetNeighbor?.data?.title || targetNeighbor?.data?.name || targetNeighbor?.label || neighborId;
+                        const relColor = EDGE_COLORS[edge.relation] || 'var(--accent-primary)';
 
                         return (
                           <div
                             key={idx}
-                            onClick={() => handleFocusNode(targetNeighbor?.id || (edge.direction === 'outgoing' ? edge.target : edge.source))}
+                            onClick={() => handleFocusNode(neighborId)}
                             style={{
-                              padding: '6px 8px',
+                              padding: '7px 10px',
                               borderRadius: 'var(--radius-sm)',
                               background: 'var(--bg-secondary)',
                               border: '1px solid var(--border-subtle)',
@@ -964,9 +1270,12 @@ export default function KnowledgeGraphView() {
                               alignItems: 'center',
                               justifyContent: 'space-between',
                               gap: 6,
+                              transition: 'border-color 0.15s',
                             }}
+                            onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--accent-primary)'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border-subtle)'; }}
                           >
-                            <div>
+                            <div style={{ overflow: 'hidden' }}>
                               <span
                                 style={{
                                   fontSize: 9.5,
@@ -976,13 +1285,13 @@ export default function KnowledgeGraphView() {
                                   display: 'block',
                                 }}
                               >
-                                {edge.direction === 'outgoing' ? '→ ' : '← '} {edge.relation.replace('_', ' ')}
+                                {edge.direction === 'outgoing' ? '→ ' : '← '} {(edge.relation || 'connected').replace(/_/g, ' ')}
                               </span>
-                              <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>
-                                {String(neighborLabel).slice(0, 30)}
+                              <span style={{ color: 'var(--text-primary)', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>
+                                {String(neighborLabel).slice(0, 34)}
                               </span>
                             </div>
-                            <ArrowRight size={11} style={{ color: 'var(--text-muted)' }} />
+                            <ArrowRight size={12} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
                           </div>
                         );
                       })}
@@ -999,6 +1308,7 @@ export default function KnowledgeGraphView() {
           </div>
         </div>
       )}
+
 
       {/* 2. Relationship Matrix Table */}
       {graphMode === 'matrix' && !loading && (

@@ -1,16 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Search,
   Loader2,
   FileText,
   Network,
-  Sparkles,
   ArrowRight,
   Database,
-  SlidersHorizontal,
   Check,
-  RotateCw,
+  FolderKanban,
+  Zap,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
@@ -25,17 +24,6 @@ const AVAILABLE_SOURCES = [
   { id: 'paperswithcode', name: 'Papers with Code', desc: 'SOTA benchmarks & repos' },
 ];
 
-const SUGGESTED_TOPICS = [
-  'Attention Is All You Need',
-  'Direct Preference Optimization (DPO)',
-  'Diffusion Models for Image Synthesis',
-  'Mamba: Linear-Time Sequence Modeling',
-  'Retrieval-Augmented Generation (RAG)',
-  'Graph Neural Networks for Drug Discovery',
-  'Chain-of-Thought Prompting in LLMs',
-  'Self-Rewarding Language Models',
-];
-
 export default function LiteratureSearchView() {
   const navigate = useNavigate();
   const {
@@ -46,10 +34,19 @@ export default function LiteratureSearchView() {
     performSearch,
     searchLoading,
     searchError,
+    activeWorkspace,
   } = useApp();
 
-  const [query, setQuery] = useState(globalQuery || '');
+  // Initialize query strictly from active workspace title or globalQuery
+  const currentWorkspaceTopic = activeWorkspace?.title || globalQuery || '';
+  const [query, setQuery] = useState(currentWorkspaceTopic);
   const [limit, setLimit] = useState(10);
+
+  // Keep query in exact sync when switching active workspace
+  useEffect(() => {
+    const wsTopic = activeWorkspace?.title || globalQuery || '';
+    setQuery(wsTopic);
+  }, [activeWorkspace?.id, activeWorkspace?.title, globalQuery]);
 
   const toggleSource = (srcId) => {
     setSelectedSources(prev =>
@@ -66,20 +63,21 @@ export default function LiteratureSearchView() {
     const q = query.trim();
     if (!q) return;
 
-    // Navigate to the View Results page immediately; performSearch runs in background/context
     performSearch(q, limit, selectedSources);
     navigate('/search-results');
   };
 
-  const handleSelectSuggestedTopic = (topic) => {
-    setQuery(topic);
-    performSearch(topic, limit, selectedSources);
+  const handleSearchWorkspaceTopic = () => {
+    const topicToSearch = (activeWorkspace?.title || query).trim();
+    if (!topicToSearch) return;
+    setQuery(topicToSearch);
+    performSearch(topicToSearch, limit, selectedSources);
     navigate('/search-results');
   };
 
   return (
     <section id="view-search-home" className="view-panel active">
-      {/* Top 2-Page Segmented Navigation */}
+      {/* Top Segmented Navigation */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, borderBottom: '1px solid var(--border-subtle)', paddingBottom: 10 }}>
         <div style={{ display: 'flex', gap: 6 }}>
           <button
@@ -87,7 +85,7 @@ export default function LiteratureSearchView() {
             style={{ display: 'flex', alignItems: 'center', gap: 6 }}
           >
             <Search size={13} />
-            <span>Search Page</span>
+            <span>Search Literature</span>
           </button>
           <button
             className="btn btn-secondary btn-sm"
@@ -95,7 +93,7 @@ export default function LiteratureSearchView() {
             style={{ display: 'flex', alignItems: 'center', gap: 6 }}
           >
             <FileText size={13} />
-            <span>View Founded Papers ({results.length})</span>
+            <span>Founded Papers ({results.length})</span>
           </button>
         </div>
 
@@ -105,7 +103,7 @@ export default function LiteratureSearchView() {
             onClick={() => navigate('/search-results')}
             style={{ display: 'flex', alignItems: 'center', gap: 6 }}
           >
-            <span>View Results ({results.length})</span>
+            <span>View Founded Papers ({results.length})</span>
             <ArrowRight size={13} />
           </button>
         )}
@@ -113,15 +111,80 @@ export default function LiteratureSearchView() {
 
       {/* Main Panel Header */}
       <div className="panel-header" style={{ marginBottom: 20 }}>
-        <div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>
-            Scientific Literature Search
-          </h1>
-          <p className="panel-subtitle">
-            Search across 8 scientific databases in parallel with automated deduplication, citation mapping, and legal open-access full-text retrieval.
-          </p>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+              <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>
+                Scientific Literature Search
+              </h1>
+              {activeWorkspace && (
+                <span className="badge badge-emerald" style={{ fontSize: 11.5, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <FolderKanban size={11} />
+                  <span>Workspace: {activeWorkspace.title}</span>
+                </span>
+              )}
+            </div>
+            <p className="panel-subtitle" style={{ margin: 0 }}>
+              Search across 8 scientific databases in parallel with automated deduplication, citation mapping, and legal open-access full-text retrieval.
+            </p>
+          </div>
         </div>
       </div>
+
+      {/* Active Workspace Quick Launch Banner */}
+      {activeWorkspace && (
+        <div
+          className="card"
+          style={{
+            marginBottom: 20,
+            padding: '16px 20px',
+            borderRadius: 'var(--radius-md, 8px)',
+            background: 'linear-gradient(135deg, var(--bg-card) 0%, var(--bg-subtle) 100%)',
+            border: '1px solid var(--border-hover, #6366f1)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: 14,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 8,
+                backgroundColor: 'rgba(99, 102, 241, 0.12)',
+                color: 'var(--accent-primary)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Zap size={18} />
+            </div>
+            <div>
+              <div style={{ fontSize: 11.5, color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>
+                Active Research Focus
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>
+                {activeWorkspace.title}
+              </div>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={handleSearchWorkspaceTopic}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600, padding: '7px 16px' }}
+          >
+            <Search size={13} />
+            <span>Search Workspace Topic</span>
+            <ArrowRight size={13} />
+          </button>
+        </div>
+      )}
 
       {/* Active Session Notification if results already exist */}
       {results.length > 0 && (
@@ -129,7 +192,7 @@ export default function LiteratureSearchView() {
           className="card"
           style={{
             marginBottom: 20,
-            padding: '12px 16px',
+            padding: '12px 18px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -140,15 +203,15 @@ export default function LiteratureSearchView() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <FileText size={16} style={{ color: 'var(--accent-blue)' }} />
             <span style={{ fontSize: 13, color: 'var(--text-primary)' }}>
-              You currently have <strong>{results.length} founded research papers</strong> loaded for "<em>{globalQuery}</em>".
+              You currently have <strong>{results.length} founded research papers</strong> loaded for "<em>{globalQuery || query}</em>".
             </span>
           </div>
           <button
-            className="btn btn-primary btn-sm"
+            className="btn btn-secondary btn-sm"
             onClick={() => navigate('/search-results')}
             style={{ display: 'flex', alignItems: 'center', gap: 6 }}
           >
-            <span>Go to Results View</span>
+            <span>Open Results View</span>
             <ArrowRight size={13} />
           </button>
         </div>
@@ -177,7 +240,7 @@ export default function LiteratureSearchView() {
                 id="literature-search-input"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Enter scientific topic, paper title, DOI, or arXiv identifier (e.g. Attention Is All You Need)..."
+                placeholder="Enter scientific topic, paper title, DOI, or arXiv identifier..."
                 autoFocus
                 style={{
                   flex: 1,
@@ -299,36 +362,6 @@ export default function LiteratureSearchView() {
         )}
       </div>
 
-      {/* SUGGESTED / TRENDING RESEARCH TOPICS */}
-      <div className="card" style={{ marginBottom: 24, padding: '18px 20px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-          <Sparkles size={15} style={{ color: 'var(--accent-blue)' }} />
-          <h3 style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>
-            Suggested Research Topics (Click to Run Search)
-          </h3>
-        </div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {SUGGESTED_TOPICS.map((topic, i) => (
-            <button
-              key={i}
-              className="btn btn-secondary btn-sm"
-              onClick={() => handleSelectSuggestedTopic(topic)}
-              style={{
-                fontSize: 12,
-                padding: '6px 12px',
-                borderRadius: 'var(--radius-sm)',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-              }}
-            >
-              <Search size={11} style={{ color: 'var(--text-muted)' }} />
-              <span>{topic}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-
       {/* ARCHITECTURAL CAPABILITIES GRID */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14 }}>
         <div className="card" style={{ padding: 16 }}>
@@ -364,3 +397,5 @@ export default function LiteratureSearchView() {
     </section>
   );
 }
+
+

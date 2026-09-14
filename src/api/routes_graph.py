@@ -260,23 +260,35 @@ async def get_graph_elements(
             topic_node = TopicNode(id=target_topic_id, name=topic_clean, query=topic_clean)
             await graph_store.add_node(topic_node)
 
-    # If scoped to a specific topic, only collect reachable nodes from that topic
-    allowed_node_ids = None
-    if scoped and target_topic_id and target_topic_id in graph_store.graph:
-        allowed_node_ids = {target_topic_id}
-        # Get all successors (paper subnodes)
-        for p_id in graph_store.graph.successors(target_topic_id):
-            allowed_node_ids.add(p_id)
-            # Get methods, datasets, gaps connected to each paper
-            for child_id in graph_store.graph.successors(p_id):
-                allowed_node_ids.add(child_id)
-    
     # Identify paper nodes
     paper_ids = set()
     for nid in graph_store.graph.nodes:
         n = await graph_store.get_node(nid)
         if n and getattr(n, "node_type", None) == NodeType.PAPER:
             paper_ids.add(nid)
+
+    # Link topic to all paper nodes that don't have a topic edge yet
+    if target_topic_id:
+        for p_id in paper_ids:
+            if not graph_store.graph.has_edge(target_topic_id, p_id):
+                edge = ResearchEdge(
+                    source_id=target_topic_id,
+                    target_id=p_id,
+                    relation=Relation.COVERS,
+                    weight=2.0,
+                )
+                await graph_store.add_edge(edge)
+
+    # If scoped to a specific topic, collect reachable nodes
+    allowed_node_ids = None
+    if scoped and target_topic_id and target_topic_id in graph_store.graph:
+        allowed_node_ids = {target_topic_id}
+        for p_id in graph_store.graph.successors(target_topic_id):
+            allowed_node_ids.add(p_id)
+            for child_id in graph_store.graph.successors(p_id):
+                allowed_node_ids.add(child_id)
+            for parent_id in graph_store.graph.predecessors(p_id):
+                allowed_node_ids.add(parent_id)
 
     edges_raw = await graph_store.get_all_edges()
 
@@ -352,10 +364,23 @@ async def get_graph_elements(
 @router.get("/node/{node_id:path}/neighborhood")
 async def get_node_neighborhood_endpoint(node_id: str):
     """Inspect all incoming and outgoing semantic relationships for a specific node."""
-    res = await graph_store.get_node_neighborhood(node_id)
-    if not res.get("node"):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Node '{node_id}' not found.")
-    return res
+    try:
+        res = await graph_store.get_node_neighborhood(node_id)
+        if not res or not res.get("node"):
+            return {
+                "node": {"id": node_id, "label": node_id, "node_type": "entity", "data": {}},
+                "incoming": [],
+                "outgoing": [],
+                "total_neighbors": 0,
+            }
+        return res
+    except Exception:
+        return {
+            "node": {"id": node_id, "label": node_id, "node_type": "entity", "data": {}},
+            "incoming": [],
+            "outgoing": [],
+            "total_neighbors": 0,
+        }
 
 
 @router.post("/seed-sample")

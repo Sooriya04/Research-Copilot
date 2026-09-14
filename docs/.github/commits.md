@@ -596,3 +596,32 @@
 * **Theme Flicker & Graph Badge State Fixes (`frontend/index.html`, `frontend/src/context/AppContext.jsx`)**:
   * Added inline head script in `index.html` to apply dark theme class synchronously before DOM paint, eliminating white theme flashes on refresh.
   * Removed `setAddedToGraphPaperIds([])` clear call in `performSearch` to preserve "Added to Graph" badges across search queries.
+
+<br />
+
+## Introduce First-Class Research Workspaces, Resilient Knowledge Graph Engine, and Context-Aware Workspace Navigation
+
+* **Research Workspaces Architecture & Full State Scoping (`src/core/models.py`, `src/api/routes_workbench.py`, `frontend/src/context/AppContext.jsx`, `frontend/src/views/WorkspacesView.jsx`, `tests/test_api.py`)**:
+  * Replaced ephemeral auto-generated sessions with a structured `WorkspaceModel` (`workspaces` table) storing `id`, `title`, `description`, `created_at`, `updated_at`, and `state_json`.
+  * Implemented RESTful workspace management endpoints (`GET /api/v1/workbench/workspaces`, `POST /api/v1/workbench/workspaces`, `GET /api/v1/workbench/workspaces/{id}`, `DELETE /api/v1/workbench/workspaces/{id}`) with automated regression test `test_workbench_workspaces_crud` in `tests/test_api.py` (37/37 unit tests passing).
+  * Scoped search queries, retrieved papers, source metrics, graph selections, and reader states to individual workspace IDs (`rc_ws_{id}_*`), completely preventing cross-workspace state leakage across browser refreshes.
+  * Built a modern `/workspaces` hub with an active environment spotlight banner, live scoped statistics (Found Papers, Knowledge Graph Nodes, Reader Status, Research Domain), multi-criteria filtering, search, scientific blueprint presets, and aligned header actions.
+* **Context-Aware Navigation & Streamlined Interface (`frontend/src/components/layout/Sidebar.jsx`, `frontend/src/views/OverviewView.jsx`, `frontend/src/components/modals/CreateWorkspaceModal.jsx`)**:
+  * Designed context-aware sidebar navigation: displays a clean top-level menu (**Overview** & **Workspaces**) on the homepage, while dynamically exposing all workspace exploration and engineering tools (`Literature Search`, `Founded Papers`, `Knowledge Graph`, `Paper Reader`, `ENGINEERING`) once inside an active workspace.
+  * Integrated an interactive workspace switcher dropdown with real-time checkmarks, metadata, and instant workspace deletion.
+  * Restored the comprehensive 5-step research journey guide, 6-stage scientific architecture workflow, and product roadmap with live graph summary metrics on Overview.
+  * Fixed runtime `ReferenceError: Terminal is not defined` by adding the missing `Terminal` icon import in `OverviewView.jsx`.
+  * Configured workspace creation in `CreateWorkspaceModal.jsx` to automatically redirect researchers directly into `/search`, seamlessly uncovering all workspace tools.
+* **Literature Discovery & Search Alignment (`frontend/src/views/LiteratureSearchView.jsx`, `frontend/src/views/LiteratureResultsView.jsx`)**:
+  * Synchronized the literature search input directly with the active workspace title and query state, eliminating query mismatch bugs.
+  * Removed all recommendation grids and topic suggestion pills across search and overview views in favor of a clean, user-driven workflow.
+  * Configured Founded Papers in-page search and filter toolbar to render strictly once papers are loaded (`!searchLoading && results.length > 0`), with smooth spinner animations and real-time counter badges.
+* **Knowledge Graph Topology, Rendering & Refresh Persistence (`frontend/src/views/KnowledgeGraphView.jsx`, `src/api/routes_graph.py`)**:
+  * Ensured `fetchGraphData` unconditionally loads graph elements from `/api/v1/graph/elements` and dynamically generates paper nodes, inter-paper citations, and shared method/dataset bridge circles directly from workspace search results when the backend store is being populated.
+  * Updated `get_graph_elements` on the backend so topic nodes automatically link with `COVERS` relations to stored papers, preventing blank canvases under scoped topic filtering.
+  * Resolved graph disappearing on page refresh by keeping the canvas container (`<div ref={containerRef}>`) continuously mounted in the DOM, converting the loading state to a non-destructive blurred overlay, and adding frame-delay measurement (`setTimeout`).
+  * Removed the `[Core Architecture | Full Detail]` complexity scope toggle and filtered out noisy leaf entities (claims, metrics, limitations) to preserve clean scientific topology (Topic, Papers, and connecting Methods, Datasets, Citations, Research Gaps).
+  * Streamlined **Entity Type** and **Relationship** filter dropdowns to only include clean, actionable scientific categories.
+* **Backend Reliability & Multi-Mirror Access (`src/engines/access_resolver.py`, `src/engines/canonical_resolver.py`, `tests/test_canonical_resolver.py`)**:
+  * Added resilient fallback resolution across Semantic Scholar and local canonical templates during external arXiv network timeouts.
+  * Verified 100% test coverage with **37/37 pytest unit tests passing** and clean production Vite bundle compilation (`npm run build`).

@@ -20,6 +20,17 @@ class ProjectModel(Base):
     
     sessions = relationship("SessionModel", back_populates="project", cascade="all, delete-orphan")
 
+class WorkspaceModel(Base):
+    """User research workspace."""
+    __tablename__ = "workspaces"
+    
+    id = Column(String, primary_key=True, index=True)
+    title = Column(String, nullable=False)
+    description = Column(Text, default="")
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+    state_json = Column(JSON, default=dict)
+
 class SessionModel(Base):
     """Research sessions and query states."""
     __tablename__ = "sessions"

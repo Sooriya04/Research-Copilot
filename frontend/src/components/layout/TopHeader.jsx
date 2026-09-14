@@ -11,18 +11,28 @@ const VIEW_TITLES = {
   '/experiment-studio': 'Benchmarks & SOTA',
   '/manuscript': 'Manuscript Draft',
   '/research-gaps': 'Research Gap Finder',
+  '/workspaces': 'Research Workspaces Hub',
 };
 
 export default function TopHeader() {
   const location = useLocation();
-  const { theme, toggleTheme, openCmdPalette } = useApp();
+  const { theme, toggleTheme, openCmdPalette, activeWorkspace, openWorkspaceModal } = useApp();
 
   const currentTitle = VIEW_TITLES[location.pathname] || 'Workspace';
+  const wsTitle = activeWorkspace ? activeWorkspace.title : 'Research Workspace';
 
   return (
     <header className="top-header">
       <div className="header-left">
-        <span>Workspace</span> / <strong id="header-view-title">{currentTitle}</strong>
+        <span
+          onClick={openWorkspaceModal}
+          style={{ cursor: 'pointer', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+          title="Click to switch or create workspace"
+        >
+          {wsTitle}
+        </span>
+        <span style={{ margin: '0 6px', color: 'var(--text-muted)' }}>/</span>
+        <strong id="header-view-title">{currentTitle}</strong>
       </div>
 
       <div className="command-bar-trigger" id="btn-open-cmd-bar" onClick={openCmdPalette}>

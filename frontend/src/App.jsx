@@ -4,6 +4,7 @@ import Sidebar from './components/layout/Sidebar';
 import TopHeader from './components/layout/TopHeader';
 import CommandPaletteModal from './components/modals/CommandPaletteModal';
 import PaperDetailModal from './components/modals/PaperDetailModal';
+import CreateWorkspaceModal from './components/modals/CreateWorkspaceModal';
 
 import OverviewView from './views/OverviewView';
 import LiteratureSearchView from './views/LiteratureSearchView';
@@ -13,6 +14,7 @@ import PaperReaderView from './views/PaperReaderView';
 import BenchmarksView from './views/BenchmarksView';
 import ManuscriptView from './views/ManuscriptView';
 import ResearchGapView from './views/ResearchGapView';
+import WorkspacesView from './views/WorkspacesView';
 
 export default function App() {
   const navigate = useNavigate();
@@ -46,6 +48,7 @@ export default function App() {
             <Route path="/experiment-studio" element={<BenchmarksView />} />
             <Route path="/manuscript" element={<ManuscriptView />} />
             <Route path="/research-gaps" element={<ResearchGapView />} />
+            <Route path="/workspaces" element={<WorkspacesView />} />
             <Route path="*" element={<OverviewView />} />
           </Routes>
         </div>
@@ -53,6 +56,7 @@ export default function App() {
 
       <CommandPaletteModal />
       <PaperDetailModal />
+      <CreateWorkspaceModal />
     </div>
   );
 }
