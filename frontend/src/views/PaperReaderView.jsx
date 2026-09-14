@@ -82,7 +82,10 @@ export default function PaperReaderView() {
   const [errorMessage, setErrorMessage] = useState(null);
 
   const fetchOaCandidate = (lookupQuery) => {
-    if (!lookupQuery) return;
+    if (!lookupQuery) {
+      setResolvingPdf(false);
+      return;
+    }
     setResolvingPdf(true);
     fetch(`/api/v1/paper/${encodeURIComponent(lookupQuery)}`)
       .then(res => res.ok ? res.json() : null)
@@ -117,6 +120,9 @@ export default function PaperReaderView() {
       const authorsStr = (activeReaderPaper.authors || []).map(a => (typeof a === 'string' ? a : a.name)).join(', ');
       const pdfLink = resolvePaperPdf(activeReaderPaper);
       const sourceUrl = activeReaderPaper.url || (cleanArxiv ? `https://arxiv.org/abs/${cleanArxiv}` : (activeReaderPaper.doi ? `https://doi.org/${activeReaderPaper.doi}` : null));
+      const dynamicMethodology = activeReaderPaper.methods && activeReaderPaper.methods.length > 0
+        ? `Methodology focuses on: ${activeReaderPaper.methods.join(', ')}.`
+        : (activeReaderPaper.abstract ? `Key Research Focus: ${activeReaderPaper.abstract.slice(0, 260)}...` : 'Structured methodology extracted from canonical paper ingestion.');
 
       setCurrentDoc({
         id: pId || 'Document',
@@ -127,7 +133,7 @@ export default function PaperReaderView() {
         sourceUrl: sourceUrl,
         pdfUrl: pdfLink,
         abstract: activeReaderPaper.abstract || 'No abstract preview available.',
-        methodology: 'Structured methodology extracted from canonical paper ingestion.',
+        methodology: dynamicMethodology,
         concepts: activeReaderPaper.topics && activeReaderPaper.topics.length > 0 ? activeReaderPaper.topics.slice(0, 5) : ['MACHINE-LEARNING', 'METHODOLOGY'],
         bibtex: `@article{paper_${(cleanArxiv || pId).replace(/[^a-zA-Z0-9]/g, '') || 'ref'},
   title={${activeReaderPaper.title || 'Untitled'}},
@@ -150,7 +156,10 @@ export default function PaperReaderView() {
 
   const handleExtract = async () => {
     const query = inputVal.trim();
-    if (!query) return;
+    if (!query || loading) return;
+
+    setLoading(true);
+    setErrorMessage(null);
 
     // Check if user entered a direct PDF URL
     if (query.endsWith('.pdf') || query.includes('/pdf/')) {
@@ -171,11 +180,9 @@ export default function PaperReaderView() {
   url={${query}}
 }`,
       });
+      setLoading(false);
       return;
     }
-
-    setLoading(true);
-    setErrorMessage(null);
     try {
       const res = await fetch('/api/v1/paper/summarize', {
         method: 'POST',

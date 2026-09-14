@@ -45,10 +45,19 @@ async def create_project(req: ProjectCreate, db: AsyncSession = Depends(get_db))
 
 @router.get("/sessions", response_model=List[SessionOut])
 async def list_sessions(db: AsyncSession = Depends(get_db)):
-    """List all research sessions stored in SQLite."""
-    result = await db.execute(select(SessionModel))
+    """List all research sessions stored in SQLite, sorted newest first and deduplicated by query."""
+    result = await db.execute(select(SessionModel).order_by(SessionModel.created_at.desc()))
     sessions = result.scalars().all()
-    return [SessionOut(id=s.id, project_id=s.project_id, query=s.query, status=s.status) for s in sessions]
+    
+    seen_queries = set()
+    unique_sessions = []
+    ignored_dummy_queries = {"string", "test", "dummy", "null", "undefined", "foo", "bar"}
+    for s in sessions:
+        q_norm = (s.query or "").strip().lower()
+        if q_norm and q_norm not in ignored_dummy_queries and q_norm not in seen_queries:
+            seen_queries.add(q_norm)
+            unique_sessions.append(SessionOut(id=s.id, project_id=s.project_id, query=s.query, status=s.status))
+    return unique_sessions
 
 @router.get("/artifacts/{session_id}")
 async def list_session_artifacts(session_id: str, db: AsyncSession = Depends(get_db)):

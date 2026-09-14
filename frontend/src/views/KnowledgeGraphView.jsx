@@ -378,10 +378,25 @@ export default function KnowledgeGraphView() {
     if (graphMode === 'graph' && containerRef.current && filteredData.nodes.length > 0) {
       renderVisGraph();
     }
+    return () => {
+      if (networkRef.current) {
+        try {
+          networkRef.current.destroy();
+        } catch (e) {}
+        networkRef.current = null;
+      }
+    };
   }, [graphMode, theme, filteredData]);
 
   const renderVisGraph = () => {
     if (!containerRef.current || filteredData.nodes.length === 0) return;
+
+    if (networkRef.current) {
+      try {
+        networkRef.current.destroy();
+      } catch (e) {}
+      networkRef.current = null;
+    }
 
     const isDark = theme === 'dark';
 

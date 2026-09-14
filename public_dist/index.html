@@ -16,10 +16,30 @@
   <!-- KaTeX for LaTeX Formulas -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
-  <script type="module" crossorigin src="/assets/index-DKyXx5br.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-BOSarErc.css">
+  <script>
+    (function() {
+      try {
+        var t = localStorage.getItem('rc_theme');
+        if (t === 'dark') {
+          document.documentElement.classList.add('dark-theme');
+        }
+      } catch(e) {}
+    })();
+  </script>
+  <script type="module" crossorigin src="/assets/index-DzRP36JI.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-Ds4kJaQL.css">
 </head>
 <body class="light-theme">
+  <script>
+    (function() {
+      try {
+        var t = localStorage.getItem('rc_theme');
+        if (t === 'dark') {
+          document.body.className = 'dark-theme';
+        }
+      } catch(e) {}
+    })();
+  </script>
   <div id="root"></div>
 </body>
 </html>

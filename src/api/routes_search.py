@@ -280,17 +280,55 @@ async def search_unified_endpoint(req: UnifiedSearchRequest, db: AsyncSession = 
     logger.info("[UNIFIED SEARCH] Initiating parallel search for query: '%s'", req.query)
     
     session_id = req.session_id or f"sess-{uuid.uuid4().hex[:8]}"
-    sources = req.sources or ["openalex", "arxiv", "europepmc", "semanticscholar"]
+    sources = req.sources or ["openalex", "arxiv", "europepmc", "semanticscholar", "crossref", "huggingface", "paperswithcode"]
     source_tasks = {}
 
     if "openalex" in sources:
-        source_tasks["openalex"] = resolver.search_openalex(req.query, limit=req.limit_per_source)
+        source_tasks["openalex"] = asyncio.wait_for(resolver.search_openalex(req.query, limit=req.limit_per_source), timeout=8.0)
     if "arxiv" in sources:
-        source_tasks["arxiv"] = resolver.search_arxiv(req.query, limit=req.limit_per_source)
+        source_tasks["arxiv"] = asyncio.wait_for(resolver.search_arxiv(req.query, limit=req.limit_per_source), timeout=8.0)
     if "europepmc" in sources or "pubmed" in sources:
-        source_tasks["europepmc"] = multi_search.search_europepmc(req.query, limit=req.limit_per_source)
+        source_tasks["europepmc"] = asyncio.wait_for(multi_search.search_europepmc(req.query, limit=req.limit_per_source), timeout=8.0)
     if "semanticscholar" in sources:
-        source_tasks["semanticscholar"] = multi_search.search_semanticscholar(req.query, limit=req.limit_per_source)
+        source_tasks["semanticscholar"] = asyncio.wait_for(multi_search.search_semanticscholar(req.query, limit=req.limit_per_source), timeout=8.0)
+    if "crossref" in sources:
+        source_tasks["crossref"] = asyncio.wait_for(multi_search.search_crossref(req.query, limit=req.limit_per_source), timeout=8.0)
+    if "huggingface" in sources:
+        async def _hf_wrapper():
+            hf_items = await multi_search.search_huggingface(req.query, limit=req.limit_per_source)
+            converted = []
+            for item in hf_items:
+                converted.append(Paper(
+                    id=f"hf:{item.get('id')}",
+                    title=f"HuggingFace {item.get('type', 'artifact').capitalize()}: {item.get('id')}",
+                    abstract=f"Hugging Face repository ({item.get('pipeline_tag') or 'ML model'}). Likes: {item.get('likes', 0)}, Downloads: {item.get('downloads', 0)}.",
+                    authors=[],
+                    primary_source="huggingface",
+                    url=item.get("url"),
+                    is_open_access=True,
+                ))
+            return converted
+        source_tasks["huggingface"] = asyncio.wait_for(_hf_wrapper(), timeout=8.0)
+    if "paperswithcode" in sources:
+        async def _pwc_wrapper():
+            from src.engines.paperswithcode import PapersWithCodeClient
+            client = PapersWithCodeClient()
+            pwc_papers = await client.search_papers(req.query, limit=req.limit_per_source)
+            converted = []
+            for p in pwc_papers:
+                converted.append(Paper(
+                    id=f"pwc:{p.id}",
+                    title=p.title,
+                    abstract=p.abstract or "Papers with Code benchmark repository entry.",
+                    authors=[Author(name=a) for a in (p.authors or [])],
+                    year=p.published_year,
+                    url=p.url,
+                    pdf_url=p.pdf_url,
+                    primary_source="paperswithcode",
+                    is_open_access=True,
+                ))
+            return converted
+        source_tasks["paperswithcode"] = asyncio.wait_for(_pwc_wrapper(), timeout=8.0)
 
     task_keys = list(source_tasks.keys())
     results = await asyncio.gather(*source_tasks.values(), return_exceptions=True)
@@ -300,7 +338,7 @@ async def search_unified_endpoint(req: UnifiedSearchRequest, db: AsyncSession = 
 
     for source_name, res in zip(task_keys, results):
         if isinstance(res, Exception):
-            logger.error("[UNIFIED SEARCH] Source '%s' FAILED with error: %s", source_name, res)
+            logger.warning("[UNIFIED SEARCH] Source '%s' timed out or encountered error: %s", source_name, res)
             source_breakdown[source_name] = 0
         elif isinstance(res, list):
             logger.info("[UNIFIED SEARCH] Source '%s' SUCCEEDED -> Found %d papers", source_name, len(res))
@@ -327,19 +365,26 @@ async def search_unified_endpoint(req: UnifiedSearchRequest, db: AsyncSession = 
     except Exception as graph_err:
         logger.warning("Could not initialize topic head node in graph store: %s", graph_err)
 
-    # Persist or update session in SQLite
+    # Persist or update session in SQLite (deduplicating by session_id or query)
     try:
         existing_sess = await db.get(SessionModel, session_id)
         if not existing_sess:
+            q_res = await db.execute(select(SessionModel).where(SessionModel.query == req.query.strip()))
+            same_query_sess = q_res.scalars().first()
+            if same_query_sess:
+                existing_sess = same_query_sess
+                session_id = same_query_sess.id
+
+        if not existing_sess:
             new_session = SessionModel(
                 id=session_id,
-                query=req.query,
+                query=req.query.strip(),
                 status="completed",
                 state_json={"total_papers": len(unique_papers), "sources": sources, "duration_ms": duration_ms}
             )
             db.add(new_session)
         else:
-            existing_sess.query = req.query
+            existing_sess.query = req.query.strip()
             existing_sess.status = "completed"
             existing_sess.state_json = {"total_papers": len(unique_papers), "sources": sources, "duration_ms": duration_ms}
         await db.commit()

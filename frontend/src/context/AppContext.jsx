@@ -212,7 +212,6 @@ export function AppProvider({ children }) {
     setSearchQuery(q);
     setSearchResults([]);
     setSourceCounts({});
-    setAddedToGraphPaperIds([]);
 
     try {
       const res = await fetch('/api/v1/search/unified', {

@@ -569,4 +569,30 @@
   * Added real-time `resolvingPdf` loading indicator during background mirror lookup.
   * Added on-demand **"Locate Open Access PDF"** action button in the fallback card to trigger immediate multi-source resolution.
 
+<br />
 
+## Complete Platform Bug Audit, Session Deduplication, PDF Resolver Hardening, and Vis Network Memory Cleanup
+
+* **Session Deduplication & Database Persistence Hardening (`src/api/routes_workbench.py`, `src/api/routes_search.py`, `src/api/routes_graph.py`)**:
+  * Sorted sessions by `created_at desc` and deduplicated by query in `list_sessions` endpoint, preventing duplicate session rows from appearing on the Overview page.
+  * Added query-based lookups in `unified_search_endpoint` and `run_pipeline_endpoint` to reuse existing database session records when running identical search queries.
+  * Filtered out dummy test queries (`"string"`, `"test"`, `"dummy"`, `"null"`) from recent session listings.
+* **Unified Multi-Source Search Connector Completion (`src/api/routes_search.py`)**:
+  * Extended `search_unified_endpoint` to handle all 8 scientific databases (`openalex`, `arxiv`, `europepmc`, `semanticscholar`, `crossref`, `huggingface`, `paperswithcode`).
+  * Wrapped each connector task in `asyncio.wait_for(..., timeout=8.0)` to enforce an 8-second execution budget per source, eliminating hanging search spinners.
+  * Converted Hugging Face models/datasets and Papers with Code benchmark records into unified `Paper` models for seamless UI rendering.
+* **arXiv Direct Lookup Optimization (`src/engines/access_resolver.py`)**:
+  * Optimized arXiv search queries matching arXiv ID format (`\d{4}\.\d{4,5}`) to use `id_list={clean_id}` instead of full-text `search_query=all:...`.
+  * Resolved arXiv API 500 server errors and test execution timeouts; verified 36/36 backend tests pass cleanly.
+* **Paper Reader & PDF Resolver Hardening (`frontend/src/views/PaperReaderView.jsx`)**:
+  * Fixed `resolvingPdf` spinner freeze bug by ensuring `setResolvingPdf(false)` is always executed on early returns when `lookupQuery` is empty.
+  * Added double-click protection (`if (loading) return`) and explicit loading state resetting for direct PDF URL extractions in `handleExtract`.
+  * Replaced static fallback text with dynamic methodology synthesis derived from paper methods or abstract content.
+* **Vis Network Memory Leak & Cleanup Fix (`frontend/src/views/KnowledgeGraphView.jsx`)**:
+  * Added explicit `networkRef.current.destroy()` cleanup before instantiating new Vis Network instances during graph filter changes.
+  * Added cleanup return function to `useEffect` to prevent duplicate event listener registrations and memory leaks.
+* **Research Gap Error Handling (`frontend/src/views/ResearchGapView.jsx`)**:
+  * Implemented error handling and UI error banner for hypothesis generation failures, replacing silent catch blocks.
+* **Theme Flicker & Graph Badge State Fixes (`frontend/index.html`, `frontend/src/context/AppContext.jsx`)**:
+  * Added inline head script in `index.html` to apply dark theme class synchronously before DOM paint, eliminating white theme flashes on refresh.
+  * Removed `setAddedToGraphPaperIds([])` clear call in `performSearch` to preserve "Added to Graph" badges across search queries.

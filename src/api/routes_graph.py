@@ -76,14 +76,20 @@ async def run_research_graph(req: GraphRunRequest, db: AsyncSession = Depends(ge
     pipeline = build_default_research_pipeline()
     final_state: ResearchGraphState = await pipeline.run(initial_state)
 
-    # Persist session and run in SQLite
-    session_record = SessionModel(
-        id=session_id,
-        query=req.query,
-        status="completed",
-        state_json={"total_papers": len(final_state.papers), "iterations": final_state.iteration}
-    )
-    db.add(session_record)
+    # Persist session and run in SQLite (deduplicate existing session)
+    existing_sess = await db.get(SessionModel, session_id)
+    if not existing_sess:
+        session_record = SessionModel(
+            id=session_id,
+            query=req.query,
+            status="completed",
+            state_json={"total_papers": len(final_state.papers), "iterations": final_state.iteration}
+        )
+        db.add(session_record)
+    else:
+        existing_sess.query = req.query
+        existing_sess.status = "completed"
+        existing_sess.state_json = {"total_papers": len(final_state.papers), "iterations": final_state.iteration}
 
     run_record = GraphRunModel(
         id=f"run-{uuid.uuid4().hex[:8]}",

@@ -32,9 +32,12 @@ export default function ResearchGapView() {
       .catch(() => {});
   }, []);
 
+  const [errorMessage, setErrorMessage] = useState(null);
+
   const handleAnalyzeGaps = async () => {
     if (!topic.trim()) return;
     setLoading(true);
+    setErrorMessage(null);
 
     try {
       const res = await fetch('/api/v1/hypothesis/generate', {
@@ -55,9 +58,12 @@ export default function ResearchGapView() {
             }))
           );
         }
+      } else {
+        const errTxt = await res.text();
+        setErrorMessage(`Hypothesis generation failed: ${errTxt}`);
       }
     } catch (err) {
-      // Keep state
+      setErrorMessage(`Network error generating hypotheses: ${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -109,6 +115,12 @@ export default function ResearchGapView() {
             <span>{loading ? 'Analyzing...' : 'Generate Hypotheses'}</span>
           </button>
         </form>
+
+        {errorMessage && (
+          <div style={{ marginTop: 12, fontSize: 12.5, color: 'var(--accent-rose)' }}>
+            {errorMessage}
+          </div>
+        )}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }} id="gap-results-container">

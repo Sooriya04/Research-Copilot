@@ -73,8 +73,17 @@ class AccessResolver:
 
     async def search_arxiv(self, query: str, limit: int = 25) -> List[Paper]:
         """Search papers on arXiv API."""
-        clean_query = urllib.parse.quote(f"all:{query}")
-        url = f"{settings.arxiv_base_url}?search_query={clean_query}&start=0&max_results={limit}"
+        raw_q = query.strip()
+        clean_id = re.sub(r"^arxiv:\s*", "", raw_q, flags=re.IGNORECASE)
+        clean_id = re.sub(r"v\d+$", "", clean_id)
+        is_arxiv_id = bool(re.match(r"^\d{4}\.\d{4,5}$", clean_id) or re.match(r"^[a-z\-]+(?:\.[A-Z]{2})?/\d{7}$", clean_id))
+
+        if is_arxiv_id:
+            url = f"{settings.arxiv_base_url}?id_list={clean_id}"
+        else:
+            clean_query = urllib.parse.quote(f"all:{raw_q}")
+            url = f"{settings.arxiv_base_url}?search_query={clean_query}&start=0&max_results={limit}"
+
         papers: List[Paper] = []
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
