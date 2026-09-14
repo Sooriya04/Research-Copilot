@@ -621,7 +621,30 @@
   * Updated `get_graph_elements` on the backend so topic nodes automatically link with `COVERS` relations to stored papers, preventing blank canvases under scoped topic filtering.
   * Resolved graph disappearing on page refresh by keeping the canvas container (`<div ref={containerRef}>`) continuously mounted in the DOM, converting the loading state to a non-destructive blurred overlay, and adding frame-delay measurement (`setTimeout`).
   * Removed the `[Core Architecture | Full Detail]` complexity scope toggle and filtered out noisy leaf entities (claims, metrics, limitations) to preserve clean scientific topology (Topic, Papers, and connecting Methods, Datasets, Citations, Research Gaps).
+  * Enforced strict topic node isolation: filtered out stale, foreign topic capsules from prior searches, guaranteeing that only the single active workspace topic node is rendered at the center of the graph canvas.
   * Streamlined **Entity Type** and **Relationship** filter dropdowns to only include clean, actionable scientific categories.
 * **Backend Reliability & Multi-Mirror Access (`src/engines/access_resolver.py`, `src/engines/canonical_resolver.py`, `tests/test_canonical_resolver.py`)**:
   * Added resilient fallback resolution across Semantic Scholar and local canonical templates during external arXiv network timeouts.
   * Verified 100% test coverage with **37/37 pytest unit tests passing** and clean production Vite bundle compilation (`npm run build`).
+
+<br />
+
+## Introduce Single-Page Research Library Hub, AI Research Chat, Paper Ingestion, and Context-Aware Workspace Hierarchy
+
+* **Single-Page Research Library & Unified Ingestion Hub (`frontend/src/views/LibraryView.jsx`, `src/api/routes_paper_intelligence.py`, `frontend/src/App.jsx`)**:
+  * Built a single-page **Library Hub** (`/library`) supporting 3 ingestion methods:
+    * **Upload PDF File**: Drag & drop or file picker accepting `.pdf` research documents with automatic paper metadata extraction and indexing.
+    * **Import via ID / URL**: Instant resolution for arXiv IDs (e.g. `1706.03762`, `2312.00752`), DOIs, or direct paper URLs with automatic metadata fetching.
+    * **Select Files (Batch Ingestion)**: Multi-file picker enabling rapid multi-document ingestion.
+  * Added REST endpoints `POST /api/v1/paper/upload` (multipart PDF ingestion) and `POST /api/v1/paper/import-url` (identifier/URL resolver).
+  * Minimalist light/dark theme design featuring an empty state hero capsule and an interactive inventory table with one-click **Read**, **Chat**, and **Delete** actions synced to `localStorage`.
+* **Autonomous AI Research Chat Engine & Slide-Out Drawer (`src/api/routes_chat.py`, `frontend/src/views/LibraryView.jsx`)**:
+  * Implemented context-grounded conversational research assistant endpoint `POST /api/v1/chat/message` and SSE streaming endpoint `POST /api/v1/chat/stream`.
+  * Injected dynamic grounding context: active workspace topic, active paper title, and abstract directly into the research system prompt.
+  * Built slide-out conversational drawer with per-paper context injection and instant reply streaming.
+* **Hierarchical Workspace Navigation & Interactive Knowledge Graph Alignment (`frontend/src/components/layout/Sidebar.jsx`, `frontend/src/views/LiteratureResultsView.jsx`, `src/api/routes_graph.py`, `src/graph/store.py`)**:
+  * Structured the sidebar into a clean three-pillar navigation: **Overview**, **Workspaces**, and **Library**.
+  * Dynamic workspace tree: automatically uncovers all 4 workspace tools (`Literature Search`, `Founded Papers`, `Knowledge Graph`, `Paper Reader`) when inside any workspace environment.
+  * Enhanced Founded Papers with full toggleable **Add / Un-Add (Remove)** capabilities for the knowledge graph backed by backend `remove_node` and `POST /api/v1/graph/remove-paper` endpoints.
+* **Full Test Suite & Production Bundle Verification (`tests/`, `frontend/dist/`)**:
+  * Verified 100% green test suite with all **39/39 passing pytest unit tests** and clean production Vite bundle compilation (`npm run build`).

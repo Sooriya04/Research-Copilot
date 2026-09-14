@@ -155,8 +155,17 @@ export default function OverviewView() {
           </div>
         </form>
 
-        {/* 5 Fast Action Navigation Buttons */}
+        {/* Fast Action Navigation Buttons */}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, paddingTop: 16, borderTop: '1px solid var(--border-subtle)' }}>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => navigate('/chat')}
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <Sparkles size={13} style={{ color: 'var(--accent-primary)' }} />
+            <span>AI Research Chat</span>
+          </button>
           <button
             type="button"
             className="btn btn-secondary btn-sm"
@@ -191,7 +200,7 @@ export default function OverviewView() {
             style={{ display: 'flex', alignItems: 'center', gap: 6 }}
           >
             <FileText size={13} style={{ color: 'var(--accent-amber)' }} />
-            <span>4. Paper Reader & PDF</span>
+            <span>4. Paper Reader & Markdown</span>
           </button>
           <button
             type="button"

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Search,
   Loader2,
@@ -26,6 +26,7 @@ const AVAILABLE_SOURCES = [
 
 export default function LiteratureSearchView() {
   const navigate = useNavigate();
+  const location = useLocation();
   const {
     searchQuery: globalQuery,
     searchResults: results,
@@ -42,11 +43,19 @@ export default function LiteratureSearchView() {
   const [query, setQuery] = useState(currentWorkspaceTopic);
   const [limit, setLimit] = useState(10);
 
-  // Keep query in exact sync when switching active workspace
+  // Sync with URL query parameter (e.g. from Command Palette) or active workspace topic
   useEffect(() => {
-    const wsTopic = activeWorkspace?.title || globalQuery || '';
-    setQuery(wsTopic);
-  }, [activeWorkspace?.id, activeWorkspace?.title, globalQuery]);
+    const params = new URLSearchParams(location.search);
+    const urlQuery = params.get('q');
+    if (urlQuery && urlQuery.trim()) {
+      setQuery(urlQuery.trim());
+      performSearch(urlQuery.trim(), limit, selectedSources);
+      navigate('/search-results', { replace: true });
+    } else {
+      const wsTopic = activeWorkspace?.title || globalQuery || '';
+      setQuery(wsTopic);
+    }
+  }, [location.search, activeWorkspace?.id, activeWorkspace?.title, globalQuery]);
 
   const toggleSource = (srcId) => {
     setSelectedSources(prev =>
@@ -390,7 +399,7 @@ export default function LiteratureSearchView() {
             <h4 style={{ margin: 0, fontSize: 13.5, fontWeight: 600 }}>Selective Graph Ingestion</h4>
           </div>
           <p style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-            Only papers you explicitly choose via "+ Add to Graph" are imported into the Knowledge Graph topology.
+            Only papers you explicitly choose via "Add to Graph" are imported into the Knowledge Graph topology.
           </p>
         </div>
       </div>

@@ -5,13 +5,17 @@ import { useApp } from '../../context/AppContext';
 
 const VIEW_TITLES = {
   '/': 'Overview',
+  '/create': 'Library',
+  '/library': 'Library',
+  '/workspaces': 'Research Workspaces Hub',
+  '/chat': 'Library',
   '/search': 'Literature Search',
+  '/search-results': 'Founded Papers',
   '/knowledge-graph': 'Knowledge Graph',
-  '/pdf-inspector': 'Paper Reader',
+  '/pdf-inspector': 'Paper Reader & Markdown',
   '/experiment-studio': 'Benchmarks & SOTA',
   '/manuscript': 'Manuscript Draft',
   '/research-gaps': 'Research Gap Finder',
-  '/workspaces': 'Research Workspaces Hub',
 };
 
 export default function TopHeader() {

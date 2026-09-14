@@ -11,6 +11,7 @@ import LiteratureSearchView from './views/LiteratureSearchView';
 import LiteratureResultsView from './views/LiteratureResultsView';
 import KnowledgeGraphView from './views/KnowledgeGraphView';
 import PaperReaderView from './views/PaperReaderView';
+import LibraryView from './views/LibraryView';
 import BenchmarksView from './views/BenchmarksView';
 import ManuscriptView from './views/ManuscriptView';
 import ResearchGapView from './views/ResearchGapView';
@@ -23,7 +24,7 @@ export default function App() {
   useEffect(() => {
     const handleNumberShortcuts = (e) => {
       if (['1', '2', '3', '4'].includes(e.key) && !['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) {
-        const routes = ['/', '/search', '/knowledge-graph', '/pdf-inspector'];
+        const routes = ['/', '/workspaces', '/library', '/pdf-inspector'];
         navigate(routes[parseInt(e.key) - 1]);
       }
     };
@@ -40,6 +41,10 @@ export default function App() {
           <Routes>
             <Route path="/" element={<OverviewView />} />
             <Route path="/overview" element={<OverviewView />} />
+            <Route path="/workspaces" element={<WorkspacesView />} />
+            <Route path="/library" element={<LibraryView />} />
+            <Route path="/create" element={<LibraryView />} />
+            <Route path="/chat" element={<LibraryView />} />
             <Route path="/search" element={<LiteratureSearchView />} />
             <Route path="/search-results" element={<LiteratureResultsView />} />
             <Route path="/search/results" element={<LiteratureResultsView />} />
@@ -48,7 +53,6 @@ export default function App() {
             <Route path="/experiment-studio" element={<BenchmarksView />} />
             <Route path="/manuscript" element={<ManuscriptView />} />
             <Route path="/research-gaps" element={<ResearchGapView />} />
-            <Route path="/workspaces" element={<WorkspacesView />} />
             <Route path="*" element={<OverviewView />} />
           </Routes>
         </div>

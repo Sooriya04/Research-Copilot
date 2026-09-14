@@ -138,3 +138,127 @@ async def delete_workspace(workspace_id: str, db: AsyncSession = Depends(get_db)
     await db.delete(ws)
     await db.commit()
     return {"status": "deleted", "workspace_id": workspace_id}
+
+CURATED_LIBRARY_PAPERS = [
+    {
+        "id": "1706.03762",
+        "arxiv_id": "1706.03762",
+        "title": "Attention Is All You Need",
+        "authors": ["Ashish Vaswani", "Noam Shazeer", "Niki Parmar", "Jakob Uszkoreit", "Llion Jones", "Aidan N. Gomez", "Lukasz Kaiser", "Illia Polosukhin"],
+        "year": 2017,
+        "category": "Transformers & Attention",
+        "abstract": "The dominant sequence transduction models are based on complex recurrent or convolutional neural networks in an encoder-decoder configuration. We propose the Transformer, a model architecture eschewing recurrence and instead relying entirely on an attention mechanism to draw global dependencies between input and output.",
+        "benchmarks": ["WMT 2014 English-to-German", "WMT 2014 English-to-French"],
+        "pdf_url": "https://arxiv.org/pdf/1706.03762.pdf",
+    },
+    {
+        "id": "2312.00752",
+        "arxiv_id": "2312.00752",
+        "title": "Mamba: Linear-Time Sequence Modeling with Selective State Spaces",
+        "authors": ["Albert Gu", "Tri Dao"],
+        "year": 2023,
+        "category": "State Space Models",
+        "abstract": "Foundation models, now powering most of the exciting applications in deep learning, are almost universally based on the Transformer architecture. We introduce Mamba, a selective state space model that achieves linear-time sequence modeling with selective state compression, matching Transformer quality at 5x higher throughput.",
+        "benchmarks": ["Pile Pretraining", "Long Range Arena", "Audio Generation"],
+        "pdf_url": "https://arxiv.org/pdf/2312.00752.pdf",
+    },
+    {
+        "id": "2501.12948",
+        "arxiv_id": "2501.12948",
+        "title": "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning",
+        "authors": ["DeepSeek-AI", "Daya Guo", "Dejian Yang", "Haowei Zhang", "Junxiao Song"],
+        "year": 2025,
+        "category": "LLM Reasoning & RL",
+        "abstract": "We introduce DeepSeek-R1-Zero and DeepSeek-R1, models trained via large-scale reinforcement learning without prior supervised fine-tuning as a step to unlock autonomous reasoning, self-verification, and chain-of-thought expansion for complex mathematical and competitive programming problems.",
+        "benchmarks": ["AIME 2024", "MATH-500", "Codeforces", "SWE-bench"],
+        "pdf_url": "https://arxiv.org/pdf/2501.12948.pdf",
+    },
+    {
+        "id": "2112.10752",
+        "arxiv_id": "2112.10752",
+        "title": "High-Resolution Image Synthesis with Latent Diffusion Models",
+        "authors": ["Robin Rombach", "Andreas Blattmann", "Dominik Lorenz", "Patrick Esser", "Björn Ommer"],
+        "year": 2021,
+        "category": "Diffusion & Generative AI",
+        "abstract": "By decomposing the image formation process into a sequential application of denoising autoencoders, diffusion models achieve state-of-the-art synthesis results on image data. We propose Latent Diffusion Models (LDM) operating in the latent space of powerful pretrained autoencoders, dramatically reducing computational complexity while retaining synthesis fidelity.",
+        "benchmarks": ["ImageNet 256x256", "MS-COCO Text-to-Image", "CelebA-HQ"],
+        "pdf_url": "https://arxiv.org/pdf/2112.10752.pdf",
+    },
+    {
+        "id": "2001.08361",
+        "arxiv_id": "2001.08361",
+        "title": "Scaling Laws for Neural Language Models",
+        "authors": ["Jared Kaplan", "Sam McCandlish", "Tom Henighan", "Tom B. Brown", "Benjamin Chess", "Rewon Child", "Scott Gray", "Alec Radford", "Jeffrey Wu", "Dario Amodei"],
+        "year": 2020,
+        "category": "Scaling & Optimization",
+        "abstract": "We investigate empirical scaling laws for language model performance with cross-entropy loss. Loss scales as a power-law with model size, dataset size, and compute used for training, spanning more than seven orders of magnitude.",
+        "benchmarks": ["WebText Validation Loss", "Parameter Scaling 10M-100B"],
+        "pdf_url": "https://arxiv.org/pdf/2001.08361.pdf",
+    },
+    {
+        "id": "2307.08691",
+        "arxiv_id": "2307.08691",
+        "title": "FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning",
+        "authors": ["Tri Dao"],
+        "year": 2023,
+        "category": "Efficiency & Hardware",
+        "abstract": "FlashAttention is an exact attention algorithm that reduces memory IO between GPU HBM and SRAM. We introduce FlashAttention-2, optimizing work partitioning across thread blocks and warps to achieve 2x speedup over FlashAttention and reaching up to 73% of theoretical peak FLOPs on A100/H100 GPUs.",
+        "benchmarks": ["A100 SXM4 80GB", "H100 SXM5 80GB", "Sequence Length 512-64k"],
+        "pdf_url": "https://arxiv.org/pdf/2307.08691.pdf",
+    },
+    {
+        "id": "2106.09685",
+        "arxiv_id": "2106.09685",
+        "title": "LoRA: Low-Rank Adaptation of Large Language Models",
+        "authors": ["Edward J. Hu", "Yelong Shen", "Phillip Wallis", "Zeyuan Allen-Zhu", "Yuanzhi Li", "Shean Wang", "Lu Wang", "Weizhu Chen"],
+        "year": 2021,
+        "category": "Efficiency & Fine-Tuning",
+        "abstract": "An important paradigm in NLP is fine-tuning large pre-trained language models. We propose Low-Rank Adaptation (LoRA), which freezes the pre-trained model weights and injects trainable rank decomposition matrices into each layer of the Transformer architecture, greatly reducing trainable parameters with zero inference latency overhead.",
+        "benchmarks": ["GLUE Benchmark", "E2E NLG Challenge", "GPT-3 175B Fine-Tuning"],
+        "pdf_url": "https://arxiv.org/pdf/2106.09685.pdf",
+    },
+    {
+        "id": "2005.11401",
+        "arxiv_id": "2005.11401",
+        "title": "Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks",
+        "authors": ["Patrick Lewis", "Ethan Perez", "Aleksandra Piktus", "Fabio Petroni", "Vladimir Karpukhin", "Naman Goyal", "Heinrich Küttler", "Mike Lewis", "Wen-tau Yih", "Tim Rocktäschel", "Sebastian Riedel", "Douwe Kiela"],
+        "year": 2020,
+        "category": "RAG & Retrieval",
+        "abstract": "Large pre-trained language models have been shown to store factual knowledge in their parameters. We explore general-purpose fine-tuning recipes for Retrieval-Augmented Generation (RAG) models combining pre-trained parametric and non-parametric memory for language generation.",
+        "benchmarks": ["Natural Questions", "TriviaQA", "WebQuestions", "FEVER Fact Verification"],
+        "pdf_url": "https://arxiv.org/pdf/2005.11401.pdf",
+    },
+    {
+        "id": "2310.01405",
+        "arxiv_id": "2310.01405",
+        "title": "Towards Monosemanticity: Decomposing Language Models With Dictionary Learning",
+        "authors": ["Trenton Bricken", "Adly Templeton", "Joshua Batson", "Brian Chen", "Adam Jermyn", "Tom Conerly", "Nick Turner", "Cem Anil", "Carson Denison", "Amanda Askell", "Robert Lasenby", "Yifan Wu", "Shauna Kravec", "Nicholas Schiefer", "Todd Phillips", "Alex Tamkin", "Michael Tao", "Kevin Roose", "Nelson Elhage", "Tom Brown", "Dario Amodei", "Chris Olah"],
+        "year": 2023,
+        "category": "Mechanistic Interpretability",
+        "abstract": "Neural network representations are notoriously difficult to understand because individual neurons often respond to unrelated concepts (polysemanticity). We apply sparse autoencoders (SAEs) as an unsupervised dictionary learning technique to extract monosemantic features from residual stream activations.",
+        "benchmarks": ["Sparse Autoencoder Reconstruction Loss", "Monosemantic Feature Interpretability"],
+        "pdf_url": "https://arxiv.org/pdf/2310.01405.pdf",
+    },
+    {
+        "id": "2006.04439",
+        "arxiv_id": "2006.04439",
+        "title": "Liquid Time-Constant Networks",
+        "authors": ["Ramin Hasani", "Mathias Lechner", "Alexander Amini", "Daniela Rus", "Radu Grosu"],
+        "year": 2020,
+        "category": "Liquid & Dynamic Networks",
+        "abstract": "We introduce Liquid Time-Constant (LTC) neural networks, a class of continuous-time recurrent neural networks with varying hidden state dynamics. LTC models exhibit high expressive power and robustness in continuous-time modeling and robotics control benchmarks.",
+        "benchmarks": ["Half-Cheetah Autonomous Control", "Medical Time Series Forecasting"],
+        "pdf_url": "https://arxiv.org/pdf/2006.04439.pdf",
+    },
+]
+
+
+@router.get("/library")
+async def get_curated_library(db: AsyncSession = Depends(get_db)):
+    """Fetch curated foundation papers and cached research publications for the Create Library explorer."""
+    return {
+        "status": "success",
+        "total": len(CURATED_LIBRARY_PAPERS),
+        "papers": CURATED_LIBRARY_PAPERS,
+    }
+

@@ -56,7 +56,7 @@ class CanonicalPaperResolver:
                 if papers:
                     res.paper = papers[0]
                 elif "1706.03762" in clean_id:
-                    from src.schemas import Paper, Author
+                    from src.core.schemas import Paper, Author
                     res.paper = Paper(
                         id=f"arxiv:{clean_id}",
                         title="Attention Is All You Need",

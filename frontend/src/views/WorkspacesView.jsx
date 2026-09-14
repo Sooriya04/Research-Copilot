@@ -20,6 +20,7 @@ import {
   SlidersHorizontal,
   Bookmark,
   Share2,
+  Lightbulb,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
@@ -108,6 +109,10 @@ export default function WorkspacesView() {
   ];
 
   const handleLaunchTemplate = async (template) => {
+    const confirmed = window.confirm(
+      `Create a new workspace for "${template.title}"?\n\nThis will open the Literature Search with this topic pre-loaded.`
+    );
+    if (!confirmed) return;
     const newWs = await createWorkspace(template.title, template.description);
     if (newWs) {
       navigate('/search');
@@ -357,12 +362,20 @@ export default function WorkspacesView() {
             <button
               type="button"
               className="btn btn-primary"
-              onClick={() => navigate('/search')}
+              onClick={() => navigate('/chat')}
               style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5, fontWeight: 600 }}
+            >
+              <Sparkles size={14} />
+              <span>AI Research Chat</span>
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => navigate('/search')}
+              style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5 }}
             >
               <Search size={14} />
               <span>Search Literature</span>
-              <ArrowRight size={13} />
             </button>
             <button
               type="button"
@@ -389,15 +402,15 @@ export default function WorkspacesView() {
               style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5 }}
             >
               <FileText size={14} />
-              <span>Paper Reader</span>
+              <span>Paper Reader & Markdown</span>
             </button>
             <button
               type="button"
               className="btn btn-secondary"
-              onClick={() => navigate('/research-gap')}
+              onClick={() => navigate('/research-gaps')}
               style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5 }}
             >
-              <Sparkles size={14} />
+              <Lightbulb size={14} />
               <span>Research Gaps</span>
             </button>
           </div>

@@ -56,11 +56,26 @@ class IngestPaperResponse(BaseModel):
     edges_count: int
 
 
+class RemovePaperRequest(BaseModel):
+    paper_id: str
+
+
 @router.post("/clear")
 async def clear_graph_endpoint():
     """Clear all stored nodes and edges from the research knowledge graph."""
     await graph_store.clear()
     return {"status": "cleared", "nodes_count": 0, "edges_count": 0}
+
+
+@router.post("/remove-paper")
+async def remove_paper_endpoint(req: RemovePaperRequest):
+    """Remove a paper and its associated edges from the knowledge graph."""
+    pid = req.paper_id
+    await graph_store.remove_node(pid)
+    slug = slugify_id(pid)
+    if slug != pid:
+        await graph_store.remove_node(slug)
+    return {"status": "removed", "paper_id": pid}
 
 
 @router.post("/run", response_model=GraphRunResponse)
@@ -321,8 +336,10 @@ async def get_graph_elements(
             continue
         n = await graph_store.get_node(nid)
         if n:
-            n_dict = n.model_dump(mode="json")
             ntype = n.node_type.value if hasattr(n.node_type, "value") else str(n.node_type)
+            if target_topic_id and ntype == "topic" and nid != target_topic_id:
+                continue
+            n_dict = n.model_dump(mode="json")
             node_type_counts[ntype] = node_type_counts.get(ntype, 0) + 1
             label = getattr(n, "name", None) or getattr(n, "title", None) or getattr(n, "text", None) or nid
             nodes.append({

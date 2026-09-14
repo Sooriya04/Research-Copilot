@@ -67,41 +67,63 @@ export default function LiteratureResultsView() {
     navigate('/pdf-inspector');
   };
 
-  const handleIngestToGraph = async (paper) => {
+  const handleToggleGraph = async (paper) => {
     const pId = paper.id || paper.arxiv_id || paper.canonical_id || `paper-${paper.title?.slice(0, 15)}`;
     const currentTopic = searchQuery || 'General Research Literature';
+    const isAdded = addedToGraphPaperIds.includes(pId);
+
     setIngestedMap(prev => ({ ...prev, [pId]: 'loading' }));
 
-    try {
-      const res = await fetch('/api/v1/graph/ingest-paper', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          topic: currentTopic,
-          paper_data: {
-            id: pId,
-            title: paper.title,
-            year: paper.year,
-            authors: (paper.authors || []).map(a => (typeof a === 'string' ? a : a.name || String(a))),
-            methods: paper.methods || [],
-            datasets: paper.datasets || [],
-            benchmarks: paper.benchmarks || [],
-            metrics: paper.citation_count ? { citations: String(paper.citation_count) } : {},
-            claims: [],
-            limitations: [],
-            cited_papers: paper.referenced_works || [],
-          },
-        }),
-      });
-
-      if (res.ok) {
-        setIngestedMap(prev => ({ ...prev, [pId]: 'done' }));
-        setAddedToGraphPaperIds(prev => (prev.includes(pId) ? prev : [...prev, pId]));
-      } else {
+    if (isAdded) {
+      // Un-add / remove paper from knowledge graph
+      try {
+        await fetch('/api/v1/graph/remove-paper', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ paper_id: pId }),
+        });
+        setAddedToGraphPaperIds(prev => prev.filter(id => id !== pId));
+        setIngestedMap(prev => {
+          const next = { ...prev };
+          delete next[pId];
+          return next;
+        });
+      } catch {
         setIngestedMap(prev => ({ ...prev, [pId]: 'error' }));
       }
-    } catch {
-      setIngestedMap(prev => ({ ...prev, [pId]: 'error' }));
+    } else {
+      // Ingest / add paper into knowledge graph
+      try {
+        const res = await fetch('/api/v1/graph/ingest-paper', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            topic: currentTopic,
+            paper_data: {
+              id: pId,
+              title: paper.title,
+              year: paper.year,
+              authors: (paper.authors || []).map(a => (typeof a === 'string' ? a : a.name || String(a))),
+              methods: paper.methods || [],
+              datasets: paper.datasets || [],
+              benchmarks: paper.benchmarks || [],
+              metrics: paper.citation_count ? { citations: String(paper.citation_count) } : {},
+              claims: [],
+              limitations: [],
+              cited_papers: paper.referenced_works || [],
+            },
+          }),
+        });
+
+        if (res.ok) {
+          setIngestedMap(prev => ({ ...prev, [pId]: 'done' }));
+          setAddedToGraphPaperIds(prev => (prev.includes(pId) ? prev : [...prev, pId]));
+        } else {
+          setIngestedMap(prev => ({ ...prev, [pId]: 'error' }));
+        }
+      } catch {
+        setIngestedMap(prev => ({ ...prev, [pId]: 'error' }));
+      }
     }
   };
 
@@ -570,24 +592,31 @@ export default function LiteratureResultsView() {
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                     <button
                       className={`btn btn-sm ${isAddedToGraph ? 'btn-secondary' : 'btn-primary'}`}
-                      onClick={() => handleIngestToGraph(paper)}
+                      onClick={() => handleToggleGraph(paper)}
                       disabled={ingestedMap[pId] === 'loading'}
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 5,
+                        borderColor: isAddedToGraph ? 'var(--accent-blue, #2563eb)' : undefined,
+                        color: isAddedToGraph ? 'var(--accent-blue, #2563eb)' : undefined,
+                      }}
+                      title={isAddedToGraph ? 'Click to remove from knowledge graph' : 'Click to add to knowledge graph'}
                     >
-                      {isAddedToGraph ? (
-                        <>
-                          <Check size={12} />
-                          <span>In Graph</span>
-                        </>
-                      ) : ingestedMap[pId] === 'loading' ? (
+                      {ingestedMap[pId] === 'loading' ? (
                         <>
                           <Loader2 size={12} className="animate-spin" />
-                          <span>Adding...</span>
+                          <span>{isAddedToGraph ? 'Removing...' : 'Adding...'}</span>
+                        </>
+                      ) : isAddedToGraph ? (
+                        <>
+                          <Check size={12} />
+                          <span>In Graph (Remove)</span>
                         </>
                       ) : (
                         <>
                           <Plus size={12} />
-                          <span>+ Add to Graph</span>
+                          <span>Add to Graph</span>
                         </>
                       )}
                     </button>

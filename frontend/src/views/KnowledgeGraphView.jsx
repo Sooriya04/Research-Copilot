@@ -368,16 +368,24 @@ export default function KnowledgeGraphView() {
     let nodesPool = [];
     let edgesPool = [];
 
-    const topicId = searchQuery
-      ? `topic-${searchQuery.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-')}`
+    const activeTopicStr = (activeWorkspace?.title || searchQuery || '').trim();
+    const topicId = activeTopicStr
+      ? `topic-${activeTopicStr.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-')}`
       : (rawNodes.find(n => (n.node_type || '').toLowerCase() === 'topic')?.id || 'topic-main');
 
-    nodesPool = [...rawNodes];
+    // Filter out stale topic nodes from prior sessions/searches so only the active topic exists
+    nodesPool = rawNodes.filter(n => {
+      const ntype = (n.node_type || '').toLowerCase();
+      if (ntype === 'topic') {
+        return n.id === topicId;
+      }
+      return true;
+    });
     edgesPool = [...rawEdges];
 
     // Ensure central topic node exists
     if (!nodesPool.some(n => n.id === topicId)) {
-      const topicLabel = searchQuery || 'Research Topic';
+      const topicLabel = activeTopicStr || 'Research Topic';
       nodesPool.unshift({
         id: topicId,
         label: topicLabel,
@@ -440,7 +448,11 @@ export default function KnowledgeGraphView() {
     // Add topic and paper nodes
     nodesPool.forEach(n => {
       const ntype = (n.node_type || 'paper').toLowerCase();
-      if (ntype === 'topic' || ntype === 'paper') {
+      if (ntype === 'topic') {
+        if (n.id === topicId) {
+          finalNodes.push(n);
+        }
+      } else if (ntype === 'paper') {
         finalNodes.push(n);
       } else {
         // Strict Rule from user:
@@ -857,7 +869,7 @@ export default function KnowledgeGraphView() {
           <p className="panel-subtitle">
             Interactive multi-hop semantic relationship graph linking papers, methods, benchmark datasets, and claims.
             {searchQuery && (
-              <span className="badge badge-blue" style={{ marginLeft: 8 }}>
+              <span className="badge badge-blue" style={{ marginLeft: 8, whiteSpace: 'nowrap', display: 'inline-block' }}>
                 Topic: {searchQuery}
               </span>
             )}
@@ -1024,7 +1036,7 @@ export default function KnowledgeGraphView() {
             <span>
               <strong>Active Topic:</strong> {searchQuery ? <em>"{searchQuery}"</em> : 'Literature Graph'} &bull;{' '}
               {paperNodesCount === 0 ? (
-                <span>No papers added yet. Go to <strong>Literature Search</strong> and click <strong>+ Add to Graph</strong> on papers to include them here.</span>
+                <span>No papers added yet. Go to <strong>Literature Search</strong> and click <strong>Add to Graph</strong> on papers to include them here.</span>
               ) : (
                 <span><strong>{paperNodesCount}</strong> {paperNodesCount === 1 ? 'paper' : 'papers'} added &bull; Showing connections to methods and datasets.</span>
               )}

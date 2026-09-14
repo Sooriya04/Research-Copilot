@@ -313,6 +313,18 @@ class ResearchGraphStore:
             "edges": sub_edges,
         }
 
+    async def remove_node(self, node_id: str) -> bool:
+        """Remove a node and its incident edges from in-memory graph and SQLite database."""
+        await self._ensure_initialized()
+        if node_id in self.graph:
+            self.graph.remove_node(node_id)
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("DELETE FROM graph_edges WHERE source_id = ? OR target_id = ?", (node_id, node_id))
+            await db.execute("DELETE FROM graph_nodes WHERE id = ?", (node_id,))
+            await db.commit()
+        logger.info("Removed node %s and incident edges from ResearchGraphStore.", node_id)
+        return True
+
     async def clear(self) -> None:
         """Clear all in-memory graph nodes/edges and truncate persistent SQLite tables."""
         await self._ensure_initialized()
