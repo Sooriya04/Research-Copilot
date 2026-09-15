@@ -77,6 +77,16 @@ async def upload_pdf_endpoint(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"PDF parsing error: {e}")
 
 
+def extract_clean_arxiv_id(s: str) -> Optional[str]:
+    if not s:
+        return None
+    raw = s.strip()
+    match = re.search(r"(\d{4}\.\d{4,5}(?:v\d+)?|[a-z\-]+(?:\.[a-z]{2})?/\d{7})", raw, re.IGNORECASE)
+    if match:
+        return match.group(1)
+    return None
+
+
 @router.post("/import-url")
 async def import_paper_from_url_endpoint(req: ImportPaperUrlRequest):
     """Import research paper via arXiv ID (e.g. '2310.07240'), DOI (e.g. '10.1145/...'), or direct PDF URL, converting into full Markdown."""
@@ -88,43 +98,63 @@ async def import_paper_from_url_endpoint(req: ImportPaperUrlRequest):
         pdf_bytes = None
         pdf_url = None
         title = target_ident
+        authors = []
+        year = 2024
+        abstract = ""
 
-        # Check if direct URL to a PDF
-        if target_ident.lower().startswith("http://") or target_ident.lower().startswith("https://"):
-            if target_ident.lower().endswith(".pdf") or "arxiv.org/pdf/" in target_ident:
+        # 1. Check if an arXiv ID or arXiv URL
+        arxiv_id = extract_clean_arxiv_id(target_ident)
+        if arxiv_id or "arxiv.org" in target_ident.lower():
+            clean_id = arxiv_id or target_ident.split("/abs/")[-1].split("/pdf/")[-1].replace(".pdf", "").strip()
+            pdf_url = f"https://arxiv.org/pdf/{clean_id}.pdf"
+            pdf_bytes = await pdf_extractor.fetch_pdf_bytes(pdf_url)
+
+            # Try to fetch rich metadata from canonical resolver
+            try:
+                resolved = await resolver.resolve(clean_id)
+                if resolved:
+                    title = resolved.title or title
+                    authors = [a.name for a in resolved.authors]
+                    year = resolved.year or year
+                    abstract = resolved.abstract or abstract
+            except Exception as e:
+                logger.warning("[PaperImport] Resolver metadata fetch error for arXiv ID %s: %s", clean_id, e)
+
+        # 2. Check if direct URL to a PDF
+        elif target_ident.lower().startswith("http://") or target_ident.lower().startswith("https://"):
+            if target_ident.lower().endswith(".pdf") or "/pdf" in target_ident.lower():
                 pdf_url = target_ident
                 pdf_bytes = await pdf_extractor.fetch_pdf_bytes(pdf_url)
             else:
-                # If HTML URL, attempt canonical resolution
+                # If generic web link, attempt canonical resolution
                 resolved = await resolver.resolve(target_ident)
                 if resolved and resolved.pdf_url:
                     pdf_url = resolved.pdf_url
                     pdf_bytes = await pdf_extractor.fetch_pdf_bytes(pdf_url)
-                    title = resolved.title
+                    title = resolved.title or title
+                    authors = [a.name for a in resolved.authors]
+                    year = resolved.year or year
+                    abstract = resolved.abstract or abstract
+
+        # 3. Resolve via generic DOI or title
         else:
-            # Resolve via arXiv ID or DOI
             resolved = await resolver.resolve(target_ident)
             if resolved and resolved.pdf_url:
                 pdf_url = resolved.pdf_url
                 pdf_bytes = await pdf_extractor.fetch_pdf_bytes(pdf_url)
-                title = resolved.title
-
-        if not pdf_bytes:
-            # Fallback: if it's an arXiv ID format like 2310.07240
-            arxiv_match = target_ident.replace("arxiv:", "").strip()
-            fallback_url = f"https://arxiv.org/pdf/{arxiv_match}.pdf"
-            pdf_bytes = await pdf_extractor.fetch_pdf_bytes(fallback_url)
-            if pdf_bytes:
-                pdf_url = fallback_url
+                title = resolved.title or title
+                authors = [a.name for a in resolved.authors]
+                year = resolved.year or year
+                abstract = resolved.abstract or abstract
 
         if not pdf_bytes:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Could not retrieve PDF bytes for '{target_ident}'. Please ensure the link is open access or upload the file directly."
+                detail=f"Could not retrieve PDF bytes for '{target_ident}'. Please ensure the link is valid and open access, or upload the file directly."
             )
 
         parsed = markdown_engine.convert_pdf_to_markdown(pdf_bytes, filename=title)
-        clean_slug = re.sub(r"[^a-z0-9]+", "-", target_ident.lower())[:25]
+        clean_slug = re.sub(r"[^a-z0-9]+", "-", (arxiv_id or target_ident).lower())[:25]
         paper_id = f"import-{clean_slug}"
 
         return {
@@ -132,15 +162,17 @@ async def import_paper_from_url_endpoint(req: ImportPaperUrlRequest):
             "paper": {
                 "id": paper_id,
                 "title": parsed["title"] or title,
-                "authors": parsed["authors"],
-                "year": parsed["year"],
-                "abstract": parsed["abstract"],
+                "authors": parsed["authors"] or authors or ["Authors listed in publication"],
+                "year": parsed["year"] or year,
+                "abstract": parsed["abstract"] or abstract,
                 "markdown": parsed["markdown"],
                 "sections": parsed["sections"],
                 "figures": parsed["figures"],
                 "total_pages": parsed["total_pages"],
-                "source": "Imported via Identifier / URL",
+                "source": "arXiv" if (arxiv_id or "arxiv" in target_ident.lower()) else "Imported URL",
                 "pdf_url": pdf_url,
+                "arxiv_id": arxiv_id or "",
+                "url": target_ident if target_ident.startswith("http") else (f"https://arxiv.org/abs/{arxiv_id}" if arxiv_id else f"https://doi.org/{target_ident}"),
             }
         }
     except HTTPException:

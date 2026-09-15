@@ -629,22 +629,85 @@
 
 <br />
 
-## Introduce Single-Page Research Library Hub, AI Research Chat, Paper Ingestion, and Context-Aware Workspace Hierarchy
-
-* **Single-Page Research Library & Unified Ingestion Hub (`frontend/src/views/LibraryView.jsx`, `src/api/routes_paper_intelligence.py`, `frontend/src/App.jsx`)**:
-  * Built a single-page **Library Hub** (`/library`) supporting 3 ingestion methods:
-    * **Upload PDF File**: Drag & drop or file picker accepting `.pdf` research documents with automatic paper metadata extraction and indexing.
-    * **Import via ID / URL**: Instant resolution for arXiv IDs (e.g. `1706.03762`, `2312.00752`), DOIs, or direct paper URLs with automatic metadata fetching.
-    * **Select Files (Batch Ingestion)**: Multi-file picker enabling rapid multi-document ingestion.
-  * Added REST endpoints `POST /api/v1/paper/upload` (multipart PDF ingestion) and `POST /api/v1/paper/import-url` (identifier/URL resolver).
-  * Minimalist light/dark theme design featuring an empty state hero capsule and an interactive inventory table with one-click **Read**, **Chat**, and **Delete** actions synced to `localStorage`.
-* **Autonomous AI Research Chat Engine & Slide-Out Drawer (`src/api/routes_chat.py`, `frontend/src/views/LibraryView.jsx`)**:
-  * Implemented context-grounded conversational research assistant endpoint `POST /api/v1/chat/message` and SSE streaming endpoint `POST /api/v1/chat/stream`.
-  * Injected dynamic grounding context: active workspace topic, active paper title, and abstract directly into the research system prompt.
-  * Built slide-out conversational drawer with per-paper context injection and instant reply streaming.
-* **Hierarchical Workspace Navigation & Interactive Knowledge Graph Alignment (`frontend/src/components/layout/Sidebar.jsx`, `frontend/src/views/LiteratureResultsView.jsx`, `src/api/routes_graph.py`, `src/graph/store.py`)**:
-  * Structured the sidebar into a clean three-pillar navigation: **Overview**, **Workspaces**, and **Library**.
-  * Dynamic workspace tree: automatically uncovers all 4 workspace tools (`Literature Search`, `Founded Papers`, `Knowledge Graph`, `Paper Reader`) when inside any workspace environment.
-  * Enhanced Founded Papers with full toggleable **Add / Un-Add (Remove)** capabilities for the knowledge graph backed by backend `remove_node` and `POST /api/v1/graph/remove-paper` endpoints.
-* **Full Test Suite & Production Bundle Verification (`tests/`, `frontend/dist/`)**:
   * Verified 100% green test suite with all **39/39 passing pytest unit tests** and clean production Vite bundle compilation (`npm run build`).
+
+
+## Decouple Research Library from Workspaces, Isolate In-Page Search, and Fix Paper Ingestion & Runtime Type Safety
+
+  * **Standalone Research Library Hub & Dedicated In-
+Library Search (`frontend/src/views/LibraryView.jsx`,
+`frontend/src/components/layout/TopHeader.jsx`,
+`frontend/src/App.jsx`)**:
+    * Built a single-page **Library Hub**
+(`/library`) completely decoupled from workspaces:
+      * **Upload PDF File**: Drag & drop or file
+picker accepting `.pdf` research documents with
+automatic paper metadata extraction and local table
+population without forced redirects.
+      * **Import via ID / URL**: Instant resolution
+for arXiv IDs (e.g. `1706.03762`, `2312.00752`), DOIs,
+or direct paper URLs with automatic metadata fetching.
+      * **Select Files (Batch Ingestion)**: Multi-
+file picker enabling rapid multi-document ingestion.
+      * **In-Library Search Filter**: Dedicated
+search input (`"Filter library files..."`) filtering
+files locally on `/library` by title, author, and
+source with zero workspace contamination.
+    * Added REST endpoints `POST
+/api/v1/paper/upload` (multipart PDF ingestion) and
+`POST /api/v1/paper/import-url` (identifier/URL
+resolver).
+    * Minimalist light/dark theme design featuring an
+empty state hero capsule and an interactive inventory
+table with one-click **Read**, **Chat**, and
+**Delete** actions synced to `localStorage`.
+  * **Autonomous AI Research Chat Engine & Slide-Out
+Drawer (`src/api/routes_chat.py`,
+`frontend/src/views/LibraryView.jsx`)**:
+    * Implemented context-grounded conversational
+research assistant endpoint `POST
+/api/v1/chat/message` and SSE streaming endpoint
+`POST /api/v1/chat/stream`.
+    * Injected dynamic grounding context: active
+workspace topic, active paper title, and abstract
+directly into the research system prompt.
+    * Built slide-out conversational drawer with per-
+paper context injection, conversation reset on close,
+and instant reply streaming.
+  * **Hierarchical Workspace Navigation & Interactive
+Knowledge Graph Alignment
+(`frontend/src/components/layout/Sidebar.jsx`,
+`frontend/src/views/LiteratureResultsView.jsx`,
+`src/api/routes_graph.py`, `src/graph/store.py`)**:
+    * Structured the sidebar into a clean three-
+pillar navigation: **Overview**, **Workspaces**, and
+**Library**, with flush edge-to-edge borders
+perfectly aligned to the 56px top header.
+    * Dynamic workspace tree: automatically uncovers
+all 4 workspace tools (`Literature Search`, `Founded
+Papers`, `Knowledge Graph`, `Paper Reader`) when
+inside any workspace environment.
+    * Enhanced Founded Papers with full toggleable
+**Add / Un-Add (Remove)** capabilities for the
+knowledge graph backed by backend `remove_node` and
+`POST /api/v1/graph/remove-paper` endpoints.
+  * **Robust Ingestion & Runtime Type Safety
+(`src/engines/pdf_extractor.py`,
+`src/api/routes_paper_intelligence.py`,
+`frontend/src/views/PaperReaderView.jsx`,
+`frontend/src/components/modals/PaperDetailModal.
+jsx`)**:
+    * Added academic `User-Agent` headers to
+`PDFExtractor` and implemented
+`extract_clean_arxiv_id` in
+`routes_paper_intelligence.py` to prevent nested URL
+parsing bugs and 403/404 repository rejections.
+    * Safe author normalization across
+`PaperReaderView` and modals preventing runtime
+TypeError exceptions when authors are formatted as
+strings.
+  * **Full Test Suite & Production Bundle
+Verification (`tests/`, `frontend/dist/`)**:
+    * Verified 100% green test suite with all **39/39
+passing pytest unit tests** and clean production Vite
+bundle compilation (`npm run build`).

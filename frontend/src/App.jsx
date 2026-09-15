@@ -24,7 +24,7 @@ export default function App() {
   useEffect(() => {
     const handleNumberShortcuts = (e) => {
       if (['1', '2', '3', '4'].includes(e.key) && !['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) {
-        const routes = ['/', '/workspaces', '/library', '/pdf-inspector'];
+        const routes = ['/', '/workspaces', '/library', '/search'];
         navigate(routes[parseInt(e.key) - 1]);
       }
     };

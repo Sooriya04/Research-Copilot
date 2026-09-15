@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Upload,
@@ -13,13 +13,14 @@ import {
   Loader2,
   FolderOpen,
   Plus,
+  Search,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import MarkdownRenderer from '../components/common/MarkdownRenderer';
 
 export default function LibraryView() {
   const navigate = useNavigate();
-  const { setActiveReaderPaper, createWorkspace, workspaces } = useApp();
+  const { setActiveReaderPaper } = useApp();
   const fileInputRef = useRef(null);
   const multiFileInputRef = useRef(null);
 
@@ -31,6 +32,20 @@ export default function LibraryView() {
     } catch {}
     return [];
   });
+
+  // In-Library Search Filter
+  const [searchFilter, setSearchFilter] = useState('');
+
+  const filteredLibraryPapers = useMemo(() => {
+    if (!searchFilter.trim()) return libraryPapers;
+    const term = searchFilter.toLowerCase().trim();
+    return libraryPapers.filter((p) => {
+      const titleMatch = (p.title || '').toLowerCase().includes(term);
+      const authorsMatch = (typeof p.authors === 'string' ? p.authors : (p.authors || []).join(' ')).toLowerCase().includes(term);
+      const catMatch = (p.category || '').toLowerCase().includes(term);
+      return titleMatch || authorsMatch || catMatch;
+    });
+  }, [libraryPapers, searchFilter]);
 
   // Import Modal State
   const [showImportModal, setShowImportModal] = useState(false);
@@ -62,7 +77,7 @@ export default function LibraryView() {
     if (!file) return;
 
     setImporting(true);
-    setStatusMessage(`Uploading "${file.name}" & converting to Markdown...`);
+    setStatusMessage(`Uploading "${file.name}" & extracting metadata...`);
 
     const formData = new FormData();
     formData.append('file', file);
@@ -85,7 +100,7 @@ export default function LibraryView() {
         title: paper.title || file.name.replace('.pdf', ''),
         authors: Array.isArray(paper.authors)
           ? paper.authors.map((a) => (typeof a === 'string' ? a : a.name)).join(', ')
-          : 'Uploaded Author',
+          : (typeof paper.authors === 'string' ? paper.authors : 'Uploaded Author'),
         year: paper.year || new Date().getFullYear(),
         category: 'Uploaded PDF',
         desc: paper.abstract || 'Uploaded research document.',
@@ -98,9 +113,7 @@ export default function LibraryView() {
       };
 
       setLibraryPapers((prev) => [newPaperEntry, ...prev.filter((p) => p.id !== newPaperEntry.id)]);
-      setActiveReaderPaper(newPaperEntry);
       setStatusMessage('');
-      navigate('/pdf-inspector');
     } catch (err) {
       alert(`Upload Error: ${err.message}`);
     } finally {
@@ -116,7 +129,7 @@ export default function LibraryView() {
     if (!importQuery.trim()) return;
 
     setImporting(true);
-    setStatusMessage(`Resolving "${importQuery.trim()}" & rendering Markdown...`);
+    setStatusMessage(`Resolving "${importQuery.trim()}" & importing paper...`);
 
     try {
       const res = await fetch('/api/v1/paper/import-url', {
@@ -137,9 +150,9 @@ export default function LibraryView() {
         title: paper.title || importQuery.trim(),
         authors: Array.isArray(paper.authors)
           ? paper.authors.map((a) => (typeof a === 'string' ? a : a.name)).join(', ')
-          : 'Author',
+          : (typeof paper.authors === 'string' ? paper.authors : 'Author'),
         year: paper.year || 2024,
-        category: paper.primary_source || 'arXiv',
+        category: paper.source || paper.primary_source || 'arXiv',
         desc: paper.abstract || 'Imported literature document.',
         arxiv_id: paper.arxiv_id || importQuery.trim(),
         url: paper.url || `https://arxiv.org/abs/${importQuery.trim()}`,
@@ -150,10 +163,8 @@ export default function LibraryView() {
       };
 
       setLibraryPapers((prev) => [newPaperEntry, ...prev.filter((p) => p.id !== newPaperEntry.id)]);
-      setActiveReaderPaper(newPaperEntry);
       setShowImportModal(false);
       setImportQuery('');
-      navigate('/pdf-inspector');
     } catch (err) {
       alert(`Import error: ${err.message}`);
     } finally {
@@ -162,16 +173,9 @@ export default function LibraryView() {
     }
   };
 
-  // Open Paper in Markdown Reader
+  // Open Paper in Reader
   const handleOpenPaper = (paper) => {
     setActiveReaderPaper(paper);
-    // Only create a workspace if one for this paper doesn't already exist
-    const alreadyExists = Array.isArray(workspaces) && workspaces.some(
-      (ws) => ws.title === paper.title
-    );
-    if (!alreadyExists) {
-      createWorkspace(paper.title, `Research workspace for ${paper.title}`);
-    }
     navigate('/pdf-inspector');
   };
 
@@ -443,10 +447,41 @@ export default function LibraryView() {
         ) : (
           /* User Uploaded Papers List */
           <div style={{ width: '100%', maxWidth: 960 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#0f172a' }}>
-                Files in Library ({libraryPapers.length})
-              </h3>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, gap: 12, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--text-primary, #0f172a)' }}>
+                  Files in Library ({filteredLibraryPapers.length}{filteredLibraryPapers.length !== libraryPapers.length ? ` of ${libraryPapers.length}` : ''})
+                </h3>
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                  <Search size={14} style={{ position: 'absolute', left: 10, color: 'var(--text-muted, #64748b)' }} />
+                  <input
+                    type="text"
+                    placeholder="Filter library files..."
+                    value={searchFilter}
+                    onChange={(e) => setSearchFilter(e.target.value)}
+                    style={{
+                      padding: '6px 12px 6px 30px',
+                      borderRadius: 6,
+                      border: '1px solid var(--border-subtle, #cbd5e1)',
+                      backgroundColor: 'var(--bg-card, #ffffff)',
+                      color: 'var(--text-primary, #0f172a)',
+                      fontSize: 12.5,
+                      outline: 'none',
+                      width: 210,
+                    }}
+                  />
+                  {searchFilter && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchFilter('')}
+                      style={{ position: 'absolute', right: 8, background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: 0 }}
+                    >
+                      <X size={13} />
+                    </button>
+                  )}
+                </div>
+              </div>
+
               <div style={{ display: 'flex', gap: 8 }}>
                 <button
                   type="button"
@@ -477,9 +512,9 @@ export default function LibraryView() {
                     gap: 6,
                     padding: '6px 14px',
                     borderRadius: 6,
-                    backgroundColor: '#ffffff',
-                    border: '1px solid #cbd5e1',
-                    color: '#0f172a',
+                    backgroundColor: 'var(--bg-card, #ffffff)',
+                    border: '1px solid var(--border-subtle, #cbd5e1)',
+                    color: 'var(--text-primary, #0f172a)',
                     fontSize: 12.5,
                     fontWeight: 500,
                     cursor: 'pointer',
@@ -493,8 +528,8 @@ export default function LibraryView() {
 
             <div
               style={{
-                backgroundColor: '#ffffff',
-                border: '1px solid #e2e8f0',
+                backgroundColor: 'var(--bg-card, #ffffff)',
+                border: '1px solid var(--border-subtle, #e2e8f0)',
                 borderRadius: 8,
                 overflow: 'hidden',
                 boxShadow: '0 1px 3px rgba(0, 0, 0, 0.04)',
@@ -510,7 +545,14 @@ export default function LibraryView() {
                   </tr>
                 </thead>
                 <tbody>
-                  {libraryPapers.map((paper) => (
+                  {filteredLibraryPapers.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} style={{ textAlign: 'center', padding: '32px 16px', color: 'var(--text-muted, #64748b)' }}>
+                        No files matching "{searchFilter}" in library.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredLibraryPapers.map((paper) => (
                     <tr
                       key={paper.id}
                       onClick={() => handleOpenPaper(paper)}
@@ -574,7 +616,8 @@ export default function LibraryView() {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                  ))
+                )}
                 </tbody>
               </table>
             </div>

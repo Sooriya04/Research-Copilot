@@ -25,25 +25,44 @@ export default function TopHeader() {
   const currentTitle = VIEW_TITLES[location.pathname] || 'Workspace';
   const wsTitle = activeWorkspace ? activeWorkspace.title : 'Research Workspace';
 
+  const isLibraryRoute = location.pathname === '/library' || location.pathname === '/create' || location.pathname === '/chat';
+  const isOverviewRoute = location.pathname === '/' || location.pathname === '/overview';
+
   return (
     <header className="top-header">
       <div className="header-left">
-        <span
-          onClick={openWorkspaceModal}
-          style={{ cursor: 'pointer', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-          title="Click to switch or create workspace"
-        >
-          {wsTitle}
-        </span>
-        <span style={{ margin: '0 6px', color: 'var(--text-muted)' }}>/</span>
-        <strong id="header-view-title">{currentTitle}</strong>
+        {isLibraryRoute ? (
+          <strong id="header-view-title" style={{ fontSize: '0.92rem', color: 'var(--text-primary)' }}>
+            Research Library
+          </strong>
+        ) : isOverviewRoute ? (
+          <>
+            <span style={{ color: 'var(--text-muted)' }}>Research Copilot</span>
+            <span style={{ margin: '0 6px', color: 'var(--text-muted)' }}>/</span>
+            <strong id="header-view-title" style={{ color: 'var(--text-primary)' }}>Overview</strong>
+          </>
+        ) : (
+          <>
+            <span
+              onClick={openWorkspaceModal}
+              style={{ cursor: 'pointer', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+              title="Click to switch or create workspace"
+            >
+              {wsTitle}
+            </span>
+            <span style={{ margin: '0 6px', color: 'var(--text-muted)' }}>/</span>
+            <strong id="header-view-title">{currentTitle}</strong>
+          </>
+        )}
       </div>
 
-      <div className="command-bar-trigger" id="btn-open-cmd-bar" onClick={openCmdPalette}>
-        <Search size={14} style={{ marginRight: 6, color: 'var(--text-muted)' }} />
-        <span>Search literature, DOIs, repositories...</span>
-        <span className="kbd-badge">⌘K</span>
-      </div>
+      {!isLibraryRoute && (
+        <div className="command-bar-trigger" id="btn-open-cmd-bar" onClick={openCmdPalette}>
+          <Search size={14} style={{ marginRight: 6, color: 'var(--text-muted)' }} />
+          <span>Search literature, DOIs, repositories...</span>
+          <span className="kbd-badge">⌘K</span>
+        </div>
+      )}
 
       <div className="header-right">
         <button className="header-btn" id="btn-theme-toggle" title="Toggle Theme" onClick={toggleTheme}>

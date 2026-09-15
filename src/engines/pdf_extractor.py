@@ -13,7 +13,11 @@ class PDFExtractor:
     async def fetch_pdf_bytes(self, pdf_url: str) -> Optional[bytes]:
         """Download raw PDF bytes safely."""
         try:
-            async with httpx.AsyncClient(timeout=self.timeout, follow_redirects=True) as client:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 ResearchCopilot/1.0",
+                "Accept": "application/pdf,*/*",
+            }
+            async with httpx.AsyncClient(timeout=self.timeout, follow_redirects=True, headers=headers) as client:
                 resp = await client.get(pdf_url)
                 if resp.status_code == 200 and len(resp.content) > 500:
                     return resp.content

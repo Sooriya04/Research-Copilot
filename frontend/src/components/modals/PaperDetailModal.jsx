@@ -14,7 +14,10 @@ export default function PaperDetailModal() {
   const source = selectedPaper.primary_source || selectedPaper.source || 'OpenAlex';
   const url = selectedPaper.url || selectedPaper.pdf_url;
 
-  const authorsList = (selectedPaper.authors || []).map(a => (typeof a === 'string' ? a : a.name)).join(', ');
+  const rawAuth = selectedPaper.authors;
+  const authorsList = Array.isArray(rawAuth)
+    ? rawAuth.map(a => (typeof a === 'string' ? a : a?.name || String(a))).join(', ')
+    : (typeof rawAuth === 'string' ? rawAuth : 'Authors listed in publication');
 
   const openInReader = () => {
     setActiveReaderPaper(selectedPaper);

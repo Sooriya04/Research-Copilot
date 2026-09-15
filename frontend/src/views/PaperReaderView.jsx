@@ -120,7 +120,10 @@ export default function PaperReaderView() {
     if (activeReaderPaper) {
       const pId = activeReaderPaper.id || activeReaderPaper.arxiv_id || activeReaderPaper.canonical_id || '';
       const cleanArxiv = extractArxivId(pId) || extractArxivId(activeReaderPaper.arxiv_id) || extractArxivId(activeReaderPaper.url);
-      const authorsStr = (activeReaderPaper.authors || []).map((a) => (typeof a === 'string' ? a : a.name)).join(', ');
+      const rawAuthors = activeReaderPaper.authors;
+      const authorsStr = Array.isArray(rawAuthors)
+        ? rawAuthors.map((a) => (typeof a === 'string' ? a : a?.name || String(a))).join(', ')
+        : (typeof rawAuthors === 'string' ? rawAuthors : 'Authors listed in publication');
       const pdfLink = resolvePaperPdf(activeReaderPaper);
       const sourceUrl = activeReaderPaper.url || (cleanArxiv ? `https://arxiv.org/abs/${cleanArxiv}` : (activeReaderPaper.doi ? `https://doi.org/${activeReaderPaper.doi}` : null));
       const dynamicMethodology = activeReaderPaper.methods && activeReaderPaper.methods.length > 0
