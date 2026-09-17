@@ -5,14 +5,15 @@ import { useApp } from '../../context/AppContext';
 
 const VIEW_TITLES = {
   '/': 'Overview',
-  '/create': 'Library',
+  '/overview': 'Overview',
   '/library': 'Library',
+  '/create': 'Import Papers',
+  '/chat': 'Research Chat',
   '/workspaces': 'Research Workspaces Hub',
-  '/chat': 'Library',
   '/search': 'Literature Search',
   '/search-results': 'Founded Papers',
   '/knowledge-graph': 'Knowledge Graph',
-  '/pdf-inspector': 'Paper Reader & Markdown',
+  '/pdf-inspector': 'Paper Reader',
   '/experiment-studio': 'Benchmarks & SOTA',
   '/manuscript': 'Manuscript Draft',
   '/research-gaps': 'Research Gap Finder',
@@ -25,7 +26,7 @@ export default function TopHeader() {
   const currentTitle = VIEW_TITLES[location.pathname] || 'Workspace';
   const wsTitle = activeWorkspace ? activeWorkspace.title : 'Research Workspace';
 
-  const isLibraryRoute = location.pathname === '/library' || location.pathname === '/create' || location.pathname === '/chat';
+  const isLibraryRoute = location.pathname === '/library';
   const isOverviewRoute = location.pathname === '/' || location.pathname === '/overview';
 
   return (

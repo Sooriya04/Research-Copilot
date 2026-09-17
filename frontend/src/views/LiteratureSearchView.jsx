@@ -43,7 +43,8 @@ export default function LiteratureSearchView() {
   const [query, setQuery] = useState(currentWorkspaceTopic);
   const [limit, setLimit] = useState(10);
 
-  // Sync with URL query parameter (e.g. from Command Palette) or active workspace topic
+  // Sync only with URL query parameter (e.g. from Command Palette)
+  // Only runs on mount or when the URL ?q= param actually changes
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const urlQuery = params.get('q');
@@ -51,11 +52,9 @@ export default function LiteratureSearchView() {
       setQuery(urlQuery.trim());
       performSearch(urlQuery.trim(), limit, selectedSources);
       navigate('/search-results', { replace: true });
-    } else {
-      const wsTopic = activeWorkspace?.title || globalQuery || '';
-      setQuery(wsTopic);
     }
-  }, [location.search, activeWorkspace?.id, activeWorkspace?.title, globalQuery]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search]);
 
   const toggleSource = (srcId) => {
     setSelectedSources(prev =>

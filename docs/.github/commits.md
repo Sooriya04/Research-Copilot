@@ -711,3 +711,19 @@ Verification (`tests/`, `frontend/dist/`)**:
     * Verified 100% green test suite with all **39/39
 passing pytest unit tests** and clean production Vite
 bundle compilation (`npm run build`).
+
+## Resolve Critical Routing Issues, Eliminate Workspace Auto-Creation Bugs, and Correct View Renderings
+
+* **Resolved Missing Route View Renderings (`frontend/src/App.jsx`)**:
+  * Identified and corrected a critical routing bug where the `/create` and `/chat` routes were improperly mapped to `LibraryView` instead of their respective `CreateView` and `ChatView` components.
+  * Wired all view components securely to their designated top-level endpoints and purged duplicate nested paths (e.g., `/search/results`).
+* **Eliminated Search-to-Workspace State Bleed (`frontend/src/context/AppContext.jsx`)**:
+  * Identified a systemic bug in the `performSearch` context provider where searching inherently created a new research workspace if none existed. This caused isolated library searches to silently spawn new workspaces.
+  * Refactored `performSearch` to respect strict separation of concerns, executing queries against the fallback `sessionId` instead of auto-provisioning new `WorkspaceModel` resources.
+* **Halted Infinite Re-Render Loops in Search View (`frontend/src/views/LiteratureSearchView.jsx`)**:
+  * Stabilized `useEffect` query parameter synchronization to strictly depend on `location.search`, preventing cascading state updates (e.g. `globalQuery`) from triggering infinite re-renders and uncontrolled API requests.
+* **Realigned TopHeader Context & Sidebar Aesthetics (`frontend/src/components/layout/TopHeader.jsx`, `frontend/src/components/layout/Sidebar.jsx`)**:
+  * Updated `VIEW_TITLES` map so newly wired views accurately display their context headers (`Import Papers`, `Research Chat`).
+  * Refined sidebar hierarchy, removing redundant sub-tree paths and shortening labels (e.g. `Paper Reader & Markdown` to `Paper Reader`).
+* **Verified Production Build Stability**:
+  * Confirmed successful production compilation (`npm run build`) with zero module warnings and 0 build errors.

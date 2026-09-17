@@ -69,7 +69,7 @@ export default function Sidebar() {
             className={({ isActive }) =>
               `nav-item ${
                 isActive ||
-                ['/workspaces', '/search', '/search-results', '/search/results', '/knowledge-graph', '/pdf-inspector'].some(
+                ['/workspaces', '/search', '/search-results', '/knowledge-graph', '/pdf-inspector'].some(
                   (p) => location.pathname === p || location.pathname.startsWith(p + '/')
                 )
                   ? 'active'
@@ -84,7 +84,7 @@ export default function Sidebar() {
           </NavLink>
 
           {/* Sub-tree: Rendered when user is on workspaces or inside any workspace tool */}
-          {['/workspaces', '/search', '/search-results', '/search/results', '/knowledge-graph', '/pdf-inspector'].some(
+          {['/workspaces', '/search', '/search-results', '/knowledge-graph', '/pdf-inspector'].some(
             (p) => location.pathname === p || location.pathname.startsWith(p + '/')
           ) && (
             <div style={{ paddingLeft: 10, borderLeft: '1.5px solid var(--border-subtle)', marginLeft: 16, marginTop: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -140,7 +140,7 @@ export default function Sidebar() {
               >
                 <div className="nav-item-left">
                   <FileText size={14} />
-                  <span>Paper Reader & Markdown</span>
+                  <span>Paper Reader</span>
                 </div>
               </NavLink>
             </div>

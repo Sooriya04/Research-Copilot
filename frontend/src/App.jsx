@@ -12,6 +12,8 @@ import LiteratureResultsView from './views/LiteratureResultsView';
 import KnowledgeGraphView from './views/KnowledgeGraphView';
 import PaperReaderView from './views/PaperReaderView';
 import LibraryView from './views/LibraryView';
+import ChatView from './views/ChatView';
+import CreateView from './views/CreateView';
 import BenchmarksView from './views/BenchmarksView';
 import ManuscriptView from './views/ManuscriptView';
 import ResearchGapView from './views/ResearchGapView';
@@ -43,11 +45,10 @@ export default function App() {
             <Route path="/overview" element={<OverviewView />} />
             <Route path="/workspaces" element={<WorkspacesView />} />
             <Route path="/library" element={<LibraryView />} />
-            <Route path="/create" element={<LibraryView />} />
-            <Route path="/chat" element={<LibraryView />} />
+            <Route path="/create" element={<CreateView />} />
+            <Route path="/chat" element={<ChatView />} />
             <Route path="/search" element={<LiteratureSearchView />} />
             <Route path="/search-results" element={<LiteratureResultsView />} />
-            <Route path="/search/results" element={<LiteratureResultsView />} />
             <Route path="/knowledge-graph" element={<KnowledgeGraphView />} />
             <Route path="/pdf-inspector" element={<PaperReaderView />} />
             <Route path="/experiment-studio" element={<BenchmarksView />} />

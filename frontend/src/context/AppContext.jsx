@@ -351,11 +351,6 @@ export function AppProvider({ children }) {
     const q = (queryText || searchQuery).trim();
     if (!q) return [];
 
-    let wsToUse = activeWorkspace;
-    if (!wsToUse) {
-      wsToUse = await createWorkspace(q, `Scientific investigation on "${q}".`);
-    }
-
     setSearchLoading(true);
     setSearchError(null);
     setSearchQuery(q);
@@ -370,7 +365,7 @@ export function AppProvider({ children }) {
           query: q,
           sources: sourcesToUse || selectedSources,
           limit_per_source: Number(limitNum),
-          session_id: wsToUse ? wsToUse.id : sessionId,
+          session_id: activeWorkspace ? activeWorkspace.id : sessionId,
         }),
       });
 
