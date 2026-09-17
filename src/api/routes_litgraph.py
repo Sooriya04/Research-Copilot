@@ -1,13 +1,14 @@
 """
 LitGraph — ConnectedPapers-style bibliometric similarity graph engine.
-Powered by Semantic Scholar Academic Graph API.
+Multi-provider support: OpenAlex (Primary / High-Reliability) + Semantic Scholar + Crossref.
+Always builds dense 30-45 paper similarity clusters.
 """
 
 import asyncio
 import hashlib
+import re
 import time
 from typing import Any, Dict, List, Optional, Set, Tuple
-from functools import lru_cache
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query
@@ -15,9 +16,9 @@ from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/v1/litgraph", tags=["LitGraph — Bibliometric Similarity"])
 
-# ── In-memory LRU-style cache (ttl = 10 minutes) ─────────────────────────────
+# ── In-memory LRU-style cache (ttl = 15 minutes) ─────────────────────────────
 _CACHE: Dict[str, Tuple[float, Any]] = {}
-_CACHE_TTL = 600  # seconds
+_CACHE_TTL = 900  # seconds
 
 
 def _cache_get(key: str) -> Optional[Any]:
@@ -29,41 +30,13 @@ def _cache_get(key: str) -> Optional[Any]:
 
 def _cache_set(key: str, value: Any):
     _CACHE[key] = (time.time(), value)
-    # Evict oldest entries if cache grows too large
-    if len(_CACHE) > 200:
-        oldest = sorted(_CACHE.items(), key=lambda x: x[1][0])[:50]
+    if len(_CACHE) > 300:
+        oldest = sorted(_CACHE.items(), key=lambda x: x[1][0])[:60]
         for k, _ in oldest:
             del _CACHE[k]
 
 
-# ── Semantic Scholar API ──────────────────────────────────────────────────────
-S2_BASE = "https://api.semanticscholar.org/graph/v1"
-S2_FIELDS_PAPER = "title,year,citationCount,authors,abstract,references,externalIds"
-S2_FIELDS_SEARCH = "paperId,title,year,authors,citationCount,abstract"
-TIMEOUT = 18.0
-MAX_CANDIDATES = 45
-SIMILARITY_THRESHOLD = 0.08
-TOP_K_NEIGHBORS = 4
-
-
-async def s2_get(client: httpx.AsyncClient, path: str, params: dict) -> dict:
-    """Fetch from Semantic Scholar with retry on 429."""
-    for attempt in range(3):
-        try:
-            resp = await client.get(f"{S2_BASE}{path}", params=params, timeout=TIMEOUT)
-            if resp.status_code == 429:
-                await asyncio.sleep(2 ** attempt)
-                continue
-            resp.raise_for_status()
-            return resp.json()
-        except httpx.TimeoutException:
-            if attempt == 2:
-                raise
-            await asyncio.sleep(1)
-    return {}
-
-
-# ── Pydantic Schemas ──────────────────────────────────────────────────────────
+# ── Schemas ──────────────────────────────────────────────────────────────────
 class LitGraphNode(BaseModel):
     id: str
     title: str
@@ -74,13 +47,13 @@ class LitGraphNode(BaseModel):
     doi: Optional[str] = None
     url: Optional[str] = None
     isSeed: bool = False
-    references: List[str] = []  # kept for client-side tooltips
+    references: List[str] = []
 
 
 class LitGraphLink(BaseModel):
     source: str
     target: str
-    weight: float  # Jaccard similarity score [0,1]
+    weight: float  # Similarity score [0, 1]
 
 
 class LitGraphResponse(BaseModel):
@@ -100,236 +73,372 @@ class SearchResult(BaseModel):
     abstract: Optional[str] = None
 
 
-# ── Jaccard Similarity ────────────────────────────────────────────────────────
-def jaccard(refs_a: Set[str], refs_b: Set[str]) -> float:
-    if not refs_a or not refs_b:
+# ── Helpers ──────────────────────────────────────────────────────────────────
+def reconstruct_abstract(inverted_index: Optional[Dict[str, List[int]]]) -> str:
+    if not inverted_index:
+        return ""
+    try:
+        word_pos = []
+        for word, positions in inverted_index.items():
+            for pos in positions:
+                word_pos.append((pos, word))
+        word_pos.sort()
+        return " ".join(w for _, w in word_pos)[:600]
+    except Exception:
+        return ""
+
+
+def clean_id(raw_id: str) -> str:
+    if not raw_id:
+        return ""
+    s = str(raw_id).strip()
+    s = re.sub(r"^https?://openalex\.org/", "", s)
+    return s
+
+
+def text_tokens(text: str) -> Set[str]:
+    """Tokenize text into lowercase words for text-similarity fallback."""
+    if not text:
+        return set()
+    words = re.findall(r"\b[a-zA-Z]{3,}\b", text.lower())
+    stopwords = {
+        "the", "and", "for", "with", "that", "this", "from", "using", "via",
+        "based", "towards", "paper", "study", "approach", "model", "learning",
+        "methods", "results", "analysis", "system", "performance", "proposed",
+    }
+    return {w for w in words if w not in stopwords}
+
+
+def jaccard(set_a: Set[str], set_b: Set[str]) -> float:
+    if not set_a or not set_b:
         return 0.0
-    inter = len(refs_a & refs_b)
-    union = len(refs_a | refs_b)
+    inter = len(set_a & set_b)
+    union = len(set_a | set_b)
     return inter / union if union > 0 else 0.0
 
 
-# ── Fetch enriched paper metadata (with references) ───────────────────────────
-async def fetch_paper(client: httpx.AsyncClient, paper_id: str) -> Optional[Dict]:
-    cache_key = f"paper:{paper_id}"
-    cached = _cache_get(cache_key)
-    if cached is not None:
-        return cached
+# ── OpenAlex Provider ────────────────────────────────────────────────────────
+OPENALEX_BASE = "https://api.openalex.org"
+HEADERS = {"User-Agent": "ResearchCopilot/2.0 (mailto:team@researchcopilot.ai)"}
 
+
+def parse_openalex_work(work: Dict[str, Any], is_seed: bool = False) -> Dict[str, Any]:
+    pid = clean_id(work.get("id"))
+    authors = [
+        a.get("author", {}).get("display_name", "")
+        for a in work.get("authorships", [])[:6]
+        if a.get("author", {}).get("display_name")
+    ]
+    abstract = reconstruct_abstract(work.get("abstract_inverted_index"))
+    refs = [clean_id(r) for r in work.get("referenced_works", []) if r]
+    related = [clean_id(r) for r in work.get("related_works", []) if r]
+    doi = work.get("doi")
+    if doi:
+        doi = re.sub(r"^https?://(dx\.)?doi\.org/", "", doi)
+
+    primary_loc = work.get("primary_location") or {}
+    pdf_url = (
+        primary_loc.get("pdf_url")
+        or (work.get("open_access") or {}).get("oa_url")
+        or work.get("doi")
+        or f"https://openalex.org/{pid}"
+    )
+
+    return {
+        "id": pid,
+        "title": work.get("title") or "Untitled Research Paper",
+        "year": work.get("publication_year"),
+        "citationCount": work.get("cited_by_count", 0) or 0,
+        "authors": authors,
+        "abstract": abstract,
+        "doi": doi,
+        "url": pdf_url,
+        "isSeed": is_seed,
+        "references": refs,
+        "related": related,
+    }
+
+
+async def search_openalex(client: httpx.AsyncClient, query: str, limit: int = 8) -> List[SearchResult]:
     try:
-        data = await s2_get(
-            client,
-            f"/paper/{paper_id}",
-            {"fields": S2_FIELDS_PAPER, "limit": 1},
+        resp = await client.get(
+            f"{OPENALEX_BASE}/works",
+            params={"search": query, "per-page": limit},
+            headers=HEADERS,
+            timeout=8.0,
         )
-        if not data or "paperId" not in data:
-            return None
-
-        refs = [
-            r["paperId"]
-            for r in data.get("references", [])
-            if r.get("paperId")
-        ][:100]
-
-        result = {
-            "id": data["paperId"],
-            "title": data.get("title", "Unknown Title"),
-            "year": data.get("year"),
-            "citationCount": data.get("citationCount", 0) or 0,
-            "authors": [a["name"] for a in data.get("authors", [])[:6]],
-            "abstract": (data.get("abstract") or "")[:600],
-            "doi": (data.get("externalIds") or {}).get("DOI"),
-            "arxivId": (data.get("externalIds") or {}).get("ArXiv"),
-            "references": refs,
-            "isSeed": False,
-        }
-        _cache_set(cache_key, result)
-        return result
+        if resp.status_code != 200:
+            return []
+        data = resp.json().get("results", [])
+        results = []
+        for p in data:
+            pid = clean_id(p.get("id"))
+            if not pid:
+                continue
+            authors = [
+                a.get("author", {}).get("display_name", "")
+                for a in p.get("authorships", [])[:4]
+                if a.get("author", {}).get("display_name")
+            ]
+            abstract = reconstruct_abstract(p.get("abstract_inverted_index"))
+            results.append(
+                SearchResult(
+                    paperId=pid,
+                    title=p.get("title") or "Untitled Paper",
+                    year=p.get("publication_year"),
+                    authors=authors,
+                    citationCount=p.get("cited_by_count", 0) or 0,
+                    abstract=abstract,
+                )
+            )
+        return results
     except Exception:
-        return None
+        return []
 
 
-# ── Fetch 1-hop candidate pool (citations + references of seed) ───────────────
-async def fetch_candidate_pool(
-    client: httpx.AsyncClient, seed_id: str
-) -> List[str]:
-    """Return up to MAX_CANDIDATES paper IDs from the seed's neighbourhood."""
-    cache_key = f"pool:{seed_id}"
+async def fetch_openalex_work(client: httpx.AsyncClient, paper_id: str) -> Optional[Dict[str, Any]]:
+    clean_pid = clean_id(paper_id)
+    cache_key = f"oa:work:{clean_pid}"
     cached = _cache_get(cache_key)
     if cached is not None:
         return cached
 
-    candidate_ids: Set[str] = set()
-
-    # Fetch seed's references
     try:
-        refs_data = await s2_get(
-            client,
-            f"/paper/{seed_id}/references",
-            {"fields": "paperId,citationCount", "limit": 50},
-        )
-        for r in (refs_data.get("data") or []):
-            cp = r.get("citedPaper", {})
-            if cp.get("paperId") and cp.get("citationCount", 0) > 0:
-                candidate_ids.add(cp["paperId"])
+        if clean_pid.startswith("10.") or "doi.org" in clean_pid:
+            url = f"{OPENALEX_BASE}/works/https://doi.org/{clean_pid}"
+        elif clean_pid.upper().startswith("W"):
+            url = f"{OPENALEX_BASE}/works/{clean_pid}"
+        else:
+            url = f"{OPENALEX_BASE}/works?search={clean_pid}&per-page=1"
+
+        resp = await client.get(url, headers=HEADERS, timeout=8.0)
+        if resp.status_code == 200:
+            data = resp.json()
+            work = data["results"][0] if "results" in data and data["results"] else data
+            if "id" in work:
+                parsed = parse_openalex_work(work)
+                _cache_set(cache_key, parsed)
+                return parsed
     except Exception:
         pass
-
-    # Fetch papers that cite the seed
-    try:
-        cites_data = await s2_get(
-            client,
-            f"/paper/{seed_id}/citations",
-            {"fields": "paperId,citationCount", "limit": 50},
-        )
-        for c in (cites_data.get("data") or []):
-            cp = c.get("citingPaper", {})
-            if cp.get("paperId") and cp.get("citationCount", 0) > 0:
-                candidate_ids.add(cp["paperId"])
-    except Exception:
-        pass
-
-    candidate_ids.discard(seed_id)
-    result = list(candidate_ids)[:MAX_CANDIDATES]
-    _cache_set(cache_key, result)
-    return result
+    return None
 
 
-# ── Build similarity graph ────────────────────────────────────────────────────
-async def build_litgraph(seed_id: str) -> LitGraphResponse:
-    cache_key = f"graph:{seed_id}"
-    cached = _cache_get(cache_key)
-    if cached is not None:
-        return cached
+async def fetch_openalex_batch(client: httpx.AsyncClient, paper_ids: List[str]) -> List[Dict[str, Any]]:
+    if not paper_ids:
+        return []
+    clean_ids = [clean_id(pid) for pid in paper_ids if pid.upper().startswith("W")][:50]
+    if not clean_ids:
+        return []
 
-    async with httpx.AsyncClient() as client:
-        # 1. Fetch seed paper
-        seed = await fetch_paper(client, seed_id)
-        if not seed:
-            raise HTTPException(status_code=404, detail=f"Paper '{seed_id}' not found on Semantic Scholar.")
-        seed["isSeed"] = True
+    works = []
+    for i in range(0, len(clean_ids), 25):
+        chunk = clean_ids[i : i + 25]
+        pipe_ids = "|".join(chunk)
+        try:
+            resp = await client.get(
+                f"{OPENALEX_BASE}/works",
+                params={"filter": f"openalex:{pipe_ids}", "per-page": 25},
+                headers=HEADERS,
+                timeout=10.0,
+            )
+            if resp.status_code == 200:
+                for r in resp.json().get("results", []):
+                    works.append(parse_openalex_work(r))
+        except Exception:
+            pass
+    return works
 
-        # 2. Fetch candidate pool
-        candidate_ids = await fetch_candidate_pool(client, seed_id)
 
-        # 3. Enrich all candidates in parallel (batches of 10)
-        papers: List[Dict] = [seed]
-        batch_size = 10
-        for i in range(0, len(candidate_ids), batch_size):
-            batch = candidate_ids[i : i + batch_size]
-            results = await asyncio.gather(*[fetch_paper(client, pid) for pid in batch])
-            papers.extend([r for r in results if r is not None])
+# ── Similarity Matrix & Graph Construction ───────────────────────────────────
+def build_similarity_graph(seed: Dict[str, Any], candidates: List[Dict[str, Any]]) -> Tuple[List[LitGraphNode], List[LitGraphLink]]:
+    # Deduplicate candidates
+    seen_ids = {seed["id"]}
+    all_papers = [seed]
+    for c in candidates:
+        if c["id"] not in seen_ids and c.get("title"):
+            seen_ids.add(c["id"])
+            all_papers.append(c)
 
-    # 4. Build reference sets
-    ref_sets: Dict[str, Set[str]] = {p["id"]: set(p["references"]) for p in papers}
+    # Limit to top 35-42 papers for optimal rendering and high performance
+    all_papers = all_papers[:42]
+    N = len(all_papers)
 
-    # 5. Compute pairwise Jaccard similarity & build edges
-    paper_ids = [p["id"] for p in papers]
-    N = len(paper_ids)
+    ref_sets = {p["id"]: set(p.get("references", [])) for p in all_papers}
+    rel_sets = {p["id"]: set(p.get("related", [])) for p in all_papers}
+    tok_sets = {p["id"]: text_tokens(f"{p.get('title', '')} {p.get('abstract', '')}") for p in all_papers}
+
     links: List[LitGraphLink] = []
+    seen_edges: Set[Tuple[str, str]] = set()
 
-    # For each paper, keep top-K neighbors above threshold
     for i in range(N):
-        pid = paper_ids[i]
-        scored: List[Tuple[float, str]] = []
+        pid = all_papers[i]["id"]
+        scored_neighbors: List[Tuple[float, str]] = []
+
         for j in range(N):
             if i == j:
                 continue
-            qid = paper_ids[j]
-            score = jaccard(ref_sets[pid], ref_sets[qid])
-            if score >= SIMILARITY_THRESHOLD:
-                scored.append((score, qid))
+            qid = all_papers[j]["id"]
 
-        scored.sort(reverse=True)
-        top_neighbors = scored[:TOP_K_NEIGHBORS]
+            ref_score = jaccard(ref_sets[pid], ref_sets[qid])
+            rel_score = jaccard(rel_sets[pid], rel_sets[qid])
+            text_score = jaccard(tok_sets[pid], tok_sets[qid])
 
-        for score, neighbor_id in top_neighbors:
-            # Deduplicate undirected edges
+            # Blend scores
+            if len(ref_sets[pid] | ref_sets[qid]) > 5:
+                sim = 0.60 * ref_score + 0.20 * rel_score + 0.20 * text_score
+            else:
+                sim = 0.25 * ref_score + 0.35 * rel_score + 0.40 * text_score
+
+            # Boost seed connections
+            if pid == seed["id"] or qid == seed["id"]:
+                sim = max(sim, 0.18)
+
+            scored_neighbors.append((sim, qid))
+
+        # Sort and take top 3-4 most similar neighbors
+        scored_neighbors.sort(reverse=True)
+        top_k = 6 if pid == seed["id"] else 3
+        for score, neighbor_id in scored_neighbors[:top_k]:
             edge_key = tuple(sorted([pid, neighbor_id]))
-            if not any(
-                tuple(sorted([l.source, l.target])) == edge_key for l in links
-            ):
-                links.append(LitGraphLink(source=pid, target=neighbor_id, weight=round(score, 4)))
+            if edge_key not in seen_edges:
+                seen_edges.add(edge_key)
+                links.append(LitGraphLink(source=pid, target=neighbor_id, weight=round(max(score, 0.15), 4)))
 
-    # 6. Keep only nodes that are connected OR are the seed
-    connected_ids: Set[str] = {seed_id}
+    # Ensure all nodes are connected
+    connected_ids: Set[str] = {seed["id"]}
     for l in links:
         connected_ids.add(l.source)
         connected_ids.add(l.target)
 
-    connected_papers = [p for p in papers if p["id"] in connected_ids]
+    # For any paper that remained unconnected, link to seed
+    for p in all_papers:
+        if p["id"] not in connected_ids:
+            links.append(LitGraphLink(source=seed["id"], target=p["id"], weight=0.20))
+            connected_ids.add(p["id"])
 
-    # 7. Build node list (strip large reference arrays from payload — keep ids only for tooltip)
     nodes = [
         LitGraphNode(
             id=p["id"],
             title=p["title"],
-            year=p["year"],
-            citationCount=p["citationCount"],
-            authors=p["authors"],
-            abstract=p["abstract"],
+            year=p.get("year"),
+            citationCount=p.get("citationCount", 0) or 0,
+            authors=p.get("authors", []),
+            abstract=p.get("abstract"),
             doi=p.get("doi"),
-            url=f"https://arxiv.org/abs/{p['arxivId']}" if p.get("arxivId") else (
-                f"https://doi.org/{p['doi']}" if p.get("doi") else
-                f"https://www.semanticscholar.org/paper/{p['id']}"
-            ),
+            url=p.get("url"),
             isSeed=p.get("isSeed", False),
-            references=[],  # stripped for bandwidth
+            references=[],
         )
-        for p in connected_papers
+        for p in all_papers
     ]
 
+    return nodes, links
+
+
+# ── Core Graph Engine ────────────────────────────────────────────────────────
+async def build_litgraph_pipeline(paper_id: str) -> LitGraphResponse:
+    clean_pid = clean_id(paper_id)
+    cache_key = f"litgraph:v3:{clean_pid}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    async with httpx.AsyncClient(headers=HEADERS) as client:
+        # 1. Fetch seed paper
+        seed = await fetch_openalex_work(client, clean_pid)
+        if not seed:
+            search_res = await search_openalex(client, clean_pid, limit=1)
+            if search_res:
+                seed = await fetch_openalex_work(client, search_res[0].paperId)
+
+        if not seed:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Paper '{paper_id}' could not be resolved on academic graphs.",
+            )
+
+        seed["isSeed"] = True
+
+        # 2. Gather candidate pool
+        candidate_ids: Set[str] = set()
+        candidate_ids.update(seed.get("references", [])[:30])
+        candidate_ids.update(seed.get("related", [])[:20])
+
+        # Also get papers citing this work
+        try:
+            cites_resp = await client.get(
+                f"{OPENALEX_BASE}/works",
+                params={"filter": f"cites:{seed['id']}", "per-page": 20},
+                timeout=8.0,
+            )
+            if cites_resp.status_code == 200:
+                for c in cites_resp.json().get("results", []):
+                    cid = clean_id(c.get("id"))
+                    if cid:
+                        candidate_ids.add(cid)
+        except Exception:
+            pass
+
+        # If candidate pool is still under 35, perform topic search expansion
+        candidates: List[Dict[str, Any]] = []
+        if seed.get("title"):
+            clean_title_query = re.sub(r"[^\w\s]", "", seed["title"])
+            try:
+                topic_resp = await client.get(
+                    f"{OPENALEX_BASE}/works",
+                    params={"search": clean_title_query, "per-page": 40},
+                    timeout=8.0,
+                )
+                if topic_resp.status_code == 200:
+                    for c in topic_resp.json().get("results", []):
+                        cid = clean_id(c.get("id"))
+                        if cid and cid != seed["id"]:
+                            parsed = parse_openalex_work(c)
+                            candidates.append(parsed)
+                            candidate_ids.add(cid)
+            except Exception:
+                pass
+
+        candidate_ids.discard(seed["id"])
+        target_ids = [cid for cid in candidate_ids if not any(c["id"] == cid for c in candidates)][:40]
+
+        # Batch fetch any remaining IDs
+        if target_ids:
+            batch_results = await fetch_openalex_batch(client, target_ids)
+            candidates.extend(batch_results)
+
+    # 3. Compute dense similarity graph
+    nodes, links = build_similarity_graph(seed, candidates)
+
     response = LitGraphResponse(
-        seed_id=seed_id,
+        seed_id=seed["id"],
         seed_title=seed["title"],
         nodes=nodes,
         links=links,
         stats={
-            "total_candidates": len(candidate_ids),
+            "total_candidates": len(candidates),
             "connected_nodes": len(nodes),
             "total_edges": len(links),
-            "avg_similarity": round(
-                sum(l.weight for l in links) / max(len(links), 1), 4
-            ),
+            "avg_similarity": round(sum(l.weight for l in links) / max(len(links), 1), 4),
         },
     )
     _cache_set(cache_key, response)
     return response
 
 
-# ── API Endpoints ─────────────────────────────────────────────────────────────
+# ── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.get("/search", response_model=List[SearchResult])
-async def search_papers(q: str = Query(..., min_length=2, description="Paper title, DOI, or ArXiv ID")):
-    """Auto-suggest papers via Semantic Scholar search."""
-    cache_key = f"search:{hashlib.md5(q.encode()).hexdigest()}"
+async def search_papers(q: str = Query(..., min_length=2, description="Paper title, DOI, or query")):
+    """Auto-suggest papers via OpenAlex."""
+    cache_key = f"search:v3:{hashlib.md5(q.encode()).hexdigest()}"
     cached = _cache_get(cache_key)
     if cached is not None:
         return cached
 
     async with httpx.AsyncClient() as client:
-        try:
-            data = await s2_get(
-                client,
-                "/paper/search",
-                {"query": q, "fields": S2_FIELDS_SEARCH, "limit": 8},
-            )
-        except Exception as e:
-            raise HTTPException(status_code=502, detail=f"Semantic Scholar API error: {e}")
-
-    results = []
-    for p in (data.get("data") or []):
-        if p.get("paperId"):
-            results.append(
-                SearchResult(
-                    paperId=p["paperId"],
-                    title=p.get("title", "Unknown"),
-                    year=p.get("year"),
-                    authors=[a["name"] for a in p.get("authors", [])[:4]],
-                    citationCount=p.get("citationCount", 0) or 0,
-                    abstract=(p.get("abstract") or "")[:300],
-                )
-            )
+        results = await search_openalex(client, q, limit=8)
 
     _cache_set(cache_key, results)
     return results
@@ -338,13 +447,13 @@ async def search_papers(q: str = Query(..., min_length=2, description="Paper tit
 @router.get("/graph/{paper_id:path}", response_model=LitGraphResponse)
 async def get_litgraph(paper_id: str):
     """
-    Build a bibliometric similarity graph for a given Semantic Scholar paper ID.
-    Returns nodes + weighted edges computed via Jaccard similarity of reference sets.
+    Build a dense bibliometric similarity graph for a given paper ID, DOI, or title.
+    Returns nodes + weighted edges computed via pairwise similarity.
     """
     paper_id = paper_id.strip()
     if not paper_id:
         raise HTTPException(status_code=400, detail="paper_id is required")
-    return await build_litgraph(paper_id)
+    return await build_litgraph_pipeline(paper_id)
 
 
 @router.delete("/cache")

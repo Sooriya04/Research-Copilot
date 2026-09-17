@@ -83,6 +83,33 @@ function SearchBar({ onSelectPaper }) {
     onSelectPaper(paper);
   };
 
+  const handleKeyDown = async (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      clearTimeout(debounceRef.current);
+      if (results.length > 0) {
+        handleSelect(results[0]);
+      } else if (query.trim().length >= 2) {
+        setLoading(true);
+        try {
+          const res = await fetch(`/api/v1/litgraph/search?q=${encodeURIComponent(query.trim())}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.length > 0) {
+              handleSelect(data[0]);
+            } else {
+              setResults([]);
+              setOpen(true);
+            }
+          }
+        } catch {}
+        setLoading(false);
+      }
+    } else if (e.key === 'Escape') {
+      setOpen(false);
+    }
+  };
+
   return (
     <div style={{ position: 'relative', width: '100%' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -103,8 +130,9 @@ function SearchBar({ onSelectPaper }) {
             type="text"
             value={query}
             onChange={handleChange}
+            onKeyDown={handleKeyDown}
             onFocus={() => results.length > 0 && setOpen(true)}
-            placeholder="Search paper title, DOI, or arXiv ID..."
+            placeholder="Search paper title, DOI, or topic (e.g. Agentic Memory)..."
             style={{
               width: '100%',
               padding: '9px 12px 9px 32px',
@@ -358,10 +386,10 @@ export default function LitGraphView() {
 
       // Compute year bounds
       const years = data.nodes.map((n) => n.year).filter(Boolean);
-      const mn = Math.min(...years);
-      const mx = Math.max(...years);
-      setYearBounds([mn || 1990, mx || new Date().getFullYear()]);
-      setMinYearFilter(mn || 1990);
+      const mn = years.length ? Math.min(...years) : 1990;
+      const mx = years.length ? Math.max(...years) : new Date().getFullYear();
+      setYearBounds([mn, mx]);
+      setMinYearFilter(mn);
 
       // Annotate node radii
       data.nodes = data.nodes.map((n) => ({
@@ -439,80 +467,122 @@ export default function LitGraphView() {
     setHighlightLinks(new Set());
   }, []);
 
-  // Custom canvas node painter
+  // Custom canvas node painter (Light Theme)
   const paintNode = useCallback(
     (node, ctx, globalScale) => {
       const r = node.radius || 8;
       const isHighlighted = highlightNodes.size === 0 || highlightNodes.has(node.id);
+      const isHovered = hoverNode?.id === node.id;
       const isSelected = selectedNode?.id === node.id;
       const alpha = isHighlighted ? 1 : 0.15;
 
       ctx.save();
       ctx.globalAlpha = alpha;
 
-      // Glow for seed
+      // Glow for seed or selected/hovered node
       if (node.isSeed) {
-        ctx.shadowColor = '#f59e0b';
+        ctx.shadowColor = 'rgba(245, 158, 11, 0.6)'; // Amber glow
+        ctx.shadowBlur = 18;
+      } else if (isSelected || isHovered) {
+        ctx.shadowColor = 'rgba(99, 102, 241, 0.5)'; // Indigo glow
         ctx.shadowBlur = 14;
-      } else if (isSelected) {
-        ctx.shadowColor = node.color;
-        ctx.shadowBlur = 10;
+      } else {
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.1)';
+        ctx.shadowBlur = 6;
       }
 
       // Circle fill
       ctx.beginPath();
       ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
-      ctx.fillStyle = node.color || '#6b7280';
+      ctx.fillStyle = node.color || '#94a3b8';
       ctx.fill();
 
-      // Border
-      ctx.lineWidth = node.isSeed ? 2.5 : isSelected ? 2 : 1;
+      // Border outline (Darker for light theme)
+      ctx.lineWidth = node.isSeed ? 3 : isSelected ? 2.5 : isHovered ? 2 : 1;
       ctx.strokeStyle = node.isSeed
-        ? '#f59e0b'
+        ? '#d97706' // Darker amber
         : isSelected
-        ? '#ffffff'
-        : 'rgba(255,255,255,0.3)';
+        ? '#1e293b' // Slate 800
+        : isHovered
+        ? '#4f46e5' // Indigo 600
+        : 'rgba(0, 0, 0, 0.15)';
       ctx.stroke();
 
       ctx.shadowBlur = 0;
 
-      // Label — only when zoomed in enough or node is large
-      const labelThreshold = node.isSeed ? 1 : 2.5;
-      if (globalScale >= labelThreshold || r >= 14) {
-        const label =
-          node.title?.length > 28
-            ? node.title.slice(0, 26) + '…'
-            : node.title || node.id;
-        ctx.font = `${Math.min(3.5, 11 / globalScale)}px Plus Jakarta Sans, sans-serif`;
-        ctx.fillStyle = 'rgba(255,255,255,0.92)';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
+      // Draw title labels
+      const showLabel = node.isSeed || isSelected || isHovered || globalScale >= 1.6 || r >= 13;
+      if (showLabel) {
+        const rawTitle = node.title || node.id;
+        const maxLen = globalScale > 2.5 ? 40 : 26;
+        const label = rawTitle.length > maxLen ? rawTitle.slice(0, maxLen - 1) + '…' : rawTitle;
 
-        // Label below node
-        const labelY = node.y + r + 6 / globalScale;
-        ctx.font = `${Math.max(2.5, Math.min(4, 11 / globalScale))}px Plus Jakarta Sans, sans-serif`;
-        ctx.fillStyle = isHighlighted ? 'var(--text-primary)' : 'rgba(100,100,100,0.4)';
+        const fontSize = Math.max(3, Math.min(4.5, 12 / globalScale));
+        ctx.font = `600 ${fontSize}px Plus Jakarta Sans, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+
+        const labelY = node.y + r + 4 / globalScale;
+
+        // Subtle pill background for label readability (Light theme)
+        const textWidth = ctx.measureText(label).width;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+        ctx.beginPath();
+        const padding = 2 / globalScale;
+        ctx.roundRect(
+          node.x - textWidth / 2 - padding,
+          labelY - padding / 2,
+          textWidth + padding * 2,
+          fontSize + padding * 1.5,
+          2 / globalScale
+        );
+        ctx.fill();
+
+        // Text fill (Dark text)
+        ctx.fillStyle = node.isSeed ? '#b45309' : '#334155'; // Dark amber / Slate 700
         ctx.fillText(label, node.x, labelY);
       }
 
       ctx.restore();
     },
-    [highlightNodes, selectedNode]
+    [highlightNodes, selectedNode, hoverNode]
   );
 
-  // Custom link painter
+  // Custom link painter (Light Theme)
   const paintLink = useCallback(
     (link, ctx) => {
+      const src = link.source;
+      const tgt = link.target;
+      if (!src || !tgt || typeof src.x !== 'number' || typeof tgt.x !== 'number') return;
+
       const isHighlighted = highlightLinks.size === 0 || highlightLinks.has(link);
-      ctx.globalAlpha = isHighlighted ? Math.max(0.2, link.weight || 0.3) * 1.2 : 0.06;
-      ctx.strokeStyle = isHighlighted ? '#6366f1' : '#94a3b8';
-      ctx.lineWidth = isHighlighted ? 1.5 * (link.weight || 0.3) + 0.5 : 0.5;
+      ctx.save();
+      ctx.globalAlpha = isHighlighted ? Math.min(0.85, Math.max(0.35, link.weight || 0.4)) : 0.05;
+      
+      // Darker lines for light theme background
+      ctx.strokeStyle = isHighlighted ? (link.weight > 0.3 ? '#6366f1' : '#cbd5e1') : '#e2e8f0';
+      ctx.lineWidth = isHighlighted ? Math.max(1.2, (link.weight || 0.3) * 3) : 0.6;
+      ctx.beginPath();
+      ctx.moveTo(src.x, src.y);
+      ctx.lineTo(tgt.x, tgt.y);
+      ctx.stroke();
+      ctx.restore();
     },
     [highlightLinks]
   );
 
-  // D3 force config after graph data changes
-  const handleEngineStop = useCallback(() => {}, []);
+  // Configure custom D3 physics forces on data update
+  useEffect(() => {
+    if (fgRef.current && filteredGraph) {
+      fgRef.current.d3Force('charge', d3.forceManyBody().strength(-240));
+      fgRef.current.d3Force(
+        'link',
+        d3.forceLink().id((d) => d.id).distance((d) => (1 - (d.weight || 0.2)) * 80 + 35).strength((d) => (d.weight || 0.3) * 0.75)
+      );
+      fgRef.current.d3Force('collide', d3.forceCollide().radius((d) => (d.radius || 8) + 8));
+      fgRef.current.d3ReheatSimulation();
+    }
+  }, [filteredGraph]);
 
   if (!filteredGraph && !loading && !error) {
     return <LandingState onSelectPaper={(p) => loadGraph(p.paperId, p.title)} />;
@@ -577,7 +647,7 @@ export default function LitGraphView() {
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
 
         {/* Graph Canvas */}
-        <div style={{ flex: 1, position: 'relative', overflow: 'hidden', background: 'var(--bg-primary)' }}>
+        <div style={{ flex: 1, position: 'relative', overflow: 'hidden', background: '#f8fafc' }}>
           {filteredGraph && (
             <ForceGraph2D
               ref={fgRef}
@@ -585,16 +655,15 @@ export default function LitGraphView() {
               nodeId="id"
               linkSource="source"
               linkTarget="target"
+              backgroundColor="#f8fafc"
               nodeCanvasObject={paintNode}
               nodeCanvasObjectMode={() => 'replace'}
               linkCanvasObjectMode={() => 'before'}
               linkCanvasObject={paintLink}
-              linkWidth={(l) => 1 + (l.weight || 0.2) * 2}
-              linkDistance={(l) => (1 - (l.weight || 0.1)) * 130 + 20}
-              d3AlphaDecay={0.025}
-              d3VelocityDecay={0.38}
-              warmupTicks={80}
-              cooldownTicks={120}
+              d3AlphaDecay={0.02}
+              d3VelocityDecay={0.3}
+              warmupTicks={60}
+              cooldownTicks={100}
               onNodeClick={handleNodeClick}
               onBackgroundClick={handleBackgroundClick}
               onNodeHover={setHoverNode}
@@ -608,8 +677,6 @@ export default function LitGraphView() {
                 ctx.arc(node.x, node.y, r + 4, 0, 2 * Math.PI);
                 ctx.fill();
               }}
-              d3Force="charge"
-              onEngineStop={handleEngineStop}
             />
           )}
 
@@ -737,8 +804,9 @@ export default function LitGraphView() {
 // ── Landing page when no graph loaded ────────────────────────────────────────
 function LandingState({ onSelectPaper }) {
   const EXAMPLES = [
+    { paperId: 'W4407759090', title: 'A-Mem: Agentic Memory for LLM Agents' },
+    { paperId: 'W4393065402', title: 'A survey on large language model based autonomous agents' },
     { paperId: '204e3073870fae3d05bcbc2f6a8e263d9b72e776', title: 'Attention Is All You Need' },
-    { paperId: '2c03df8b48bf3fa39054345bafabfeff15bfd11d', title: 'BERT: Pre-training of Deep Bidirectional Transformers' },
     { paperId: '5b5b20dc5e0e7e7b8cf08fc9db9c90c2461b1f69', title: 'GPT-4 Technical Report' },
   ];
 

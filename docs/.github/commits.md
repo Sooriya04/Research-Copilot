@@ -757,3 +757,15 @@ bundle compilation (`npm run build`).
   * Added `tests/test_litgraph.py` verifying Jaccard computation, search endpoints, and cache invalidation.
   * **42/42 pytest tests passing** (100% green) and clean production Vite build (`3,180 modules transformed in 7.99s`).
 
+
+---
+
+## LitGraph Fixes: OpenAlex Expansion, Canvas Strokes, and Light Theme
+
+* **Backend: OpenAlex & Multi-Tier Candidate Expansion (`src/api/routes_litgraph.py`)**:
+  * Switched similarity graph engine to **OpenAlex-primary** architecture to resolve API timeouts and missing data.
+  * Implemented multi-tier candidate expansion (traversing references, related works, citing papers, and semantic topics) to ensure dense **40+ node candidate pooling** for accurate graph building.
+
+* **Frontend: Canvas Fixes & Light Theme (`frontend/src/views/LitGraphView.jsx`)**:
+  * **Canvas Link Rendering Fix**: Fixed the custom `paintLink` logic by adding explicit HTML5 Canvas path strokes (`ctx.beginPath()`, `ctx.moveTo()`, `ctx.lineTo()`, `ctx.stroke()`). This resolved an issue where nodes were floating without visible connections.
+  * **Beautiful Light Theme**: Refactored the `ForceGraph2D` canvas and nodes to use a clean light theme (background: `#f8fafc`). Updated node label text to dark slate, link strokes to indigo/slate for contrast, and added ambient glow effects for seed and selected nodes.
