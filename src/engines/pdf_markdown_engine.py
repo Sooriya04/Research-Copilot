@@ -1,34 +1,31 @@
-import base64
-import io
+import os
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 import pymupdf as fitz
+import pymupdf4llm
 from src.core.logger import logger
 
+# Base directory for extracted markdown and images
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+DUMP_EXTRACT_DIR = os.path.join(PROJECT_ROOT, "dump_extract")
+IMAGES_DIR = os.path.join(DUMP_EXTRACT_DIR, "images")
+MARKDOWN_DIR = os.path.join(DUMP_EXTRACT_DIR, "markdown")
+
+os.makedirs(IMAGES_DIR, exist_ok=True)
+os.makedirs(MARKDOWN_DIR, exist_ok=True)
+
+
 class PDFMarkdownEngine:
-    """Extracts publication-grade structured Markdown, embedded figures/images, LaTeX equations, and tables from PDF documents."""
+    """Extracts publication-grade structured Markdown and images from PDF documents using PyMuPDF4LLM,
 
-    SECTION_PATTERNS = [
-        ("abstract", re.compile(r"^\s*(abstract|summary)\b", re.IGNORECASE)),
-        ("introduction", re.compile(r"^\s*(\d\.?\s*)?(introduction|background|overview)\b", re.IGNORECASE)),
-        ("related_work", re.compile(r"^\s*(\d\.?\s*)?(related\s+works?|prior\s+art|literature\s+review)\b", re.IGNORECASE)),
-        ("methodology", re.compile(r"^\s*(\d\.?\s*)?(method|methodology|approach|model\s+architecture|proposed\s+method|framework)\b", re.IGNORECASE)),
-        ("experiments", re.compile(r"^\s*(\d\.?\s*)?(experiment|experimental\s+setup|evaluation|benchmarks?|datasets?)\b", re.IGNORECASE)),
-        ("results", re.compile(r"^\s*(\d\.?\s*)?(results?|empirical\s+results?|findings|ablation\s+study)\b", re.IGNORECASE)),
-        ("discussion", re.compile(r"^\s*(\d\.?\s*)?(discussion|analysis|broader\s+impacts?)\b", re.IGNORECASE)),
-        ("limitations", re.compile(r"^\s*(\d\.?\s*)?(limitations?|threats\s+to\s+validity|failure\s+cases?)\b", re.IGNORECASE)),
-        ("conclusion", re.compile(r"^\s*(\d\.?\s*)?(conclusion|concluding\s+remarks|summary\s+and\s+future\s+work)\b", re.IGNORECASE)),
-        ("references", re.compile(r"^\s*(\d\.?\s*)?(references|bibliography)\b", re.IGNORECASE)),
-    ]
+    persisting extracted files directly into dump_extract/ and serving them to the frontend.
+    """
 
-    FIGURE_CAPTION_PATTERN = re.compile(r"^\s*(Figure|Fig\.?|Table)\s*(\d+)?[\.:\s](.*)$", re.IGNORECASE)
-    EQUATION_PATTERN = re.compile(r"(\b[a-zA-Z]\s*=\s*[^;\n]+|\\\\[a-zA-Z]+|\bE\s*=\s*mc\^2|\\sum|\\int|\\alpha|\\beta|\\gamma|\\theta|\\lambda)")
-
-    def __init__(self, max_images: int = 12):
+    def __init__(self, max_images: int = 24):
         self.max_images = max_images
 
     def convert_pdf_to_markdown(self, pdf_bytes: bytes, filename: Optional[str] = None) -> Dict[str, Any]:
-        """Convert PDF bytes into a complete structured Markdown paper document with extracted figures and metadata."""
+        """Convert PDF bytes into high-fidelity Markdown, writing images and markdown to dump_extract/."""
         if not pdf_bytes or len(pdf_bytes) < 100:
             return {
                 "title": filename or "Untitled Document",
@@ -38,7 +35,7 @@ class PDFMarkdownEngine:
                 "markdown": "# Document\n\nNo readable content could be extracted from this PDF.",
                 "sections": [],
                 "figures": [],
-                "tables": [],
+                "total_pages": 0,
             }
 
         try:
@@ -53,70 +50,193 @@ class PDFMarkdownEngine:
                 "markdown": f"# Document Parsing Error\n\nCould not parse PDF: {e}",
                 "sections": [],
                 "figures": [],
-                "tables": [],
+                "total_pages": 0,
             }
 
-        extracted_images: List[Dict[str, Any]] = []
-        page_texts: List[str] = []
-        page_blocks: List[List[Dict[str, Any]]] = []
+        total_pages = len(doc)
+        clean_name = re.sub(r"[^a-zA-Z0-9]+", "_", (filename or "paper").replace(".pdf", "").lower()).strip("_")[:30] or "paper"
+        logger.info("[PDFMarkdownEngine] Extracting PDF '%s' (%d pages) to dump_extract/", clean_name, total_pages)
 
-        # 1. Extract images & text blocks from each page
-        for page_idx in range(len(doc)):
-            page = doc[page_idx]
-            page_text = page.get_text("text")
-            page_texts.append(page_text)
+        # 1. Run PyMuPDF4LLM with image writing directed into dump_extract/images/
+        #    Set the doc name so pymupdf4llm generates image filenames from clean_name
+        #    (avoids leading-dash filenames like "-0004-00.png" when opened from bytes)
+        try:
+            doc.name = clean_name
+        except Exception:
+            pass
+        markdown_text = ""
+        try:
+            markdown_text = pymupdf4llm.to_markdown(
+                doc,
+                write_images=True,
+                image_path=IMAGES_DIR,
+                use_ocr=False,
+            )
+        except Exception as err1:
+            logger.warning("[PDFMarkdownEngine] pymupdf4llm layout extraction failed (%s), falling back to RAG...", err1)
+            try:
+                markdown_text = pymupdf4llm.helpers.pymupdf_rag.to_markdown(
+                    doc,
+                    write_images=True,
+                    image_path=IMAGES_DIR,
+                )
+            except Exception as err2:
+                logger.error("[PDFMarkdownEngine] pymupdf4llm RAG extraction failed: %s", err2)
+                text_parts = [p.get_text() for p in doc]
+                markdown_text = "\n\n".join(text_parts)
 
-            # Extract image objects
-            if len(extracted_images) < self.max_images:
-                try:
-                    img_list = page.get_images(full=True)
-                    for img_info in img_list:
-                        if len(extracted_images) >= self.max_images:
-                            break
-                        xref = img_info[0]
-                        base_img = doc.extract_image(xref)
-                        if base_img and base_img.get("image"):
-                            img_bytes = base_img["image"]
-                            img_ext = base_img.get("ext", "png")
-                            # Ignore tiny icons / logos (< 2KB)
-                            if len(img_bytes) > 2048:
-                                b64_str = base64.b64encode(img_bytes).decode("utf-8")
-                                img_data_url = f"data:image/{img_ext};base64,{b64_str}"
-                                fig_num = len(extracted_images) + 1
-                                extracted_images.append({
-                                    "figure_id": f"fig-{fig_num}",
-                                    "page": page_idx + 1,
-                                    "caption": f"Figure {fig_num}: Extracted diagram / result from page {page_idx + 1}",
-                                    "data_url": img_data_url,
-                                    "width": base_img.get("width", 0),
-                                    "height": base_img.get("height", 0),
-                                })
-                except Exception as img_err:
-                    logger.warning("[PDFMarkdownEngine] Image extraction error on page %d: %s", page_idx + 1, img_err)
+        # 2. Extract any additional images from PDF xrefs that PyMuPDF4LLM might have missed
+        extracted_figures: List[Dict[str, Any]] = []
+        try:
+            fig_counter = 1
+            for p_idx in range(min(total_pages, 50)):
+                if len(extracted_figures) >= self.max_images:
+                    break
+                page = doc[p_idx]
+                img_list = page.get_images(full=True)
+                for img_info in img_list:
+                    if len(extracted_figures) >= self.max_images:
+                        break
+                    xref = img_info[0]
+                    base_img = doc.extract_image(xref)
+                    if base_img and base_img.get("image"):
+                        img_bytes = base_img["image"]
+                        if len(img_bytes) > 2048:
+                            ext = base_img.get("ext", "png")
+                            extra_filename = f"{clean_name}-p{p_idx+1}-{fig_counter}.{ext}"
+                            extra_path = os.path.join(IMAGES_DIR, extra_filename)
+                            if not os.path.exists(extra_path):
+                                with open(extra_path, "wb") as f_img:
+                                    f_img.write(img_bytes)
 
-        # 2. Extract Document Metadata (Title, Authors, Abstract)
+                            img_url = f"/dump_extract/images/{extra_filename}"
+                            extracted_figures.append({
+                                "figure_id": f"fig-{fig_counter}",
+                                "page": p_idx + 1,
+                                "caption": f"Figure {fig_counter}: Diagram from Page {p_idx + 1}",
+                                "url": img_url,
+                                "width": base_img.get("width", 0),
+                                "height": base_img.get("height", 0),
+                            })
+                            fig_counter += 1
+        except Exception as img_err:
+            logger.warning("[PDFMarkdownEngine] Direct xref image extraction warning: %s", img_err)
+
+        # 3. Normalize all image markdown paths to absolute web paths: /dump_extract/images/<filename>
+        markdown_text = re.sub(
+            r"!\[(.*?)\]\((?:(?:/)?dump_extract/)?images/([^)]+)\)",
+            r"![\1](/dump_extract/images/\2)",
+            markdown_text
+        )
+        # Also catch any raw filename references without folder prefix
+        markdown_text = re.sub(
+            r"!\[(.*?)\]\((?!http|/|data:)([^)]+\.(?:png|jpe?g|webp|gif))\)",
+            r"![\1](/dump_extract/images/\2)",
+            markdown_text
+        )
+
+        # 4. Alignment & Text Flow Sanitization:
+        # a) Repair words broken with hyphens across page breaks
+        markdown_text = re.sub(
+            r"(\b[a-zA-Z]{2,})-\s*\n+\s*(?:\d+\s*\n+)?([a-zA-Z]{2,}\b)",
+            r"\1\2",
+            markdown_text
+        )
+        # b) Remove completely isolated page numbers (a paragraph that is only 1-3 digits)
+        markdown_text = re.sub(r"\n\n\s*\d{1,3}\s*\n\n", r"\n\n", markdown_text)
+        # Also catch page numbers mid-flow (between text sentences)
+        markdown_text = re.sub(
+            r"(?<=[a-zA-Z,.:;])\s*\n+\s*\d{1,3}\s*\n+\s*(?=[a-zA-Z])",
+            r" ",
+            markdown_text
+        )
+        # c) Remove leading affiliation/footnote numbers from lines like "1Instituto Superior..."
+        #    pymupdf4llm extracts superscript digits as line-leading plain digits
+        markdown_text = re.sub(
+            r"^(\d{1,2})([A-Z][a-zA-Z])",
+            r"\2",
+            markdown_text,
+            flags=re.MULTILINE
+        )
+        # d) Demote author/affiliation lines incorrectly promoted to ## headings.
+        #    A ## line that has no section-like structure is almost certainly an author byline.
+        def _demote_if_not_section(m):
+            content = m.group(1).strip()
+            # Keep as heading if it starts with a digit (section number like "1 Introduction")
+            if re.match(r"^\d+[\s\.]", content):
+                return m.group(0)
+            # Keep if it contains common section keywords
+            if re.search(
+                r"\b(abstract|introduction|method|result|conclusion|experiment|related|"
+                r"appendix|discussion|evaluation|background|setup|analysis|approach|"
+                r"framework|model|system|dataset|baseline|limitation|future)\b",
+                content, re.IGNORECASE
+            ):
+                return m.group(0)
+            # Otherwise demote to a plain paragraph (author/affiliation/byline)
+            return f"\n{content}\n"
+        markdown_text = re.sub(r"\n## ([^\n]+)\n", _demote_if_not_section, markdown_text)
+
+        # e) Ensure images have clean spacing before and after
+        markdown_text = re.sub(r"([^\n])\n(!\[[^\]]*\]\(/dump_extract/images/[^)]+\))", r"\1\n\n\2", markdown_text)
+        markdown_text = re.sub(r"(!\[[^\]]*\]\(/dump_extract/images/[^)]+\))\n([^\n])", r"\1\n\n\2", markdown_text)
+        # f) Collapse excessive empty lines
+        markdown_text = re.sub(r"\n{3,}", r"\n\n", markdown_text)
+        # g) Join soft-wrapped lines within paragraphs:
+        #    pymupdf4llm hard-wraps at ~80 chars with a single \n inside a paragraph.
+        #    Replace a single \n NOT followed by: blank line, heading, list item, blockquote, image, table row
+        markdown_text = re.sub(
+            r"(?<!\n)\n(?!\n)(?!#{1,6} )(?![-*+] )(?!\d+\. )(?!> )(?!!\[)(?!\|)",
+            " ",
+            markdown_text,
+        )
+
+        # 5. If PyMuPDF4LLM embedded 0 images into text, append extracted figures cleanly in-between
+        images_in_md = re.findall(r"!\[.*?\]\(/dump_extract/images/[^)]+\)", markdown_text)
+        if len(images_in_md) == 0 and extracted_figures:
+            logger.info("[PDFMarkdownEngine] PyMuPDF4LLM had 0 inline figures; inserting %d extracted figures", len(extracted_figures))
+            fig_section = ["\n\n## Extracted Figures & Architecture Diagrams\n"]
+            for fig in extracted_figures:
+                fig_section.append(f"\n![{fig['caption']}]({fig['url']})\n\n*{fig['caption']}*\n")
+            markdown_text += "\n".join(fig_section)
+
+        # 6. Save the generated Markdown to dump_extract/ for permanence and inspection
+        paper_md_path = os.path.join(DUMP_EXTRACT_DIR, "paper.md")
+        slug_md_path = os.path.join(MARKDOWN_DIR, f"{clean_name}.md")
+        try:
+            with open(paper_md_path, "w", encoding="utf-8") as f_out:
+                f_out.write(markdown_text)
+            with open(slug_md_path, "w", encoding="utf-8") as f_out:
+                f_out.write(markdown_text)
+            logger.info("[PDFMarkdownEngine] Saved Markdown to %s and %s", paper_md_path, slug_md_path)
+        except Exception as f_err:
+            logger.warning("[PDFMarkdownEngine] Could not save markdown file: %s", f_err)
+
+        # 7. Extract Document Metadata (Title, Authors, Year, Abstract)
         meta = doc.metadata or {}
-        first_page_text = page_texts[0] if page_texts else ""
-        first_page_lines = [l.strip() for l in first_page_text.split("\n") if l.strip()]
+        first_page_text = doc[0].get_text() if total_pages > 0 else ""
+        first_lines = [l.strip() for l in first_page_text.split("\n") if l.strip()]
 
         title = meta.get("title") or ""
         if not title or len(title) < 5 or title.lower().endswith(".pdf"):
-            # Derive title from first prominent lines of first page
-            candidates = [l for l in first_page_lines[:6] if len(l) > 10 and not l.lower().startswith("arxiv") and not l.lower().startswith("ieee")]
-            title = candidates[0] if candidates else (filename or "Scientific Research Paper")
-            title = re.sub(r"\s+", " ", title).strip()
+            h1_match = re.search(r"^#\s+(.+)$", markdown_text, re.MULTILINE)
+            if h1_match and len(h1_match.group(1).strip()) > 5:
+                title = h1_match.group(1).strip()
+            elif first_lines:
+                candidates = [l for l in first_lines[:5] if len(l) > 10 and not l.lower().startswith("arxiv")]
+                title = candidates[0] if candidates else (filename or "Research Publication")
+        title = re.sub(r"\s+", " ", title).strip()
 
         author_meta = meta.get("author") or ""
         authors = [a.strip() for a in re.split(r"[,;]| and ", author_meta) if a.strip()]
-        if not authors and len(first_page_lines) > 1:
-            # Try to grab second line as authors if plausible
-            for line in first_page_lines[1:4]:
+        if not authors and len(first_lines) > 1:
+            for line in first_lines[1:4]:
                 if line != title and len(line) < 120 and not line.lower().startswith("abstract"):
-                    authors = [a.strip() for a in re.split(r"[,;]| and |\*|\†", line) if len(a.strip()) > 2]
-                    if authors:
+                    parsed_a = [a.strip() for a in re.split(r"[,;]| and |\*|\†", line) if len(a.strip()) > 2]
+                    if parsed_a:
+                        authors = parsed_a
                         break
 
-        # Extract year
         year = 2024
         year_match = re.search(r"\b(201\d|202\d)\b", first_page_text[:1000])
         if year_match:
@@ -125,159 +245,48 @@ class PDFMarkdownEngine:
             except Exception:
                 year = 2024
 
-        # Extract Abstract
         abstract = ""
-        abstract_idx = -1
-        for idx, line in enumerate(first_page_lines):
-            if re.match(r"^\s*abstract\b", line, re.IGNORECASE):
-                abstract_idx = idx
-                break
-        if abstract_idx != -1:
-            abstract_buffer = []
-            for line in first_page_lines[abstract_idx + 1:abstract_idx + 25]:
-                if re.match(r"^\s*(1\.?\s*)?(introduction|index terms|keywords)\b", line, re.IGNORECASE):
+        ab_match = re.search(r"##\s*Abstract\s*\n+([\s\S]+?)(?=\n+##|\Z)", markdown_text, re.IGNORECASE)
+        if ab_match:
+            abstract = ab_match.group(1).strip()
+            abstract = re.sub(r"^>\s*", "", abstract, flags=re.MULTILINE).strip()
+        elif first_lines:
+            ab_idx = -1
+            for idx, line in enumerate(first_lines):
+                if re.match(r"^\s*abstract\b", line, re.IGNORECASE):
+                    ab_idx = idx
                     break
-                abstract_buffer.append(line)
-            abstract = " ".join(abstract_buffer).strip()
-            # Remove "Abstract—" or "Abstract:" prefix
-            abstract = re.sub(r"^(abstract[\s:—–-]+)", "", abstract, flags=re.IGNORECASE).strip()
-
-        # 3. Parse Sections across all pages into clean Markdown
-        sections_dict: Dict[str, Dict[str, Any]] = {}
-        current_sec_key = "introduction"
-        current_sec_title = "Introduction"
-        current_sec_lines: List[str] = []
-
-        all_lines: List[str] = []
-        for p_idx, p_text in enumerate(page_texts):
-            for l in p_text.split("\n"):
-                clean = l.strip()
-                # Skip header/footer noise (e.g. Page numbers or conference footers)
-                if not clean or re.match(r"^(page\s*\d+|\d+\s*of\s*\d+|preprint\.?|under review|arxiv:\d+\.\d+v\d+)$", clean, re.IGNORECASE):
-                    continue
-                all_lines.append(clean)
-
-        for line in all_lines:
-            matched_sec = None
-            if len(line) < 65 and not line.endswith("."):
-                for sec_key, pattern in self.SECTION_PATTERNS:
-                    if pattern.match(line):
-                        matched_sec = (sec_key, line)
+            if ab_idx != -1:
+                abstract_buffer = []
+                for line in first_lines[ab_idx + 1:ab_idx + 20]:
+                    if re.match(r"^\s*(1\.?\s*)?(introduction|index terms)\b", line, re.IGNORECASE):
                         break
+                    abstract_buffer.append(line)
+                abstract = " ".join(abstract_buffer).strip()
+                abstract = re.sub(r"^(abstract[\s:—–-]+)", "", abstract, flags=re.IGNORECASE).strip()
 
-            if matched_sec:
-                # Flush existing buffer
-                if current_sec_lines:
-                    content_str = "\n\n".join(self._format_paragraphs(current_sec_lines))
-                    if current_sec_key in sections_dict:
-                        sections_dict[current_sec_key]["content"] += "\n\n" + content_str
-                    else:
-                        sections_dict[current_sec_key] = {
-                            "key": current_sec_key,
-                            "title": current_sec_title,
-                            "content": content_str,
-                        }
-                    current_sec_lines = []
-                current_sec_key, current_sec_title = matched_sec
-            else:
-                current_sec_lines.append(line)
-
-        # Flush final buffer
-        if current_sec_lines:
-            content_str = "\n\n".join(self._format_paragraphs(current_sec_lines))
-            if current_sec_key in sections_dict:
-                sections_dict[current_sec_key]["content"] += "\n\n" + content_str
-            else:
-                sections_dict[current_sec_key] = {
-                    "key": current_sec_key,
-                    "title": current_sec_title,
-                    "content": content_str,
-                }
-
-        # 4. Construct Rich Full-Text Markdown Document
-        md_parts = []
-        md_parts.append(f"# {title}\n")
-
-        author_str = ", ".join(authors) if authors else "Research Contributors"
-        md_parts.append(f"**Authors:** {author_str} &bull; **Year:** {year}\n")
-
-        if abstract:
-            md_parts.append("## Abstract\n")
-            md_parts.append(f"> {abstract}\n")
-
-        # Distribute extracted figures naturally across sections
-        fig_idx = 0
-        section_list = []
-
-        for sec_key, sec_data in sections_dict.items():
-            if sec_key == "abstract" and abstract:
-                continue # Already rendered
-            sec_title = sec_data["title"]
-            sec_content = sec_data["content"]
-            section_list.append({
-                "title": sec_title,
-                "type": sec_key,
-                "content": sec_content,
+        # 8. Extract Section List for Navigation
+        sections = []
+        heading_matches = list(re.finditer(r"^(#{1,3})\s+(.+)$", markdown_text, re.MULTILINE))
+        for i, match in enumerate(heading_matches):
+            h_title = match.group(2).strip()
+            start_pos = match.end()
+            end_pos = heading_matches[i + 1].start() if i + 1 < len(heading_matches) else len(markdown_text)
+            body = markdown_text[start_pos:end_pos].strip()
+            sections.append({
+                "title": h_title,
+                "type": re.sub(r"[^a-z0-9]+", "-", h_title.lower()).strip("-"),
+                "content": body[:500] if len(body) > 500 else body,
             })
-
-            md_parts.append(f"## {sec_title}\n")
-            md_parts.append(f"{sec_content}\n")
-
-            # Inject an extracted figure after Methodology and Results sections
-            if sec_key in ["methodology", "methods", "experiments", "results", "overview"] and fig_idx < len(extracted_images):
-                fig = extracted_images[fig_idx]
-                md_parts.append(f"\n![{fig['caption']}]({fig['data_url']})\n*{fig['caption']}*\n")
-                fig_idx += 1
-
-        # If any remaining images weren't injected into sections, append in an appendix section
-        if fig_idx < len(extracted_images):
-            md_parts.append("\n## Extracted Figures & Visual Architectures\n")
-            while fig_idx < len(extracted_images):
-                fig = extracted_images[fig_idx]
-                md_parts.append(f"\n![{fig['caption']}]({fig['data_url']})\n*{fig['caption']}*\n")
-                fig_idx += 1
-
-        full_markdown = "\n".join(md_parts)
 
         return {
             "title": title,
             "authors": authors,
             "year": year,
             "abstract": abstract,
-            "markdown": full_markdown,
-            "sections": section_list,
-            "figures": extracted_images,
-            "total_pages": len(doc),
+            "markdown": markdown_text,
+            "sections": sections,
+            "figures": extracted_figures,
+            "total_pages": total_pages,
+            "markdown_file": f"/dump_extract/markdown/{clean_name}.md",
         }
-
-    def _format_paragraphs(self, lines: List[str]) -> List[str]:
-        """Group raw lines into structured coherent paragraphs, bullet points, and math blocks."""
-        paragraphs = []
-        current_para = []
-
-        for l in lines:
-            stripped = l.strip()
-            # Bullet point or numbered item
-            if re.match(r"^(\*|-|•|\d+[\.\)])\s+", stripped):
-                if current_para:
-                    paragraphs.append(" ".join(current_para))
-                    current_para = []
-                paragraphs.append(stripped)
-            # LaTeX / Math line
-            elif stripped.startswith("$$") or stripped.endswith("$$"):
-                if current_para:
-                    paragraphs.append(" ".join(current_para))
-                    current_para = []
-                paragraphs.append(stripped)
-            # End of paragraph detection
-            elif stripped.endswith((".", ":", ";", "?", "!")) and len(stripped) < 75:
-                current_para.append(stripped)
-                paragraphs.append(" ".join(current_para))
-                current_para = []
-            else:
-                current_para.append(stripped)
-
-        if current_para:
-            paragraphs.append(" ".join(current_para))
-
-        return [p for p in paragraphs if p.strip()]

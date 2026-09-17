@@ -10,8 +10,10 @@ import OverviewView from './views/OverviewView';
 import LiteratureSearchView from './views/LiteratureSearchView';
 import LiteratureResultsView from './views/LiteratureResultsView';
 import KnowledgeGraphView from './views/KnowledgeGraphView';
+import LitGraphView from './views/LitGraphView';
 import PaperReaderView from './views/PaperReaderView';
 import LibraryView from './views/LibraryView';
+import LibraryReaderView from './views/LibraryReaderView';
 import ChatView from './views/ChatView';
 import CreateView from './views/CreateView';
 import BenchmarksView from './views/BenchmarksView';
@@ -45,11 +47,14 @@ export default function App() {
             <Route path="/overview" element={<OverviewView />} />
             <Route path="/workspaces" element={<WorkspacesView />} />
             <Route path="/library" element={<LibraryView />} />
+            <Route path="/library/reader" element={<LibraryReaderView />} />
+            <Route path="/library-reader" element={<LibraryReaderView />} />
             <Route path="/create" element={<CreateView />} />
             <Route path="/chat" element={<ChatView />} />
             <Route path="/search" element={<LiteratureSearchView />} />
             <Route path="/search-results" element={<LiteratureResultsView />} />
             <Route path="/knowledge-graph" element={<KnowledgeGraphView />} />
+            <Route path="/litgraph" element={<LitGraphView />} />
             <Route path="/pdf-inspector" element={<PaperReaderView />} />
             <Route path="/experiment-studio" element={<BenchmarksView />} />
             <Route path="/manuscript" element={<ManuscriptView />} />

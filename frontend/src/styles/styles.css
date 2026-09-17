@@ -1355,24 +1355,27 @@ body {
 .markdown-body h1 {
   font-size: 22px;
   font-weight: 800;
-  margin: 24px 0 12px;
+  margin: 0 0 16px;
   color: var(--text-primary);
   border-bottom: 1px solid var(--border-subtle);
-  padding-bottom: 8px;
+  padding-bottom: 10px;
+  line-height: 1.4;
 }
 
 .markdown-body h2 {
   font-size: 18px;
   font-weight: 700;
-  margin: 20px 0 10px;
+  margin: 32px 0 12px;
   color: var(--text-primary);
+  line-height: 1.4;
 }
 
 .markdown-body h3 {
   font-size: 15px;
   font-weight: 600;
-  margin: 16px 0 8px;
+  margin: 24px 0 8px;
   color: var(--text-primary);
+  line-height: 1.4;
 }
 
 .markdown-body p {
@@ -1449,13 +1452,49 @@ body {
   color: var(--text-secondary);
 }
 
-.markdown-body img {
+.markdown-body img,
+.markdown-rendered-image {
   max-width: 100%;
   height: auto;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-subtle);
-  margin: 14px 0 6px;
+  margin: 12px auto;
+  display: block;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+  background-color: var(--bg-card);
+}
+
+.markdown-image-figure {
+  margin: 26px auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 14px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  max-width: 100%;
+}
+
+.markdown-image-figure img,
+.markdown-rendered-image {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm);
+  margin: 0 auto;
+  display: block;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+}
+
+.markdown-image-caption {
+  font-size: 12.5px;
+  font-style: italic;
+  color: var(--text-secondary);
+  margin-top: 10px;
+  line-height: 1.45;
+  text-align: center;
+  max-width: 85%;
 }
 
 .markdown-body em {
@@ -1563,4 +1602,16 @@ body {
   align-items: center;
   gap: 10px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+}
+
+/* ── Anara Reader ──────────────────────────────────────────────────────────── */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateX(-50%) translateY(6px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* Allow Anara reader sections to fill full panel height */
+#view-pdf-inspector.view-panel {
+  height: 100%;
+  overflow: hidden;
 }

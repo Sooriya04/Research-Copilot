@@ -13,6 +13,7 @@ import {
   Sparkles,
   GitBranch,
   Library,
+  Workflow,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 
@@ -134,6 +135,17 @@ export default function Sidebar() {
               </NavLink>
 
               <NavLink
+                to="/litgraph"
+                className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+                style={{ fontSize: 12.5, padding: '6px 10px' }}
+              >
+                <div className="nav-item-left">
+                  <Workflow size={14} />
+                  <span>LitGraph</span>
+                </div>
+              </NavLink>
+
+              <NavLink
                 to="/pdf-inspector"
                 className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
                 style={{ fontSize: 12.5, padding: '6px 10px' }}
@@ -150,7 +162,9 @@ export default function Sidebar() {
         {/* 3. Library (Single Page Hub) */}
         <NavLink
           to="/library"
-          className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+          className={({ isActive }) =>
+            `nav-item ${isActive || location.pathname.startsWith('/library') ? 'active' : ''}`
+          }
         >
           <div className="nav-item-left">
             <Library size={15} />

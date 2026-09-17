@@ -7,6 +7,8 @@ const VIEW_TITLES = {
   '/': 'Overview',
   '/overview': 'Overview',
   '/library': 'Library',
+  '/library/reader': 'Paper Reader',
+  '/library-reader': 'Paper Reader',
   '/create': 'Import Papers',
   '/chat': 'Research Chat',
   '/workspaces': 'Research Workspaces Hub',
@@ -26,16 +28,22 @@ export default function TopHeader() {
   const currentTitle = VIEW_TITLES[location.pathname] || 'Workspace';
   const wsTitle = activeWorkspace ? activeWorkspace.title : 'Research Workspace';
 
-  const isLibraryRoute = location.pathname === '/library';
+  const isLibraryRoute = location.pathname.startsWith('/library') || location.pathname.startsWith('/library-reader');
   const isOverviewRoute = location.pathname === '/' || location.pathname === '/overview';
 
   return (
     <header className="top-header">
       <div className="header-left">
         {isLibraryRoute ? (
-          <strong id="header-view-title" style={{ fontSize: '0.92rem', color: 'var(--text-primary)' }}>
-            Research Library
-          </strong>
+          <>
+            <span style={{ color: 'var(--text-muted)' }}>Research Library</span>
+            {(location.pathname === '/library/reader' || location.pathname === '/library-reader') && (
+              <>
+                <span style={{ margin: '0 6px', color: 'var(--text-muted)' }}>/</span>
+                <strong id="header-view-title" style={{ color: 'var(--text-primary)' }}>Paper Reader</strong>
+              </>
+            )}
+          </>
         ) : isOverviewRoute ? (
           <>
             <span style={{ color: 'var(--text-muted)' }}>Research Copilot</span>

@@ -25,6 +25,7 @@ public
 artifacts
 data/
 others/
+dump_extract/
 
 # Sensitive & internal reference documentation
 ideas.md

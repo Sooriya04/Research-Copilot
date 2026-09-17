@@ -173,10 +173,12 @@ export default function LibraryView() {
     }
   };
 
-  // Open Paper in Reader
+  // Open Paper in Dedicated Library Reader
   const handleOpenPaper = (paper) => {
-    setActiveReaderPaper(paper);
-    navigate('/pdf-inspector');
+    try {
+      localStorage.setItem('rc_active_library_paper', JSON.stringify(paper));
+    } catch {}
+    navigate('/library/reader');
   };
 
   // Start Chat on Paper

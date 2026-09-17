@@ -727,3 +727,33 @@ bundle compilation (`npm run build`).
   * Refined sidebar hierarchy, removing redundant sub-tree paths and shortening labels (e.g. `Paper Reader & Markdown` to `Paper Reader`).
 * **Verified Production Build Stability**:
   * Confirmed successful production compilation (`npm run build`) with zero module warnings and 0 build errors.
+
+---
+
+## Implement LitGraph ConnectedPapers-Style Bibliometric Similarity Engine and Anara-Style Reader Interface
+
+* **LitGraph Bibliometric Similarity Engine (`src/api/routes_litgraph.py`, `src/api/app.py`)**:
+  * Built a high-performance similarity graph engine backed by the Semantic Scholar Academic Graph API.
+  * Implemented pairwise **Bibliographic Coupling** using Jaccard Similarity across shared reference sets:
+    $$S(u, v) = \frac{|Refs(u) \cap Refs(v)|}{|Refs(u) \cup Refs(v)|}$$
+  * Built candidate pool expansion (fetching 1-hop citations + references, retrieving up to 45 candidates with batch metadata enrichment).
+  * Top-K neighbor pruning ($K=4$, threshold = $0.08$) to produce dense organic clustering rather than a naive 1-hop star tree.
+  * Added in-memory TTL LRU caching layer (`_CACHE` with 10-minute expiration) and real-time paper auto-suggest endpoint (`/api/v1/litgraph/search`).
+
+* **ConnectedPapers Visual Force Graph (`frontend/src/views/LitGraphView.jsx`)**:
+  * Integrated `react-force-graph-2d` and `d3` with Canvas/WebGL accelerated rendering.
+  * **Circular Nodes**: Log-scaled radii based on citation count ($\text{min}=5\text{px}, \text{max}=24\text{px}$) with golden glow for the seed paper.
+  * **Continuous Temporal Palette**: Cool slate blue for foundational older papers transitioning to vibrant indigo and emerald for recent literature.
+  * **Organic Spring Physics**: Link distances scaled inversely to Jaccard weight ($d = (1 - w) \times 130 + 20$) with custom node and link canvas renderers.
+  * **Interactive Neighborhood Highlighting & Inspector**: Clicking any node highlights its 1-hop neighborhood while dimming unrelated nodes to 15% opacity, and populates the sidebar with metadata, abstract, and a single-click "Build Graph from This Paper" seed re-centering button.
+  * Added metric controls (publication year range slider, max nodes slider, zoom/fit controls).
+
+* **Anara-Style Academic Reader (`frontend/src/components/reader/AnaraPaperReader.jsx`, `frontend/src/views/LibraryReaderView.jsx`, `frontend/src/views/PaperReaderView.jsx`)**:
+  * Built `AnaraPaperReader` component featuring a dual-panel layout: native browser-rendered PDF on the left and a 3-tab collapsible right sidebar (**Ask AI**, **Annotations**, **Details**).
+  * Implemented floating text-selection toolbar with **Highlight**, **Comment**, and **Ask AI** triggers.
+  * Integrated full PyMuPDF4LLM Markdown fallback toggle with inline figures, tables, and KaTeX math.
+
+* **Test Suite & Build Verification**:
+  * Added `tests/test_litgraph.py` verifying Jaccard computation, search endpoints, and cache invalidation.
+  * **42/42 pytest tests passing** (100% green) and clean production Vite build (`3,180 modules transformed in 7.99s`).
+
