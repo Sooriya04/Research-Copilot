@@ -1,6 +1,6 @@
 import React from 'react';
 import { useLocation } from 'react-router-dom';
-import { Search, Moon, Sun, RotateCw } from 'lucide-react';
+import { Search, Moon, Sun, RotateCw, XCircle } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 
 const VIEW_TITLES = {
@@ -23,7 +23,7 @@ const VIEW_TITLES = {
 
 export default function TopHeader() {
   const location = useLocation();
-  const { theme, toggleTheme, openCmdPalette, activeWorkspace, openWorkspaceModal } = useApp();
+  const { theme, toggleTheme, openCmdPalette, activeWorkspace, openWorkspaceModal, deactivateWorkspace } = useApp();
 
   const currentTitle = VIEW_TITLES[location.pathname] || 'Workspace';
   const wsTitle = activeWorkspace ? activeWorkspace.title : 'Research Workspace';
@@ -51,7 +51,7 @@ export default function TopHeader() {
             <strong id="header-view-title" style={{ color: 'var(--text-primary)' }}>Overview</strong>
           </>
         ) : (
-          <>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span
               onClick={openWorkspaceModal}
               style={{ cursor: 'pointer', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
@@ -59,9 +59,33 @@ export default function TopHeader() {
             >
               {wsTitle}
             </span>
-            <span style={{ margin: '0 6px', color: 'var(--text-muted)' }}>/</span>
+            {activeWorkspace && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  deactivateWorkspace();
+                }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  padding: 0,
+                  cursor: 'pointer',
+                  color: 'var(--text-muted)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  opacity: 0.7,
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
+                onMouseLeave={(e) => (e.currentTarget.style.opacity = '0.7')}
+                title="Deactivate workspace (switch to global)"
+              >
+                <XCircle size={13} style={{ color: 'var(--accent-rose, #f43f5e)' }} />
+              </button>
+            )}
+            <span style={{ margin: '0 4px', color: 'var(--text-muted)' }}>/</span>
             <strong id="header-view-title">{currentTitle}</strong>
-          </>
+          </div>
         )}
       </div>
 

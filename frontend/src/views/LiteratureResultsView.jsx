@@ -30,6 +30,7 @@ export default function LiteratureResultsView() {
     addComparisonPaper,
     comparisonPapers,
     openPaperModal,
+    activeWorkspace,
   } = useApp();
 
   const [filterTerm, setFilterTerm] = useState('');
@@ -99,6 +100,7 @@ export default function LiteratureResultsView() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             topic: currentTopic,
+            workspace_id: activeWorkspace?.id || null,
             paper_data: {
               id: pId,
               title: paper.title,

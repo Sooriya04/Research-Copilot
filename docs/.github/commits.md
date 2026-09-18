@@ -769,3 +769,20 @@ bundle compilation (`npm run build`).
 * **Frontend: Canvas Fixes & Light Theme (`frontend/src/views/LitGraphView.jsx`)**:
   * **Canvas Link Rendering Fix**: Fixed the custom `paintLink` logic by adding explicit HTML5 Canvas path strokes (`ctx.beginPath()`, `ctx.moveTo()`, `ctx.lineTo()`, `ctx.stroke()`). This resolved an issue where nodes were floating without visible connections.
   * **Beautiful Light Theme**: Refactored the `ForceGraph2D` canvas and nodes to use a clean light theme (background: `#f8fafc`). Updated node label text to dark slate, link strokes to indigo/slate for contrast, and added ambient glow effects for seed and selected nodes.
+
+---
+
+## Fix Workspace Graph Isolation and Add Workspace Deactivation
+
+* **Knowledge Graph Isolation (`src/api/routes_graph.py`, `tests/test_workspace_graph_isolation.py`)**:
+  * Removed the bug in `get_graph_elements` that was forcibly auto-linking every queried topic to all existing papers in the database.
+  * Added `workspace_id` parameter to `IngestPaperRequest` and `get_graph_elements` to support multi-tenant workspace isolation.
+  * Implemented strict anchor-based scoping in `get_graph_elements`: graphs queried with a `topic` or `workspace_id` now only return nodes directly connected to that anchor, preventing cross-contamination between workspaces.
+  * Cleaned up legacy corrupted cross-topic edges in SQLite database.
+  * Added automated test suite `tests/test_workspace_graph_isolation.py` verifying that fresh workspaces do not inherit papers from previous workspaces.
+
+* **Workspace Deactivation & UI Scoping (`frontend/src/context/AppContext.jsx`, `frontend/src/views/WorkspacesView.jsx`, `frontend/src/views/KnowledgeGraphView.jsx`, `frontend/src/components/layout/TopHeader.jsx`)**:
+  * Implemented `deactivateWorkspace` in `AppContext` to allow researchers to exit an active workspace and return to the global, unscoped research environment without deleting the workspace.
+  * Added "Deactivate" action buttons to the Active Workspace Hero Banner, individual workspace cards, and the top navigation header.
+  * Updated `KnowledgeGraphView` to pass `workspace_id`, `topic`, and `scoped=true` to the backend, and reset entity selections when switching workspaces.
+  * Updated `LiteratureResultsView` to link ingested papers with the current `workspace_id`.

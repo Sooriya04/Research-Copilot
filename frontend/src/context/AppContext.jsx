@@ -235,6 +235,18 @@ export function AppProvider({ children }) {
     }
   };
 
+  const deactivateWorkspace = () => {
+    setActiveWorkspace(null);
+    localStorage.removeItem('rc_active_workspace');
+    localStorage.removeItem('rc_active_workspace_id');
+    setSearchQuery('');
+    setSearchResults([]);
+    setSourceCounts({});
+    setAddedToGraphPaperIds([]);
+    setActiveReaderPaperState(null);
+    setComparisonPapers([]);
+  };
+
   const deleteWorkspace = async (wsId) => {
     try {
       await fetch(`/api/v1/workbench/workspaces/${wsId}`, { method: 'DELETE' });
@@ -415,6 +427,7 @@ export function AppProvider({ children }) {
         closeWorkspaceModal,
         createWorkspace,
         switchWorkspace,
+        deactivateWorkspace,
         deleteWorkspace,
         fetchWorkspaces,
         searchQuery,

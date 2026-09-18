@@ -46,6 +46,7 @@ class IngestPaperRequest(BaseModel):
     identifier: Optional[str] = None  # e.g. "2312.00752" or DOI
     paper_data: Optional[Union[PaperIntelligence, Dict[str, Any]]] = None
     topic: Optional[str] = None
+    workspace_id: Optional[str] = None
 
 
 class IngestPaperResponse(BaseModel):
@@ -205,6 +206,22 @@ async def ingest_paper_into_graph(req: IngestPaperRequest, db: AsyncSession = De
         )
         await graph_store.add_edge(edge)
 
+    # If workspace_id is specified, link workspace -> paper
+    if req.workspace_id and req.workspace_id.strip():
+        ws_clean = req.workspace_id.strip()
+        ws_id = ws_clean if ws_clean.startswith("ws-") else f"ws-{ws_clean}"
+        ws_node = await graph_store.get_node(ws_id)
+        if not ws_node:
+            ws_topic_node = TopicNode(id=ws_id, name=f"Workspace {ws_clean}", query=ws_clean)
+            await graph_store.add_node(ws_topic_node)
+        ws_edge = ResearchEdge(
+            source_id=ws_id,
+            target_id=paper_node_id or paper_id,
+            relation=Relation.COVERS,
+            weight=2.0,
+        )
+        await graph_store.add_edge(ws_edge)
+
     return IngestPaperResponse(
         status="ingested",
         paper_id=paper_node_id or paper_id,
@@ -259,15 +276,14 @@ async def get_graph_nodes(node_type: Optional[str] = Query(None, description="pa
 @router.get("/elements")
 async def get_graph_elements(
     topic: Optional[str] = Query(None, description="Optional topic to link or filter by"),
-    scoped: bool = Query(False, description="If true, return strictly nodes connected to topic")
+    workspace_id: Optional[str] = Query(None, description="Optional workspace ID to isolate graph"),
+    scoped: bool = Query(False, description="If true, return strictly nodes connected to topic or workspace")
 ):
     """Return complete graph elements (nodes + typed labeled edges) for visual network canvas."""
     await graph_store._ensure_initialized()
 
     target_topic_id = None
-    # If topic is provided, ensure TopicNode exists and is linked to papers in store
     if topic and topic.strip():
-        builder = GraphBuilder(store=graph_store)
         topic_clean = topic.strip()
         target_topic_id = f"topic-{slugify_id(topic_clean)}"
         existing_topic = await graph_store.get_node(target_topic_id)
@@ -275,42 +291,48 @@ async def get_graph_elements(
             topic_node = TopicNode(id=target_topic_id, name=topic_clean, query=topic_clean)
             await graph_store.add_node(topic_node)
 
-    # Identify paper nodes
+    target_ws_id = None
+    if workspace_id and workspace_id.strip():
+        ws_clean = workspace_id.strip()
+        target_ws_id = ws_clean if ws_clean.startswith("ws-") else f"ws-{ws_clean}"
+
+    # Identify anchor nodes for graph scoping
+    anchor_ids = set()
+    if target_topic_id and target_topic_id in graph_store.graph:
+        anchor_ids.add(target_topic_id)
+    if target_ws_id and target_ws_id in graph_store.graph:
+        anchor_ids.add(target_ws_id)
+
+    # Scoping logic: if scoped flag is set or topic/workspace_id is provided, strictly isolate the graph
+    allowed_node_ids = None
+    if scoped or topic or workspace_id:
+        allowed_node_ids = set(anchor_ids)
+        for a_id in anchor_ids:
+            for p_id in graph_store.graph.successors(a_id):
+                allowed_node_ids.add(p_id)
+                for child_id in graph_store.graph.successors(p_id):
+                    allowed_node_ids.add(child_id)
+                for parent_id in graph_store.graph.predecessors(p_id):
+                    if parent_id in anchor_ids:
+                        allowed_node_ids.add(parent_id)
+
+    # Identify paper nodes within allowed scope
     paper_ids = set()
     for nid in graph_store.graph.nodes:
+        if allowed_node_ids is not None and nid not in allowed_node_ids:
+            continue
         n = await graph_store.get_node(nid)
         if n and getattr(n, "node_type", None) == NodeType.PAPER:
             paper_ids.add(nid)
 
-    # Link topic to all paper nodes that don't have a topic edge yet
-    if target_topic_id:
-        for p_id in paper_ids:
-            if not graph_store.graph.has_edge(target_topic_id, p_id):
-                edge = ResearchEdge(
-                    source_id=target_topic_id,
-                    target_id=p_id,
-                    relation=Relation.COVERS,
-                    weight=2.0,
-                )
-                await graph_store.add_edge(edge)
-
-    # If scoped to a specific topic, collect reachable nodes
-    allowed_node_ids = None
-    if scoped and target_topic_id and target_topic_id in graph_store.graph:
-        allowed_node_ids = {target_topic_id}
-        for p_id in graph_store.graph.successors(target_topic_id):
-            allowed_node_ids.add(p_id)
-            for child_id in graph_store.graph.successors(p_id):
-                allowed_node_ids.add(child_id)
-            for parent_id in graph_store.graph.predecessors(p_id):
-                allowed_node_ids.add(parent_id)
-
     edges_raw = await graph_store.get_all_edges()
 
     # Rule: non-topic, non-paper nodes are CONNECTION nodes between papers.
-    # If a node connects to fewer than 2 distinct papers, exclude it completely.
+    # If a node connects to papers in the active scope, include it.
     valid_connection_node_ids = set()
     for nid in graph_store.graph.nodes:
+        if allowed_node_ids is not None and nid not in allowed_node_ids:
+            continue
         n = await graph_store.get_node(nid)
         if not n:
             continue
@@ -324,7 +346,7 @@ async def get_graph_elements(
                     connected_papers.add(e.target_id)
                 elif e.target_id == nid and e.source_id in paper_ids:
                     connected_papers.add(e.source_id)
-            if len(connected_papers) >= 2:
+            if len(connected_papers) >= 1:
                 valid_connection_node_ids.add(nid)
 
     nodes = []
@@ -337,7 +359,7 @@ async def get_graph_elements(
         n = await graph_store.get_node(nid)
         if n:
             ntype = n.node_type.value if hasattr(n.node_type, "value") else str(n.node_type)
-            if target_topic_id and ntype == "topic" and nid != target_topic_id:
+            if anchor_ids and ntype == "topic" and nid not in anchor_ids:
                 continue
             n_dict = n.model_dump(mode="json")
             node_type_counts[ntype] = node_type_counts.get(ntype, 0) + 1

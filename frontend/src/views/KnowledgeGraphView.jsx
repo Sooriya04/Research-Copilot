@@ -117,10 +117,16 @@ export default function KnowledgeGraphView() {
   const fetchGraphData = async () => {
     setLoading(true);
     const activeTopic = (activeWorkspace?.title || searchQuery || '').trim();
+    const wsId = (activeWorkspace?.id || '').trim();
 
     try {
-      const url = activeTopic
-        ? `/api/v1/graph/elements?topic=${encodeURIComponent(activeTopic)}`
+      const params = new URLSearchParams();
+      if (activeTopic) params.set('topic', activeTopic);
+      if (wsId) params.set('workspace_id', wsId);
+      if (activeTopic || wsId) params.set('scoped', 'true');
+
+      const url = params.toString()
+        ? `/api/v1/graph/elements?${params.toString()}`
         : '/api/v1/graph/elements';
       const elemRes = await fetch(url);
       let loadedNodes = [];
@@ -265,8 +271,10 @@ export default function KnowledgeGraphView() {
   };
 
   useEffect(() => {
+    setSelectedEntity(null);
+    setNeighborhood(null);
     fetchGraphData();
-  }, [searchQuery, activeWorkspace?.id, searchResults?.length, addedToGraphPaperIds?.length]);
+  }, [searchQuery, activeWorkspace?.id, activeWorkspace?.title, searchResults?.length, addedToGraphPaperIds?.length]);
 
   const handleClearGraph = async () => {
     try {

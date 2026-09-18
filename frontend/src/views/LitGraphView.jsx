@@ -26,6 +26,7 @@ import {
   ChevronRight,
   ChevronLeft,
 } from 'lucide-react';
+import { useApp } from '../context/AppContext';
 
 // ── Color scale: cool blue (old) → warm indigo/emerald (recent) ──────────────
 function yearToColor(year, minYear, maxYear, isSeed = false) {
@@ -350,6 +351,7 @@ function YearLegend({ minYear, maxYear }) {
 // ── Main LitGraph View ────────────────────────────────────────────────────────
 export default function LitGraphView() {
   const fgRef = useRef(null);
+  const { activeWorkspace, searchResults } = useApp();
 
   const [graphData, setGraphData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -585,7 +587,13 @@ export default function LitGraphView() {
   }, [filteredGraph]);
 
   if (!filteredGraph && !loading && !error) {
-    return <LandingState onSelectPaper={(p) => loadGraph(p.paperId, p.title)} />;
+    return (
+      <LandingState
+        onSelectPaper={(p) => loadGraph(p.paperId, p.title)}
+        activeWorkspace={activeWorkspace}
+        searchResults={searchResults}
+      />
+    );
   }
 
   return (
@@ -802,7 +810,7 @@ export default function LitGraphView() {
 }
 
 // ── Landing page when no graph loaded ────────────────────────────────────────
-function LandingState({ onSelectPaper }) {
+function LandingState({ onSelectPaper, activeWorkspace, searchResults }) {
   const EXAMPLES = [
     { paperId: 'W4407759090', title: 'A-Mem: Agentic Memory for LLM Agents' },
     { paperId: 'W4393065402', title: 'A survey on large language model based autonomous agents' },
@@ -818,7 +826,7 @@ function LandingState({ onSelectPaper }) {
           <h1 style={{ fontSize: 28, fontWeight: 800, margin: 0, color: 'var(--text-primary)' }}>LitGraph</h1>
         </div>
         <p style={{ fontSize: 14, color: 'var(--text-muted)', margin: 0, lineHeight: 1.7 }}>
-          Explore the bibliometric similarity graph of any research paper — powered by Semantic Scholar.
+          Explore the bibliometric similarity graph of any research paper — powered by OpenAlex Academic Graph.
           Discover closely related work, trace citation clusters, and find your next read.
         </p>
       </div>
@@ -827,8 +835,33 @@ function LandingState({ onSelectPaper }) {
         <SearchBar onSelectPaper={onSelectPaper} />
       </div>
 
+      {activeWorkspace && searchResults && searchResults.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%', maxWidth: 520 }}>
+          <p style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: 0, textAlign: 'center' }}>
+            Papers from your active workspace (<strong>{activeWorkspace.title}</strong>):
+          </p>
+          {searchResults.slice(0, 3).map((p, idx) => {
+            const pid = p.openalex_id || p.id || p.canonical_id || p.arxiv_id || `paper-${idx}`;
+            return (
+              <button
+                key={pid}
+                className="btn btn-secondary btn-sm"
+                onClick={() => onSelectPaper({ paperId: pid, title: p.title })}
+                style={{ fontSize: 12, justifyContent: 'space-between', textAlign: 'left', padding: '7px 12px' }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, overflow: 'hidden' }}>
+                  <BookOpen size={12} style={{ flexShrink: 0, color: 'var(--accent-primary)' }} />
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.title}</span>
+                </div>
+                <span className="badge badge-blue" style={{ fontSize: 10, flexShrink: 0, marginLeft: 8 }}>Build Graph</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%', maxWidth: 520 }}>
-        <p style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: 0, textAlign: 'center' }}>Try an example:</p>
+        <p style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: 0, textAlign: 'center' }}>Or try a curated example:</p>
         {EXAMPLES.map((ex) => (
           <button
             key={ex.paperId}

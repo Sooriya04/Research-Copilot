@@ -21,6 +21,8 @@ import {
   Bookmark,
   Share2,
   Lightbulb,
+  XCircle,
+  Workflow,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
@@ -30,6 +32,7 @@ export default function WorkspacesView() {
     workspaces,
     activeWorkspace,
     switchWorkspace,
+    deactivateWorkspace,
     deleteWorkspace,
     createWorkspace,
     openWorkspaceModal,
@@ -229,6 +232,16 @@ export default function WorkspacesView() {
                 <SlidersHorizontal size={13} />
                 <span>Edit Details</span>
               </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={deactivateWorkspace}
+                style={{ fontSize: 12.5, padding: '7px 14px', display: 'flex', alignItems: 'center', gap: 6, color: 'var(--accent-rose, #f43f5e)' }}
+                title="Deactivate workspace and return to global mode"
+              >
+                <XCircle size={13} />
+                <span>Deactivate</span>
+              </button>
             </div>
           </div>
 
@@ -394,6 +407,15 @@ export default function WorkspacesView() {
             >
               <Network size={14} />
               <span>Knowledge Graph ({addedToGraphPaperIds.length})</span>
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => navigate('/litgraph')}
+              style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5 }}
+            >
+              <Workflow size={14} />
+              <span>LitGraph Similarity</span>
             </button>
             <button
               type="button"
@@ -691,6 +713,19 @@ export default function WorkspacesView() {
                     >
                       <Trash2 size={13} />
                     </button>
+
+                    {isActive && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={deactivateWorkspace}
+                        style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, padding: '5px 11px', color: 'var(--accent-rose, #f43f5e)' }}
+                        title="Deactivate this workspace"
+                      >
+                        <XCircle size={12} />
+                        <span>Deactivate</span>
+                      </button>
+                    )}
 
                     <button
                       type="button"
