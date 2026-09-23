@@ -786,3 +786,40 @@ bundle compilation (`npm run build`).
   * Added "Deactivate" action buttons to the Active Workspace Hero Banner, individual workspace cards, and the top navigation header.
   * Updated `KnowledgeGraphView` to pass `workspace_id`, `topic`, and `scoped=true` to the backend, and reset entity selections when switching workspaces.
   * Updated `LiteratureResultsView` to link ingested papers with the current `workspace_id`.
+
+<br />
+
+---
+
+## Fix Graph Backend Critical Bugs, Batch DB Writes, Scoped Edge Queries, and UI Polish
+
+* **Critical Performance Fix — Scoped Edge Fetching (`src/graph/store.py`, `src/api/routes_graph.py`)**:
+  * Replaced `get_all_edges()` call in `GET /api/v1/graph/elements` with the new `get_scoped_edges(allowed_node_ids)` method that only traverses edges whose both endpoints belong to the active workspace scope, reducing complexity from O(global_edges) to O(scoped_edges).
+  * Added `get_scoped_edges(allowed_node_ids: set) -> List[ResearchEdge]` to `ResearchGraphStore` — operates entirely on the in-memory NetworkX DiGraph with no DB I/O or `await` needed.
+
+* **Batch SQLite Writes — Eliminate Connection Per Call (`src/graph/store.py`, `src/graph/builder.py`)**:
+  * `add_node()` and `add_edge()` now accept an optional `_db` parameter (an open aiosqlite connection). When provided, the caller manages the connection and commit — enabling multiple writes to share a single connection.
+  * Added `batch_write()` async context manager to `ResearchGraphStore`: opens one `aiosqlite` connection, yields it, and commits on exit.
+  * Refactored `GraphBuilder.build_from_paper_intelligence()` to collect all new nodes and edges into lists, then flush them all inside a single `async with self.store.batch_write() as db:` transaction — cutting SQLite connections from ~40–60 per paper to **1 per paper**.
+
+* **Reverse Citation Scan O(N) Optimization (`src/graph/builder.py`)**:
+  * Replaced the per-node `await store.get_node(nid)` call in the reverse-citation scan with a direct in-memory `self.store.graph.nodes.get(nid, {})` dict lookup — eliminating async I/O for every node in the graph.
+  * Added early-exit conditions: skips non-paper nodes and paper nodes with empty `cited_papers` / `referenced_works` metadata before any further processing.
+
+* **Restore Connection-Node Threshold to `>= 2` (`src/api/routes_graph.py`)**:
+  * Reverted the connection-node visibility threshold from `>= 1` back to `>= 2`: a method/dataset/metric node only appears on the canvas if it bridges **at least 2 papers** in scope. This prevents orphan singleton annotation nodes from cluttering the graph.
+
+* **Fix `asynccontextmanager` Import Location (`src/graph/store.py`)**:
+  * Moved `from contextlib import asynccontextmanager` to the module-level imports, removing the erroneous inline class-body import.
+
+* **UI — Workspace Deactivation Persists Across Refresh (`frontend/src/context/AppContext.jsx`)**:
+  * Introduced `rc_workspace_deactivated` flag in `localStorage`. Clicking "Deactivate" sets the flag; `fetchWorkspaces` and the `activeWorkspace` state initializer both respect the flag and skip auto-activation. Creating or switching workspaces clears the flag.
+
+* **UI — Workspace Card Footer Layout Fix (`frontend/src/views/WorkspacesView.jsx`)**:
+  * Restructured the active workspace card footer into two rows: Row 1 holds the date and delete icon; Row 2 holds the full-width action buttons (`flex: 1`), eliminating button overflow and overlap with the date string.
+
+* **UI — Remove Paper Count from "Founded Papers" Labels (`frontend/src/components/layout/Sidebar.jsx`, `frontend/src/views/LiteratureSearchView.jsx`, `frontend/src/views/LiteratureResultsView.jsx`, `frontend/src/views/OverviewView.jsx`, `frontend/src/views/WorkspacesView.jsx`)**:
+  * Removed the `(N)` numeric count badge from all "Founded Papers" navigation labels and action buttons across 5 files.
+
+* **Commit**: `caecea3` · Branch: `dev`
+
