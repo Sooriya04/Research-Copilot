@@ -210,7 +210,7 @@ export default function LiteratureResultsView() {
             style={{ display: 'flex', alignItems: 'center', gap: 6 }}
           >
             <FileText size={13} />
-            <span>View Founded Papers ({results.length})</span>
+            <span>View Founded Papers</span>
           </button>
         </div>
 

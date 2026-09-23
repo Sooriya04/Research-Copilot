@@ -109,18 +109,6 @@ export default function Sidebar() {
                   <BookOpen size={14} />
                   <span>Founded Papers</span>
                 </div>
-                {searchResults && searchResults.length > 0 && (
-                  <span
-                    className="badge badge-blue"
-                    style={{
-                      fontSize: '0.68rem',
-                      padding: '1px 6px',
-                      borderRadius: '999px',
-                    }}
-                  >
-                    {searchResults.length}
-                  </span>
-                )}
               </NavLink>
 
               <NavLink

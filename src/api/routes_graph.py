@@ -325,10 +325,14 @@ async def get_graph_elements(
         if n and getattr(n, "node_type", None) == NodeType.PAPER:
             paper_ids.add(nid)
 
-    edges_raw = await graph_store.get_all_edges()
+    # Use scoped edge list to avoid O(global) scan on every request
+    if allowed_node_ids is not None:
+        edges_raw = graph_store.get_scoped_edges(allowed_node_ids)
+    else:
+        edges_raw = await graph_store.get_all_edges()
 
     # Rule: non-topic, non-paper nodes are CONNECTION nodes between papers.
-    # If a node connects to papers in the active scope, include it.
+    # Only include them if they connect >= 2 papers in scope (avoids orphan singletons).
     valid_connection_node_ids = set()
     for nid in graph_store.graph.nodes:
         if allowed_node_ids is not None and nid not in allowed_node_ids:
@@ -346,7 +350,7 @@ async def get_graph_elements(
                     connected_papers.add(e.target_id)
                 elif e.target_id == nid and e.source_id in paper_ids:
                     connected_papers.add(e.source_id)
-            if len(connected_papers) >= 1:
+            if len(connected_papers) >= 2:
                 valid_connection_node_ids.add(nid)
 
     nodes = []
@@ -372,7 +376,6 @@ async def get_graph_elements(
                 "data": n_dict,
             })
 
-            
     node_id_set = {n["id"] for n in nodes}
     edges = []
     for e in edges_raw:
@@ -388,7 +391,7 @@ async def get_graph_elements(
             "label": rel_str.replace("_", " ").upper(),
             "weight": e.weight,
         })
-        
+
     return {
         "nodes": nodes,
         "edges": edges,

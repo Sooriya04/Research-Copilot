@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional, Union
 import aiosqlite
 import networkx as nx
@@ -60,33 +61,44 @@ class ResearchGraphStore:
             )
             await db.commit()
 
-    async def add_node(self, node: GraphNode) -> None:
-        """Add node to NetworkX graph with model fields as attributes and persist to SQLite."""
+    async def add_node(self, node: GraphNode, _db: Optional[Any] = None) -> None:
+        """Add node to NetworkX graph with model fields as attributes and persist to SQLite.
+
+        Pass an open aiosqlite connection as ``_db`` to avoid opening a new connection
+        per call when batch-inserting (e.g., during paper ingestion).
+        """
         await self._ensure_initialized()
 
         node_dict = node.model_dump(mode="json")
         node_type = node.node_type.value if hasattr(node.node_type, "value") else str(node.node_type)
-        
+
         # Add to in-memory graph
         self.graph.add_node(node.id, **node_dict, node_obj=node)
 
-        # Persist to SQLite
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute(
-                """
-                INSERT OR REPLACE INTO graph_nodes (id, node_type, data_json, created_at)
-                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-                """,
-                (node.id, node_type, json.dumps(node_dict)),
-            )
-            await db.commit()
+        stmt = (
+            "INSERT OR REPLACE INTO graph_nodes (id, node_type, data_json, created_at)"
+            " VALUES (?, ?, ?, CURRENT_TIMESTAMP)"
+        )
+        params = (node.id, node_type, json.dumps(node_dict))
 
-    async def add_edge(self, edge: ResearchEdge) -> None:
-        """Add directed edge to NetworkX graph and persist to SQLite."""
+        if _db is not None:
+            # Caller manages the connection / commit
+            await _db.execute(stmt, params)
+        else:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute(stmt, params)
+                await db.commit()
+
+    async def add_edge(self, edge: ResearchEdge, _db: Optional[Any] = None) -> None:
+        """Add directed edge to NetworkX graph and persist to SQLite.
+
+        Pass an open aiosqlite connection as ``_db`` to avoid opening a new connection
+        per call when batch-inserting.
+        """
         await self._ensure_initialized()
 
         rel_str = edge.relation.value if hasattr(edge.relation, "value") else str(edge.relation)
-        
+
         # Add to in-memory graph
         self.graph.add_edge(
             edge.source_id,
@@ -96,16 +108,18 @@ class ResearchGraphStore:
             edge_obj=edge,
         )
 
-        # Persist to SQLite
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute(
-                """
-                INSERT OR REPLACE INTO graph_edges (source_id, target_id, relation, weight, created_at)
-                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-                """,
-                (edge.source_id, edge.target_id, rel_str, edge.weight),
-            )
-            await db.commit()
+        stmt = (
+            "INSERT OR REPLACE INTO graph_edges (source_id, target_id, relation, weight, created_at)"
+            " VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)"
+        )
+        params = (edge.source_id, edge.target_id, rel_str, edge.weight)
+
+        if _db is not None:
+            await _db.execute(stmt, params)
+        else:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute(stmt, params)
+                await db.commit()
 
     async def get_node(self, node_id: str) -> Optional[GraphNode]:
         """Return typed node from in-memory graph first, falling back to SQLite."""
@@ -264,6 +278,58 @@ class ResearchGraphStore:
                     )
                 )
         return edges
+
+    def get_scoped_edges(self, allowed_node_ids: set) -> List[ResearchEdge]:
+        """Return edges whose both endpoints are in ``allowed_node_ids``.
+
+        This is significantly faster than get_all_edges() when working with
+        workspace-scoped sub-graphs because it avoids iterating the entire
+        global edge list.  Operates on the already-loaded in-memory graph so
+        no await is needed.
+        """
+        edges: List[ResearchEdge] = []
+        for nid in allowed_node_ids:
+            if nid not in self.graph:
+                continue
+            # Outgoing edges from this node to other allowed nodes
+            for succ_id in self.graph.successors(nid):
+                if succ_id not in allowed_node_ids:
+                    continue
+                data = self.graph.get_edge_data(nid, succ_id, default={})
+                edge_obj = data.get("edge_obj")
+                if edge_obj:
+                    edges.append(edge_obj)
+                else:
+                    rel = data.get("relation", "relates_to")
+                    rel_enum = (
+                        Relation(rel) if rel in Relation._value2member_map_ else rel
+                    )
+                    edges.append(
+                        ResearchEdge(
+                            source_id=nid,
+                            target_id=succ_id,
+                            relation=rel_enum,
+                            weight=data.get("weight", 1.0),
+                        )
+                    )
+        return edges
+
+    @asynccontextmanager
+    async def batch_write(self):
+        """Async context manager that opens a single SQLite connection for multiple add_node/add_edge calls.
+
+        Usage::
+
+            async with store.batch_write() as db:
+                await store.add_node(node, _db=db)
+                await store.add_edge(edge, _db=db)
+            # commit happens automatically on __aexit__
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            try:
+                yield db
+            finally:
+                await db.commit()
 
     async def get_node_neighborhood(self, node_id: str) -> Dict[str, Any]:
         """Return the focus node, in-edges, out-edges, and direct neighbor nodes."""

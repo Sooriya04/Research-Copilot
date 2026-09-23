@@ -397,7 +397,7 @@ export default function WorkspacesView() {
               style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5 }}
             >
               <BookOpen size={14} />
-              <span>Founded Papers ({searchResults.length})</span>
+              <span>Founded Papers</span>
             </button>
             <button
               type="button"
@@ -692,51 +692,71 @@ export default function WorkspacesView() {
               </div>
 
               {/* Card Footer */}
-              <div style={{ paddingTop: 14, borderTop: '1px solid var(--border-subtle)' }}>
+              <div style={{ paddingTop: 14, borderTop: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {/* Meta info & Delete */}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--text-muted)' }}>
                     <Calendar size={12} />
                     <span>{ws.created_at ? ws.created_at.slice(0, 10) : 'Active'}</span>
                   </div>
 
-                  <div style={{ display: 'flex', gap: 6 }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => {
+                      if (confirm(`Are you sure you want to delete workspace "${ws.title}"? This cannot be undone.`)) {
+                        deleteWorkspace(ws.id);
+                      }
+                    }}
+                    style={{ padding: '4px 8px', color: 'var(--accent-rose)', opacity: 0.85 }}
+                    title="Delete Workspace"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+
+                {/* Action Buttons Row */}
+                <div style={{ display: 'flex', gap: 8, width: '100%' }}>
+                  {isActive && (
                     <button
                       type="button"
                       className="btn btn-secondary btn-sm"
-                      onClick={() => {
-                        if (confirm(`Are you sure you want to delete workspace "${ws.title}"? This cannot be undone.`)) {
-                          deleteWorkspace(ws.id);
-                        }
+                      onClick={deactivateWorkspace}
+                      style={{
+                        flex: 1,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 5,
+                        fontSize: 12,
+                        padding: '6px 10px',
+                        color: 'var(--accent-rose, #f43f5e)',
                       }}
-                      style={{ padding: '5px 9px', color: 'var(--accent-rose)', opacity: 0.85 }}
-                      title="Delete Workspace"
+                      title="Deactivate this workspace"
                     >
-                      <Trash2 size={13} />
+                      <XCircle size={13} />
+                      <span>Deactivate</span>
                     </button>
+                  )}
 
-                    {isActive && (
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        onClick={deactivateWorkspace}
-                        style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, padding: '5px 11px', color: 'var(--accent-rose, #f43f5e)' }}
-                        title="Deactivate this workspace"
-                      >
-                        <XCircle size={12} />
-                        <span>Deactivate</span>
-                      </button>
-                    )}
-
-                    <button
-                      type="button"
-                      className={`btn btn-sm ${isActive ? 'btn-secondary' : 'btn-primary'}`}
-                      onClick={() => handleOpenWorkspace(ws.id)}
-                      style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, padding: '5px 14px', fontWeight: 600 }}
-                    >
-                      <span>{isActive ? 'Open Workspace' : 'Switch & Open'}</span>
-                      <ArrowRight size={12} />
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={() => handleOpenWorkspace(ws.id)}
+                    style={{
+                      flex: 1,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 5,
+                      fontSize: 12,
+                      padding: '6px 14px',
+                      fontWeight: 600,
+                    }}
+                  >
+                    <span>{isActive ? 'Open Workspace' : 'Switch & Open'}</span>
+                    <ArrowRight size={13} />
+                  </button>
                 </div>
               </div>
             </div>

@@ -101,12 +101,6 @@ class GraphBuilder:
             authors=authors_list,
         )
 
-        # Add PaperNode
-        existing_paper = await self.store.get_node(paper_id)
-        if not existing_paper:
-            await self.store.add_node(paper_node)
-            logger.info("Added PaperNode: %s", paper_id)
-
         # 2. Methods & Datasets derivation (Exclude generic stop-words and high-level taxonomy terms)
         STOP_WORDS = {
             # Broad academic fields and disciplines
@@ -146,6 +140,17 @@ class GraphBuilder:
                 if t_name and str(t_name).strip().lower() not in STOP_WORDS:
                     derived_methods.append(str(t_name).strip())
 
+        # Pre-read existing nodes (before batch_write opens connection) to avoid re-adding
+        existing_paper = await self.store.get_node(paper_id)
+
+        # Collect all nodes/edges to write, then flush in a single DB transaction
+        nodes_to_add: list = []
+        edges_to_add: list = []
+
+        if not existing_paper:
+            nodes_to_add.append(paper_node)
+            logger.info("Adding PaperNode: %s", paper_id)
+
         for m in derived_methods:
             if isinstance(m, str):
                 method_name = m.strip()
@@ -167,11 +172,10 @@ class GraphBuilder:
             existing_method = await self.store.get_node(method_id)
             if not existing_method:
                 method_node = MethodNode(id=method_id, name=method_name, category=category)
-                await self.store.add_node(method_node)
-                logger.info("Added MethodNode: %s (%s)", method_id, method_name)
+                nodes_to_add.append(method_node)
+                logger.info("Adding MethodNode: %s (%s)", method_id, method_name)
 
-            edge = ResearchEdge(source_id=paper_id, target_id=method_id, relation=Relation.USES_METHOD)
-            await self.store.add_edge(edge)
+            edges_to_add.append(ResearchEdge(source_id=paper_id, target_id=method_id, relation=Relation.USES_METHOD))
 
         # 3. Datasets
         for d in derived_datasets:
@@ -195,11 +199,10 @@ class GraphBuilder:
             existing_dataset = await self.store.get_node(dataset_id)
             if not existing_dataset:
                 dataset_node = DatasetNode(id=dataset_id, name=dataset_name, domain=domain)
-                await self.store.add_node(dataset_node)
-                logger.info("Added DatasetNode: %s (%s)", dataset_id, dataset_name)
+                nodes_to_add.append(dataset_node)
+                logger.info("Adding DatasetNode: %s (%s)", dataset_id, dataset_name)
 
-            edge = ResearchEdge(source_id=paper_id, target_id=dataset_id, relation=Relation.EVALUATES_ON)
-            await self.store.add_edge(edge)
+            edges_to_add.append(ResearchEdge(source_id=paper_id, target_id=dataset_id, relation=Relation.EVALUATES_ON))
 
         # 4. Citations (Cross-Paper Links strictly between papers that exist in the store)
         cited_list = (
@@ -230,23 +233,33 @@ class GraphBuilder:
                             break
 
             if target_node and getattr(target_node, "node_type", None) == NodeType.PAPER:
-                edge = ResearchEdge(source_id=paper_id, target_id=target_id, relation=Relation.CITES)
-                await self.store.add_edge(edge)
+                edges_to_add.append(ResearchEdge(source_id=paper_id, target_id=target_id, relation=Relation.CITES))
 
-        # Check reverse citations: if any existing paper in the store cited this new paper
-        for nid in self.store.graph.nodes:
+        # 5. Check reverse citations ONLY among paper nodes that explicitly track cited_papers
+        #    (avoids the O(N) full scan — only papers with cited_papers metadata are considered)
+        for nid in list(self.store.graph.nodes):
             if nid == paper_id:
                 continue
-            node_obj = await self.store.get_node(nid)
-            if node_obj and getattr(node_obj, "node_type", None) == NodeType.PAPER:
-                ndata = getattr(node_obj, "data", {}) or {}
-                existing_cited = ndata.get("cited_papers") or ndata.get("referenced_works") or []
-                clean_existing_cited = [str(c).strip() for c in existing_cited]
-                if (paper_id in clean_existing_cited) or \
-                   (getattr(paper_node, "doi", None) and getattr(paper_node, "doi") in clean_existing_cited) or \
-                   (getattr(paper_node, "arxiv_id", None) and getattr(paper_node, "arxiv_id") in clean_existing_cited):
-                    rev_edge = ResearchEdge(source_id=nid, target_id=paper_id, relation=Relation.CITES)
-                    await self.store.add_edge(rev_edge)
+            node_data = self.store.graph.nodes.get(nid, {})
+            # Quick check: only iterate if node_type is paper
+            if node_data.get("node_type") != NodeType.PAPER.value:
+                continue
+            cited_by_existing = node_data.get("cited_papers") or node_data.get("referenced_works") or []
+            if not cited_by_existing:
+                continue
+            clean_existing_cited = [str(c).strip() for c in cited_by_existing]
+            if (paper_id in clean_existing_cited) or \
+               (getattr(paper_node, "doi", None) and getattr(paper_node, "doi") in clean_existing_cited) or \
+               (getattr(paper_node, "arxiv_id", None) and getattr(paper_node, "arxiv_id") in clean_existing_cited):
+                edges_to_add.append(ResearchEdge(source_id=nid, target_id=paper_id, relation=Relation.CITES))
+
+        # Flush all collected nodes and edges in a single DB transaction
+        async with self.store.batch_write() as db:
+            for node in nodes_to_add:
+                await self.store.add_node(node, _db=db)
+            for edge in edges_to_add:
+                await self.store.add_edge(edge, _db=db)
 
         return paper_id
+
 

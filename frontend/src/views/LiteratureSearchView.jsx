@@ -101,7 +101,7 @@ export default function LiteratureSearchView() {
             style={{ display: 'flex', alignItems: 'center', gap: 6 }}
           >
             <FileText size={13} />
-            <span>Founded Papers ({results.length})</span>
+            <span>Founded Papers</span>
           </button>
         </div>
 
@@ -111,7 +111,7 @@ export default function LiteratureSearchView() {
             onClick={() => navigate('/search-results')}
             style={{ display: 'flex', alignItems: 'center', gap: 6 }}
           >
-            <span>View Founded Papers ({results.length})</span>
+            <span>View Founded Papers</span>
             <ArrowRight size={13} />
           </button>
         )}

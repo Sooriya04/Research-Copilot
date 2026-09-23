@@ -15,6 +15,9 @@ export function AppProvider({ children }) {
   const [workspaces, setWorkspaces] = useState([]);
   const [activeWorkspace, setActiveWorkspace] = useState(() => {
     try {
+      if (localStorage.getItem('rc_workspace_deactivated') === 'true') {
+        return null;
+      }
       const saved = localStorage.getItem('rc_active_workspace');
       return saved ? JSON.parse(saved) : null;
     } catch {
@@ -121,14 +124,26 @@ export function AppProvider({ children }) {
       if (res.ok) {
         const list = await res.json();
         setWorkspaces(list);
-        if (list.length > 0) {
-          const storedId = localStorage.getItem('rc_active_workspace_id');
-          const found = list.find((w) => w.id === storedId) || list[0];
-          setActiveWorkspace(found);
-          localStorage.setItem('rc_active_workspace', JSON.stringify(found));
-          localStorage.setItem('rc_active_workspace_id', found.id);
-          loadWorkspaceState(found.id, found.title);
+        // Check if user explicitly deactivated workspaces
+        const isDeactivated = localStorage.getItem('rc_workspace_deactivated') === 'true';
+        if (isDeactivated) {
+          setActiveWorkspace(null);
+          return;
         }
+
+        const storedId = localStorage.getItem('rc_active_workspace_id');
+        if (storedId && list.length > 0) {
+          const found = list.find((w) => w.id === storedId);
+          if (found) {
+            setActiveWorkspace(found);
+            localStorage.setItem('rc_active_workspace', JSON.stringify(found));
+            loadWorkspaceState(found.id, found.title);
+            return;
+          }
+        }
+
+        // If no stored ID or workspace not found, do not force-activate list[0]
+        setActiveWorkspace(null);
       }
     } catch (err) {
       console.error('Failed to fetch workspaces:', err);
@@ -199,6 +214,7 @@ export function AppProvider({ children }) {
         setActiveWorkspace(newWs);
         localStorage.setItem('rc_active_workspace', JSON.stringify(newWs));
         localStorage.setItem('rc_active_workspace_id', newWs.id);
+        localStorage.removeItem('rc_workspace_deactivated');
 
         // Initialize clean state for this fresh workspace
         const initialQuery = title.trim();
@@ -231,6 +247,7 @@ export function AppProvider({ children }) {
       setActiveWorkspace(found);
       localStorage.setItem('rc_active_workspace', JSON.stringify(found));
       localStorage.setItem('rc_active_workspace_id', found.id);
+      localStorage.removeItem('rc_workspace_deactivated');
       loadWorkspaceState(found.id, found.title);
     }
   };
@@ -239,6 +256,7 @@ export function AppProvider({ children }) {
     setActiveWorkspace(null);
     localStorage.removeItem('rc_active_workspace');
     localStorage.removeItem('rc_active_workspace_id');
+    localStorage.setItem('rc_workspace_deactivated', 'true');
     setSearchQuery('');
     setSearchResults([]);
     setSourceCounts({});
@@ -253,22 +271,16 @@ export function AppProvider({ children }) {
       const filtered = workspaces.filter((w) => w.id !== wsId);
       setWorkspaces(filtered);
       if (activeWorkspace && activeWorkspace.id === wsId) {
-        if (filtered.length > 0) {
-          setActiveWorkspace(filtered[0]);
-          localStorage.setItem('rc_active_workspace', JSON.stringify(filtered[0]));
-          localStorage.setItem('rc_active_workspace_id', filtered[0].id);
-          loadWorkspaceState(filtered[0].id, filtered[0].title);
-        } else {
-          setActiveWorkspace(null);
-          localStorage.removeItem('rc_active_workspace');
-          localStorage.removeItem('rc_active_workspace_id');
-          setSearchQuery('');
-          setSearchResults([]);
-          setSourceCounts({});
-          setAddedToGraphPaperIds([]);
-          setActiveReaderPaperState(null);
-          setComparisonPapers([]);
-        }
+        setActiveWorkspace(null);
+        localStorage.removeItem('rc_active_workspace');
+        localStorage.removeItem('rc_active_workspace_id');
+        localStorage.setItem('rc_workspace_deactivated', 'true');
+        setSearchQuery('');
+        setSearchResults([]);
+        setSourceCounts({});
+        setAddedToGraphPaperIds([]);
+        setActiveReaderPaperState(null);
+        setComparisonPapers([]);
       }
     } catch (err) {
       console.error('Failed to delete workspace:', err);

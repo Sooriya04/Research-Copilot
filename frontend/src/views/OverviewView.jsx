@@ -182,7 +182,7 @@ export default function OverviewView() {
             style={{ display: 'flex', alignItems: 'center', gap: 6 }}
           >
             <BookOpen size={13} style={{ color: 'var(--accent-emerald)' }} />
-            <span>2. Founded Papers ({searchResults.length})</span>
+            <span>2. Founded Papers</span>
           </button>
           <button
             type="button"
