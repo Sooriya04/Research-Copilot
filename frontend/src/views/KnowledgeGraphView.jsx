@@ -118,6 +118,8 @@ export default function KnowledgeGraphView() {
     setLoading(true);
     const activeTopic = (activeWorkspace?.title || searchQuery || '').trim();
     const wsId = (activeWorkspace?.id || '').trim();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
 
     try {
       const params = new URLSearchParams();
@@ -128,7 +130,7 @@ export default function KnowledgeGraphView() {
       const url = params.toString()
         ? `/api/v1/graph/elements?${params.toString()}`
         : '/api/v1/graph/elements';
-      const elemRes = await fetch(url);
+      const elemRes = await fetch(url, { signal: controller.signal });
       let loadedNodes = [];
       let loadedEdges = [];
 
@@ -258,14 +260,19 @@ export default function KnowledgeGraphView() {
       setRawEdges(loadedEdges);
 
       // 2. Fetch summary & coverage
-      const sumRes = await fetch('/api/v1/graph/summary');
-      if (sumRes.ok) {
-        const summary = await sumRes.json();
-        setSummaryData(summary);
+      try {
+        const sumRes = await fetch('/api/v1/graph/summary', { signal: controller.signal });
+        if (sumRes.ok) {
+          const summary = await sumRes.json();
+          setSummaryData(summary);
+        }
+      } catch (sumErr) {
+        console.warn('Failed to load summary:', sumErr);
       }
     } catch (err) {
       console.error('Failed to load graph elements:', err);
     } finally {
+      clearTimeout(timeoutId);
       setLoading(false);
     }
   };
