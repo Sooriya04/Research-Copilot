@@ -15,6 +15,10 @@ import {
   Copy,
   Check,
   X,
+  Award,
+  GitFork,
+  Star,
+  Database,
 } from 'lucide-react';
 import MarkdownRenderer from '../common/MarkdownRenderer';
 
@@ -382,6 +386,245 @@ function DetailsTab({ paper }) {
   );
 }
 
+// ─── Sidebar Tab: Benchmarks (Papers With Code) ────────────────────────────────
+function BenchmarksTab({ paper }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const arxivId =
+    paper?.arxiv_id ||
+    (paper?.id && String(paper.id).startsWith('arxiv:') ? String(paper.id).replace('arxiv:', '') : null);
+  const title = paper?.title;
+
+  useEffect(() => {
+    if (!arxivId && !title) return;
+    setLoading(true);
+    setError(null);
+
+    const params = new URLSearchParams();
+    if (arxivId) params.set('arxiv_id', arxivId);
+    if (title) params.set('title', title);
+
+    fetch(`/api/v1/graph/benchmarks?${params.toString()}`)
+      .then((res) => {
+        if (!res.ok) throw new Error('Failed to fetch benchmark evidence');
+        return res.json();
+      })
+      .then((resData) => setData(resData))
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false));
+  }, [arxivId, title]);
+
+  if (loading) {
+    return (
+      <div
+        style={{
+          padding: 24,
+          textAlign: 'center',
+          color: 'var(--text-muted)',
+          fontSize: 13,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: 10,
+        }}
+      >
+        <Loader2 size={24} className="animate-spin" style={{ color: 'var(--accent-primary)' }} />
+        <span>Fetching Papers With Code benchmarks & code...</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div style={{ padding: 20, textAlign: 'center', color: 'var(--accent-rose)', fontSize: 13 }}>
+        <p style={{ margin: 0 }}>{error}</p>
+      </div>
+    );
+  }
+
+  const benchmarks = data?.benchmarks || [];
+  const repos = data?.repositories || [];
+
+  if (!benchmarks.length && !repos.length) {
+    return (
+      <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+        <Award size={32} style={{ opacity: 0.35, display: 'block', margin: '0 auto 10px' }} />
+        <p style={{ margin: 0, fontWeight: 500, color: 'var(--text-secondary)' }}>
+          No Papers With Code Evidence
+        </p>
+        <p style={{ margin: '6px 0 0', fontSize: 12, lineHeight: 1.5 }}>
+          This paper does not yet have registered benchmark evaluation tables or code repositories on Papers With Code.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding: 14, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* Code Repositories */}
+      {repos.length > 0 && (
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+            <GitFork size={13} style={{ color: 'var(--accent-primary)' }} />
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                textTransform: 'uppercase',
+                letterSpacing: '0.06em',
+                color: 'var(--text-muted)',
+              }}
+            >
+              Code Repositories ({repos.length})
+            </span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {repos.map((r, i) => (
+              <a
+                key={i}
+                href={r.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '10px 12px',
+                  background: 'var(--bg-subtle)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-sm)',
+                  textDecoration: 'none',
+                  color: 'inherit',
+                }}
+              >
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                    <span
+                      style={{
+                        fontSize: 12.5,
+                        fontWeight: 600,
+                        color: 'var(--accent-primary)',
+                        wordBreak: 'break-all',
+                      }}
+                    >
+                      {r.url ? r.url.replace(/^https?:\/\/(www\.)?github\.com\//, '') : 'Repository'}
+                    </span>
+                    {r.is_official && (
+                      <span
+                        style={{
+                          fontSize: 10,
+                          background: '#10b98122',
+                          color: '#10b981',
+                          padding: '1px 5px',
+                          borderRadius: 4,
+                          fontWeight: 600,
+                        }}
+                      >
+                        Official
+                      </span>
+                    )}
+                  </div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      fontSize: 11.5,
+                      color: 'var(--text-muted)',
+                    }}
+                  >
+                    {r.framework && <span>{r.framework}</span>}
+                    {r.stars != null && r.stars > 0 && (
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                        <Star size={11} style={{ color: '#f59e0b', fill: '#f59e0b' }} /> {r.stars.toLocaleString()}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <ExternalLink size={13} style={{ color: 'var(--text-muted)', marginLeft: 8, flexShrink: 0 }} />
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Benchmark Evaluations */}
+      {benchmarks.length > 0 && (
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+            <Award size={13} style={{ color: '#f59e0b' }} />
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                textTransform: 'uppercase',
+                letterSpacing: '0.06em',
+                color: 'var(--text-muted)',
+              }}
+            >
+              Benchmark Evaluations ({benchmarks.length})
+            </span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {benchmarks.map((b, i) => (
+              <div
+                key={i}
+                style={{
+                  padding: '10px 12px',
+                  background: 'var(--bg-subtle)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-sm)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 4,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>
+                    {b.task || 'Benchmark Evaluation'}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 700,
+                      background: 'rgba(99, 102, 241, 0.12)',
+                      color: 'var(--accent-primary, #6366f1)',
+                      padding: '2px 8px',
+                      borderRadius: 4,
+                    }}
+                  >
+                    {b.value}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: 8,
+                    fontSize: 11.5,
+                    color: 'var(--text-muted)',
+                  }}
+                >
+                  {b.dataset && (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                      <Database size={11} /> {b.dataset}
+                    </span>
+                  )}
+                  {b.metric && <span>Metric: {b.metric}</span>}
+                  {b.model && <span>Model: {b.model}</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 // ─── Main Anara Reader ────────────────────────────────────────────────────────
 export default function AnaraPaperReader({ paper, pdfUrl, markdownContent, onBack, backLabel = 'Back' }) {
   const [sidebarTab, setSidebarTab] = useState('ask'); // 'ask' | 'annotations' | 'details'
@@ -634,6 +877,7 @@ export default function AnaraPaperReader({ paper, pdfUrl, markdownContent, onBac
             >
               {[
                 { key: 'ask', label: 'Ask', Icon: MessageSquare },
+                { key: 'benchmarks', label: 'Benchmarks', Icon: Award },
                 { key: 'annotations', label: 'Annotations', Icon: BookmarkIcon, badge: annotations.length || null },
                 { key: 'details', label: 'Details', Icon: Info },
               ].map(({ key, label, Icon, badge }) => (
@@ -676,6 +920,9 @@ export default function AnaraPaperReader({ paper, pdfUrl, markdownContent, onBac
             <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
               {sidebarTab === 'ask' && (
                 <AskTab paper={paper} initialPrompt={askPrompt} onClearPrompt={() => setAskPrompt('')} />
+              )}
+              {sidebarTab === 'benchmarks' && (
+                <BenchmarksTab paper={paper} />
               )}
               {sidebarTab === 'annotations' && (
                 <AnnotationsTab annotations={annotations} />

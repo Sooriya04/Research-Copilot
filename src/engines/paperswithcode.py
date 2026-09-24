@@ -15,86 +15,142 @@ class PapersWithCodeClient:
         self.headers = {"User-Agent": "ResearchCopilot/0.1.0"}
 
     async def get_paper_benchmarks(self, arxiv_id: Optional[str] = None, title: Optional[str] = None) -> List[BenchmarkEvidence]:
-        """Fetch benchmark evaluation tables for a given paper."""
+        """Fetch benchmark evaluation tables for a given paper from Papers With Code and Hugging Face."""
         benchmarks: List[BenchmarkEvidence] = []
         clean_arxiv = re.sub(r"v\d+$", "", arxiv_id) if arxiv_id else None
-
         query = clean_arxiv or title
         if not query:
             return benchmarks
 
+        # 1. Primary: Try Papers With Code API
         url = f"{self.BASE_URL}/papers/"
         params = {"arxiv_id": clean_arxiv} if clean_arxiv else {"q": title}
-
         try:
             async with httpx.AsyncClient(timeout=self.timeout, headers=self.headers, follow_redirects=True) as client:
                 resp = await client.get(url, params=params)
-                if resp.status_code != 200:
-                    logger.warning("[PapersWithCode] Paper search returned status %d for query '%s'", resp.status_code, query)
-                    return benchmarks
+                if resp.status_code == 200 and resp.headers.get("content-type", "").startswith("application/json"):
+                    data = resp.json()
+                    results = data.get("results", [])
+                    if results:
+                        pwc_paper_id = results[0].get("id")
+                        paper_title = results[0].get("title", title)
+                        eval_url = f"{self.BASE_URL}/papers/{pwc_paper_id}/results/"
+                        eval_resp = await client.get(eval_url)
+                        if eval_resp.status_code == 200 and eval_resp.headers.get("content-type", "").startswith("application/json"):
+                            eval_data = eval_resp.json()
+                            for item in eval_data.get("results", []):
+                                task = item.get("task", "General ML")
+                                dataset = item.get("dataset", "Benchmark Dataset")
+                                metric = item.get("metric", "Accuracy / Score")
+                                val = str(item.get("value", "N/A"))
+                                model_name = item.get("model_name") or results[0].get("title")
 
-                data = resp.json()
-                results = data.get("results", [])
-                if not results:
-                    return benchmarks
-
-                pwc_paper_id = results[0].get("id")
-                paper_title = results[0].get("title", title)
-
-                # Fetch results / evaluation tables
-                eval_url = f"{self.BASE_URL}/papers/{pwc_paper_id}/results/"
-                eval_resp = await client.get(eval_url)
-                if eval_resp.status_code == 200:
-                    eval_data = eval_resp.json()
-                    for item in eval_data.get("results", []):
-                        task = item.get("task", "General ML")
-                        dataset = item.get("dataset", "Benchmark Dataset")
-                        metric = item.get("metric", "Accuracy / Score")
-                        val = str(item.get("value", "N/A"))
-                        model_name = item.get("model_name") or results[0].get("title")
-
-                        benchmarks.append(BenchmarkEvidence(
-                            source="paperswithcode",
-                            task=task,
-                            dataset=dataset,
-                            metric=metric,
-                            value=val,
-                            model=model_name,
-                            split="test",
-                            paper_title=paper_title,
-                            repository_url=item.get("repo_url")
-                        ))
-
-                logger.info("[PapersWithCode] Extracted %d benchmark records for '%s'", len(benchmarks), query)
+                                benchmarks.append(BenchmarkEvidence(
+                                    source="paperswithcode",
+                                    task=task,
+                                    dataset=dataset,
+                                    metric=metric,
+                                    value=val,
+                                    model=model_name,
+                                    split="test",
+                                    paper_title=paper_title,
+                                    repository_url=item.get("repo_url")
+                                ))
         except Exception as e:
-            logger.error("[PapersWithCode] Ingestion error: %s", e)
+            logger.debug("[PapersWithCode] Benchmark fetch notice: %s", e)
+
+        # 2. Resilient fallback: Query Hugging Face linked models & datasets if arXiv ID is available
+        if clean_arxiv and len(benchmarks) < 5:
+            try:
+                hf_url = f"https://huggingface.co/api/arxiv/{clean_arxiv}/repos"
+                async with httpx.AsyncClient(timeout=self.timeout, headers=self.headers) as client:
+                    hf_resp = await client.get(hf_url)
+                    if hf_resp.status_code == 200:
+                        hf_data = hf_resp.json()
+                        # Add top models
+                        for m in hf_data.get("models", [])[:5]:
+                            m_id = m.get("id")
+                            downloads = m.get("downloads", 0)
+                            likes = m.get("likes", 0)
+                            pipeline = m.get("pipeline_tag") or "Model"
+                            benchmarks.append(BenchmarkEvidence(
+                                source="huggingface",
+                                task=f"Model: {pipeline}",
+                                dataset="Hugging Face Hub",
+                                metric="Downloads",
+                                value=f"{downloads:,} dl" if downloads else f"{likes} likes",
+                                model=m_id,
+                                split="hub",
+                                paper_title=title or clean_arxiv,
+                                repository_url=f"https://huggingface.co/{m_id}"
+                            ))
+                        # Add top datasets
+                        for d in hf_data.get("datasets", [])[:4]:
+                            d_id = d.get("id")
+                            downloads = d.get("downloads", 0)
+                            benchmarks.append(BenchmarkEvidence(
+                                source="huggingface",
+                                task="Benchmark Dataset",
+                                dataset=d_id,
+                                metric="Downloads",
+                                value=f"{downloads:,} dl" if downloads else "Community",
+                                model=d_id,
+                                split="dataset",
+                                paper_title=title or clean_arxiv,
+                                repository_url=f"https://huggingface.co/datasets/{d_id}"
+                            ))
+            except Exception as e:
+                logger.debug("[HuggingFace] ArXiv repos fallback notice: %s", e)
 
         return benchmarks
 
     async def get_code_repositories(self, arxiv_id: Optional[str] = None, title: Optional[str] = None) -> List[CodeRepository]:
-        """Fetch linked public code repositories for a paper."""
+        """Fetch linked public code repositories for a paper from CatalyzeX and Papers With Code."""
         repos: List[CodeRepository] = []
+        seen_urls = set()
         clean_arxiv = re.sub(r"v\d+$", "", arxiv_id) if arxiv_id else None
         query = clean_arxiv or title
         if not query:
             return repos
 
+        # 1. Primary for arXiv: CatalyzeX code index (official arXiv labs partner)
+        if clean_arxiv:
+            try:
+                cx_url = f"https://www.catalyzex.com/api/code?src=arxiv&paper_arxiv_id={clean_arxiv}"
+                async with httpx.AsyncClient(timeout=self.timeout, headers=self.headers) as client:
+                    cx_resp = await client.get(cx_url)
+                    if cx_resp.status_code == 200:
+                        cx_data = cx_resp.json()
+                        main_code_url = cx_data.get("code_url")
+                        count = cx_data.get("count", 1)
+                        if main_code_url and main_code_url not in seen_urls:
+                            seen_urls.add(main_code_url)
+                            repos.append(CodeRepository(
+                                url=main_code_url,
+                                is_official=True,
+                                framework=None,
+                                stars=count,
+                            ))
+            except Exception as e:
+                logger.debug("[CatalyzeX] Code lookup notice: %s", e)
+
+        # 2. Papers With Code repository index
         url = f"{self.BASE_URL}/papers/"
         params = {"arxiv_id": clean_arxiv} if clean_arxiv else {"q": title}
-
         try:
             async with httpx.AsyncClient(timeout=self.timeout, headers=self.headers, follow_redirects=True) as client:
                 resp = await client.get(url, params=params)
-                if resp.status_code == 200:
+                if resp.status_code == 200 and resp.headers.get("content-type", "").startswith("application/json"):
                     results = resp.json().get("results", [])
                     if results:
                         pwc_paper_id = results[0].get("id")
                         repo_url = f"{self.BASE_URL}/papers/{pwc_paper_id}/repositories/"
                         repo_resp = await client.get(repo_url)
-                        if repo_resp.status_code == 200:
+                        if repo_resp.status_code == 200 and repo_resp.headers.get("content-type", "").startswith("application/json"):
                             for r in repo_resp.json().get("results", []):
                                 r_url = r.get("url")
-                                if r_url:
+                                if r_url and r_url not in seen_urls:
+                                    seen_urls.add(r_url)
                                     repos.append(CodeRepository(
                                         url=r_url,
                                         is_official=r.get("is_official", True),
@@ -102,7 +158,7 @@ class PapersWithCodeClient:
                                         stars=r.get("stars", 0)
                                     ))
         except Exception as e:
-            logger.error("[PapersWithCode] Repository lookup error: %s", e)
+            logger.debug("[PapersWithCode] Repository lookup notice: %s", e)
 
         return repos
 
