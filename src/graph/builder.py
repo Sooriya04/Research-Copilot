@@ -142,9 +142,26 @@ class GraphBuilder:
         full_text = f"{title} {abstract}".strip()
 
         METHOD_PATTERNS = [
-            (r"\bdecentralized\b|\bserver[- ]free\b|\bcentral\s+server\s+free\b|\bpeer[- ]to[- ]peer\b|\bp2p\b", "Decentralized Learning"),
-            (r"\bprivacy\b|\bdata\s+privacy\b|\bdifferential\s+privacy\b|\bprivacy[- ]preserving\b", "Privacy-Preserving Methods"),
+            # Bias, Fairness & Robustness
+            (r"\b(?:dataset[- ])?bias\b|\balgorithmic\s+bias\b|\bfairness\b", "Dataset Bias & Fairness"),
+            (r"\bconcept\s+drift\b", "Concept Drift"),
+            (r"\brobustness\b|\bmodel\s+robustness\b|\bprecautionary\s+measures\b", "Model Robustness"),
             (r"\bsecurity\b|\badversar(?:ies|ial)\b|\bdefense\s+mechanisms?\b|\bvulnerabilit(?:ies|y)\b|\bpoisoning\b", "Security & Defense"),
+            (r"\bprivacy\b|\bdata\s+privacy\b|\bdifferential\s+privacy\b|\bprivacy[- ]preserving\b", "Privacy-Preserving Methods"),
+            # Training, Optimization & Decision Making
+            (r"\bsupervised\s+(?:machine\s+)?learning\b", "Supervised Learning"),
+            (r"\blearning\s+curves?\b", "Learning Curves Analysis"),
+            (r"\bdata\s+acquisition\b|\bdata\s+sourcing\b|\bchanging\s+data\s+sources\b", "Data Sourcing & Acquisition"),
+            (r"\bmodel\s+selection\b|\balgorithm\s+selection\b", "Model Selection"),
+            (r"\bhyperparameters?\b|\bhyperparameter\s+(?:optimization|tuning|configuration)\b", "Hyperparameter Optimization"),
+            (r"\bearly\s+stopping\b", "Early Stopping"),
+            # NLP & Language Models
+            (r"\bpre[- ]trained\s+(?:language\s+)?models?\b|\blanguage\s+models?\b", "Pre-trained Language Models"),
+            (r"\bbert\b", "BERT Architecture"),
+            (r"\bfake\s+news\s+detection\b", "Fake News Detection"),
+            (r"\bbenchmark\s+study\b|\bbenchmark\s+evaluation\b", "Benchmark Evaluation"),
+            # Distributed & Federated Learning
+            (r"\bdecentralized\b|\bserver[- ]free\b|\bcentral\s+server\s+free\b|\bpeer[- ]to[- ]peer\b|\bp2p\b", "Decentralized Learning"),
             (r"\bvertical\s+(?:asynchronous\s+)?federated\s+learning\b|\bvertical\s+fl\b|\bvafl\b", "Vertical Federated Learning"),
             (r"\bhorizontal\s+federated\s+learning\b|\bhfl\b", "Horizontal Federated Learning"),
             (r"\basynchronous\b|\bintermittent\b|\bdelay[- ]tolerant\b|\basync\b", "Asynchronous Optimization"),
@@ -152,6 +169,7 @@ class GraphBuilder:
             (r"\b(?:stochastic\s+)?aggregation\b|\bmodel\s+aggregation\b|\bgradient\s+aggregation\b|\bsecure\s+aggregation\b", "Aggregation Methods"),
             (r"\bfedavg\b|\bfederated\s+averaging\b", "Federated Averaging"),
             (r"\bbyzantine\b|\bbyzantine[- ]robust\b", "Byzantine Robustness"),
+            # Neural Architectures & Representation
             (r"\bautoencoders?\b|\bvariational\s+autoencoder\b|\bvae\b", "Autoencoders"),
             (r"\battention\s+mechanisms?\b|\bself[- ]attention\b|\bmulti[- ]head\s+attention\b", "Attention Mechanism"),
             (r"\btransformers?\b|\bvision\s+transformer\b|\bvit\b", "Transformer"),
