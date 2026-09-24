@@ -144,16 +144,22 @@ class MultiProviderSearchEngine:
         return artifacts
 
     async def search_semanticscholar(self, query: str, limit: int = 25) -> List[Paper]:
-        """Search Semantic Scholar academic graph."""
+        """Search Semantic Scholar academic graph (uses API key if configured)."""
+        import asyncio
         url = "https://api.semanticscholar.org/graph/v1/paper/search"
         params = {
             "query": query,
             "limit": min(limit, settings.max_rank_limit),
             "fields": "title,abstract,authors,year,citationCount,isOpenAccess,openAccessPdf,externalIds,url",
         }
+        # Build headers — add API key when available
+        headers = dict(self.headers)
+        if settings.semantic_scholar_api_key:
+            headers["x-api-key"] = settings.semantic_scholar_api_key
+
         papers: List[Paper] = []
         try:
-            async with httpx.AsyncClient(timeout=self.timeout, headers=self.headers) as client:
+            async with httpx.AsyncClient(timeout=self.timeout, headers=headers) as client:
                 resp = await client.get(url, params=params)
                 if resp.status_code == 200:
                     data = resp.json()
@@ -181,9 +187,12 @@ class MultiProviderSearchEngine:
                         ))
                     logger.info("[Semantic Scholar] Fetched %d papers for query: '%s'", len(papers), query)
                 elif resp.status_code == 429:
-                    logger.warning("[Semantic Scholar] Rate limited (429 Too Many Requests) without API key. Falling back to OpenAlex/arXiv/EuropePMC.")
+                    logger.warning("[Semantic Scholar] Rate limited (429). Check API key or slow down requests.")
                 else:
                     logger.warning("[Semantic Scholar] Returned status %d: %s", resp.status_code, resp.text[:200])
         except Exception as e:
             logger.error("[Semantic Scholar] Search error: %s", e)
+        finally:
+            # S2 rate limit: 1 request/second cumulative across all endpoints
+            await asyncio.sleep(1.0)
         return papers

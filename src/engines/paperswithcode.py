@@ -105,3 +105,120 @@ class PapersWithCodeClient:
             logger.error("[PapersWithCode] Repository lookup error: %s", e)
 
         return repos
+
+    async def search_tasks(self, query: str, limit: int = 10) -> List[Dict]:
+        """Search for ML tasks by name (e.g. 'image classification', 'machine translation')."""
+        results = []
+        try:
+            url = f"{self.BASE_URL}/tasks/"
+            params = {"q": query, "page_size": limit}
+            async with httpx.AsyncClient(timeout=self.timeout, headers=self.headers, follow_redirects=True) as client:
+                resp = await client.get(url, params=params)
+                if resp.status_code == 200:
+                    for item in resp.json().get("results", []):
+                        results.append({
+                            "id": item.get("id"),
+                            "name": item.get("name"),
+                            "description": item.get("description", ""),
+                            "categories": item.get("categories", []),
+                            "url": f"https://paperswithcode.com/task/{item.get('id')}",
+                        })
+                    logger.info("[PapersWithCode] Found %d tasks for query '%s'", len(results), query)
+        except Exception as e:
+            logger.error("[PapersWithCode] Task search error: %s", e)
+        return results
+
+    async def get_sota_for_task(self, task_id: str, limit: int = 20) -> List[Dict]:
+        """Fetch SOTA leaderboard results for a specific task (e.g. 'image-classification').
+
+        Returns ranked list of {model, paper, dataset, metric, value, rank}.
+        """
+        rows = []
+        try:
+            url = f"{self.BASE_URL}/tasks/{task_id}/results/"
+            params = {"page_size": limit, "ordering": "-metric_value"}
+            async with httpx.AsyncClient(timeout=self.timeout, headers=self.headers, follow_redirects=True) as client:
+                resp = await client.get(url, params=params)
+                if resp.status_code == 200:
+                    for i, item in enumerate(resp.json().get("results", []), start=1):
+                        rows.append({
+                            "rank": i,
+                            "model": item.get("model_name") or item.get("methodology"),
+                            "paper_title": item.get("paper", {}).get("title") if item.get("paper") else None,
+                            "paper_url": item.get("paper", {}).get("url") if item.get("paper") else None,
+                            "arxiv_id": item.get("paper", {}).get("arxiv_id") if item.get("paper") else None,
+                            "dataset": item.get("dataset"),
+                            "metric": item.get("metric"),
+                            "value": item.get("metric_value"),
+                            "evaluated_on": item.get("evaluated_on"),
+                        })
+                    logger.info("[PapersWithCode] Fetched %d SOTA rows for task '%s'", len(rows), task_id)
+                else:
+                    logger.warning("[PapersWithCode] SOTA task '%s' returned status %d", task_id, resp.status_code)
+        except Exception as e:
+            logger.error("[PapersWithCode] SOTA fetch error for task '%s': %s", task_id, e)
+        return rows
+
+    async def get_sota_for_dataset(self, dataset_id: str, limit: int = 20) -> List[Dict]:
+        """Fetch SOTA leaderboard for a specific dataset (e.g. 'imagenet', 'squad').
+
+        Returns ranked results per metric for that dataset.
+        """
+        rows = []
+        try:
+            url = f"{self.BASE_URL}/datasets/{dataset_id}/results/"
+            params = {"page_size": limit}
+            async with httpx.AsyncClient(timeout=self.timeout, headers=self.headers, follow_redirects=True) as client:
+                resp = await client.get(url, params=params)
+                if resp.status_code == 200:
+                    metric_groups: Dict[str, list] = {}
+                    for item in resp.json().get("results", []):
+                        metric = item.get("metric", "Score")
+                        metric_groups.setdefault(metric, []).append(item)
+
+                    rank = 1
+                    for metric, items in metric_groups.items():
+                        # Sort descending by metric value
+                        try:
+                            items.sort(key=lambda x: float(x.get("metric_value", 0) or 0), reverse=True)
+                        except (ValueError, TypeError):
+                            pass
+                        for i, item in enumerate(items[:limit], start=1):
+                            rows.append({
+                                "rank": i,
+                                "metric": metric,
+                                "model": item.get("model_name") or item.get("methodology"),
+                                "paper_title": item.get("paper", {}).get("title") if item.get("paper") else None,
+                                "arxiv_id": item.get("paper", {}).get("arxiv_id") if item.get("paper") else None,
+                                "value": item.get("metric_value"),
+                                "evaluated_on": item.get("evaluated_on"),
+                            })
+                    logger.info("[PapersWithCode] Fetched SOTA for dataset '%s': %d rows", dataset_id, len(rows))
+                else:
+                    logger.warning("[PapersWithCode] Dataset '%s' returned status %d", dataset_id, resp.status_code)
+        except Exception as e:
+            logger.error("[PapersWithCode] SOTA dataset error for '%s': %s", dataset_id, e)
+        return rows
+
+    async def search_datasets(self, query: str, limit: int = 10) -> List[Dict]:
+        """Search for benchmark datasets by name (e.g. 'ImageNet', 'SQuAD', 'MMLU')."""
+        results = []
+        try:
+            url = f"{self.BASE_URL}/datasets/"
+            params = {"q": query, "page_size": limit}
+            async with httpx.AsyncClient(timeout=self.timeout, headers=self.headers, follow_redirects=True) as client:
+                resp = await client.get(url, params=params)
+                if resp.status_code == 200:
+                    for item in resp.json().get("results", []):
+                        results.append({
+                            "id": item.get("id"),
+                            "name": item.get("name"),
+                            "full_name": item.get("full_name"),
+                            "description": item.get("description", ""),
+                            "url": f"https://paperswithcode.com/dataset/{item.get('id')}",
+                        })
+                    logger.info("[PapersWithCode] Found %d datasets for query '%s'", len(results), query)
+        except Exception as e:
+            logger.error("[PapersWithCode] Dataset search error: %s", e)
+        return results
+

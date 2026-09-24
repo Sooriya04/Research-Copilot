@@ -497,3 +497,87 @@ async def seed_sample_graph():
         "total_edges": graph_store.graph.number_of_edges(),
     }
 
+
+import asyncio
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Papers With Code — Benchmarks & SOTA Leaderboards
+# ─────────────────────────────────────────────────────────────────────────────
+
+_pwc_client = None
+
+def _get_pwc():
+    global _pwc_client
+    if _pwc_client is None:
+        from src.engines.paperswithcode import PapersWithCodeClient
+        _pwc_client = PapersWithCodeClient()
+    return _pwc_client
+
+
+@router.get("/benchmarks", summary="Get benchmark results & code repos for a paper")
+async def get_paper_benchmarks(
+    arxiv_id: Optional[str] = Query(None, description="arXiv ID, e.g. 2408.06195"),
+    title: Optional[str] = Query(None, description="Paper title (fallback if no arXiv ID)"),
+):
+    """Fetches benchmark evaluation tables and linked code repos from Papers With Code."""
+    if not arxiv_id and not title:
+        raise HTTPException(status_code=400, detail="Provide arxiv_id or title.")
+    pwc = _get_pwc()
+    benchmarks, repos = await asyncio.gather(
+        pwc.get_paper_benchmarks(arxiv_id=arxiv_id, title=title),
+        pwc.get_code_repositories(arxiv_id=arxiv_id, title=title),
+    )
+    return {
+        "arxiv_id": arxiv_id,
+        "title": title,
+        "benchmark_count": len(benchmarks),
+        "repo_count": len(repos),
+        "benchmarks": [b.model_dump() for b in benchmarks],
+        "repositories": [r.model_dump() for r in repos],
+    }
+
+
+@router.get("/sota/search-tasks", summary="Search ML tasks on Papers With Code")
+async def sota_search_tasks(
+    q: str = Query(..., min_length=1, description="Task name, e.g. 'image classification'"),
+    limit: int = Query(10, le=50),
+):
+    """Search for ML tasks by name to get their task IDs for leaderboard queries."""
+    pwc = _get_pwc()
+    tasks = await pwc.search_tasks(query=q, limit=limit)
+    return {"query": q, "count": len(tasks), "tasks": tasks}
+
+
+@router.get("/sota/task/{task_id}", summary="SOTA leaderboard for an ML task")
+async def sota_for_task(
+    task_id: str,
+    limit: int = Query(20, le=100),
+):
+    """Returns the SOTA leaderboard for a specific task.
+    Example IDs: image-classification, language-modelling, machine-translation, question-answering"""
+    pwc = _get_pwc()
+    rows = await pwc.get_sota_for_task(task_id=task_id, limit=limit)
+    return {"task_id": task_id, "count": len(rows), "leaderboard": rows}
+
+
+@router.get("/sota/search-datasets", summary="Search benchmark datasets on Papers With Code")
+async def sota_search_datasets(
+    q: str = Query(..., min_length=1, description="Dataset name, e.g. 'ImageNet', 'SQuAD', 'MMLU'"),
+    limit: int = Query(10, le=50),
+):
+    """Search for benchmark datasets by name to get their dataset IDs."""
+    pwc = _get_pwc()
+    datasets = await pwc.search_datasets(query=q, limit=limit)
+    return {"query": q, "count": len(datasets), "datasets": datasets}
+
+
+@router.get("/sota/dataset/{dataset_id}", summary="SOTA leaderboard for a benchmark dataset")
+async def sota_for_dataset(
+    dataset_id: str,
+    limit: int = Query(20, le=100),
+):
+    """Returns the SOTA leaderboard for a specific dataset, grouped by metric.
+    Example IDs: imagenet, squad, mmlu, glue, coco"""
+    pwc = _get_pwc()
+    rows = await pwc.get_sota_for_dataset(dataset_id=dataset_id, limit=limit)
+    return {"dataset_id": dataset_id, "count": len(rows), "leaderboard": rows}
