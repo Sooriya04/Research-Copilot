@@ -57,6 +57,10 @@ class PaperNode(BaseGraphNode):
     year: Optional[int] = None
     venue: Optional[str] = None
     authors: List[str] = Field(default_factory=list)
+    doi: Optional[str] = None
+    arxiv_id: Optional[str] = None
+    abstract: Optional[str] = None
+    topics: List[str] = Field(default_factory=list)
     node_type: Literal[NodeType.PAPER] = NodeType.PAPER
 
 
