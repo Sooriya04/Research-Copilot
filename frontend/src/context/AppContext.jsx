@@ -60,30 +60,25 @@ export function AppProvider({ children }) {
     }
   });
 
+  const DEFAULT_SOURCES = ['arxiv', 'openalex', 'semanticscholar'];
+
   const [selectedSources, setSelectedSources] = useState(() => {
     try {
       const saved = localStorage.getItem('rc_sources');
-      return saved ? JSON.parse(saved) : [
-        'arxiv',
-        'openalex',
-        'semanticscholar',
-        'crossref',
-        'europepmc',
-        'pubmed',
-        'huggingface',
-        'paperswithcode',
-      ];
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        // If user had the old noisy sources saved, reset to the clean default
+        const noisySources = ['crossref', 'europepmc', 'pubmed', 'huggingface', 'paperswithcode'];
+        const hasNoisy = parsed.some(s => noisySources.includes(s));
+        if (hasNoisy) {
+          localStorage.removeItem('rc_sources');
+          return DEFAULT_SOURCES;
+        }
+        return parsed;
+      }
+      return DEFAULT_SOURCES;
     } catch {
-      return [
-        'arxiv',
-        'openalex',
-        'semanticscholar',
-        'crossref',
-        'europepmc',
-        'pubmed',
-        'huggingface',
-        'paperswithcode',
-      ];
+      return DEFAULT_SOURCES;
     }
   });
 

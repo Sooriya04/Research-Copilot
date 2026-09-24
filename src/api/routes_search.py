@@ -114,7 +114,14 @@ def deduplicate_papers(raw_papers: List[Paper]) -> List[Paper]:
 class UnifiedSearchRequest(BaseModel):
     query: str
     limit_per_source: int = 10
-    sources: Optional[List[str]] = ["openalex", "arxiv", "europepmc", "semanticscholar"]
+    # Default: only the three highest-quality, CS/ML-relevant sources.
+    # openalex        → broad scholarly index, strong relevance ranking
+    # arxiv           → preprints, best for recent CS/ML/AI papers
+    # semanticscholar → rich abstracts, citation counts, great recall
+    # Other sources (europepmc, crossref, huggingface, paperswithcode) are
+    # available via their own /search/* routes but excluded from the default
+    # because they return noisy / off-topic results for CS/ML queries.
+    sources: Optional[List[str]] = ["openalex", "arxiv", "semanticscholar"]
     session_id: Optional[str] = None
 
 
@@ -280,7 +287,7 @@ async def search_unified_endpoint(req: UnifiedSearchRequest, db: AsyncSession = 
     logger.info("[UNIFIED SEARCH] Initiating parallel search for query: '%s'", req.query)
     
     session_id = req.session_id or f"sess-{uuid.uuid4().hex[:8]}"
-    sources = req.sources or ["openalex", "arxiv", "europepmc", "semanticscholar", "crossref", "huggingface", "paperswithcode"]
+    sources = req.sources or ["openalex", "arxiv", "semanticscholar"]
     source_tasks = {}
 
     if "openalex" in sources:
@@ -350,6 +357,31 @@ async def search_unified_endpoint(req: UnifiedSearchRequest, db: AsyncSession = 
 
     # Strict multi-key deduplication
     unique_papers = deduplicate_papers(all_raw_papers)
+
+    # ── Relevance filter ────────────────────────────────────────────────────
+    # Drop papers whose title + abstract share ZERO meaningful tokens with the
+    # query. This removes off-topic results that slip in when a source's
+    # internal ranking doesn't match the query intent.
+    query_tokens = set(
+        w for w in re.findall(r"\b[a-z0-9]{3,}\b", req.query.lower())
+        if w not in {"the", "and", "for", "with", "that", "this", "from",
+                     "are", "was", "its", "not", "but", "can", "how", "via"}
+    )
+
+    def is_relevant(p: Paper) -> bool:
+        if not query_tokens:
+            return True
+        text = ((p.title or "") + " " + (p.abstract or "")).lower()
+        doc_tokens = set(re.findall(r"\b[a-z0-9]{3,}\b", text))
+        # Keep if at least 1 query token appears anywhere in title+abstract
+        return bool(query_tokens & doc_tokens)
+
+    before_filter = len(unique_papers)
+    unique_papers = [p for p in unique_papers if is_relevant(p)]
+    logger.info("[UNIFIED SEARCH] Relevance filter: %d → %d papers (dropped %d off-topic)",
+                before_filter, len(unique_papers), before_filter - len(unique_papers))
+    # ── End relevance filter ─────────────────────────────────────────────────
+
     duration_ms = (time.time() - start_time) * 1000.0
     logger.info("[UNIFIED SEARCH] Complete: %d raw -> %d unique papers in %.1f ms across sources: %s",
                 len(all_raw_papers), len(unique_papers), duration_ms, source_breakdown)
