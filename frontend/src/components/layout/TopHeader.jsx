@@ -15,6 +15,7 @@ const VIEW_TITLES = {
   '/search': 'Literature Search',
   '/search-results': 'Founded Papers',
   '/knowledge-graph': 'Knowledge Graph',
+  '/litgraph': 'LitGraph',
   '/pdf-inspector': 'Paper Reader',
   '/experiment-studio': 'Benchmarks & SOTA',
   '/manuscript': 'Manuscript Draft',

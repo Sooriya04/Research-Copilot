@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Search,
   Network,
+  Workflow,
   FlaskConical,
   FileText,
   Lightbulb,
@@ -68,6 +69,13 @@ export default function CommandPaletteModal() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <Network size={15} style={{ color: 'var(--text-muted)' }} />
               <span>Explore Knowledge Graph</span>
+            </div>
+            <span className="kbd-badge">Jump</span>
+          </div>
+          <div className="cmd-item" onClick={() => jumpTo('/litgraph')}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Workflow size={15} style={{ color: 'var(--text-muted)' }} />
+              <span>Explore Literature Graph (LitGraph)</span>
             </div>
             <span className="kbd-badge">Jump</span>
           </div>
