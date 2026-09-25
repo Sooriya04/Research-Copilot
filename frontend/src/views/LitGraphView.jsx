@@ -363,13 +363,23 @@ export default function LitGraphView() {
   const fgRef = useRef(null);
   const lastLoadedRef = useRef(null);
   const [searchParams] = useSearchParams();
-  const { activeWorkspace, searchResults, searchQuery, sessionId, setSearchQuery } = useApp();
+  const {
+    activeWorkspace,
+    searchResults,
+    searchQuery,
+    sessionId,
+    setSearchQuery,
+    litGraphData,
+    setLitGraphData,
+    litGraphTarget,
+    setLitGraphTarget,
+  } = useApp();
 
   const urlQuery = (searchParams.get('q') || searchParams.get('query') || '').trim();
   const urlPaperId = (searchParams.get('paperId') || searchParams.get('id') || '').trim();
   const activeQuery = urlQuery || searchQuery || activeWorkspace?.title || '';
 
-  const [graphData, setGraphData] = useState(null);
+  const graphData = litGraphData;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [selectedNode, setSelectedNode] = useState(null);
@@ -378,17 +388,45 @@ export default function LitGraphView() {
   const [hoverNode, setHoverNode] = useState(null);
   const [panelOpen, setPanelOpen] = useState(true);
 
-  // Filters
-  const [minYearFilter, setMinYearFilter] = useState(1990);
+  // Filters & bounds
+  const [minYearFilter, setMinYearFilter] = useState(() => {
+    if (litGraphData?.nodes?.length) {
+      const years = litGraphData.nodes.map((n) => n.year).filter(Boolean);
+      return years.length ? Math.min(...years) : 1990;
+    }
+    return 1990;
+  });
   const [maxNodes, setMaxNodes] = useState(45);
-  const [seedTitle, setSeedTitle] = useState('');
+  const [seedTitle, setSeedTitle] = useState(() => litGraphData?.seed_title || '');
+  const [yearBounds, setYearBounds] = useState(() => {
+    if (litGraphData?.nodes?.length) {
+      const years = litGraphData.nodes.map((n) => n.year).filter(Boolean);
+      const mn = years.length ? Math.min(...years) : 1990;
+      const mx = years.length ? Math.max(...years) : new Date().getFullYear();
+      return [mn, mx];
+    }
+    return [1990, new Date().getFullYear()];
+  });
 
-  // Derived year bounds
-  const [yearBounds, setYearBounds] = useState([1990, new Date().getFullYear()]);
+  const litGraphDataRef = useRef(litGraphData);
+  const litGraphTargetRef = useRef(litGraphTarget);
+  useEffect(() => {
+    litGraphDataRef.current = litGraphData;
+    litGraphTargetRef.current = litGraphTarget;
+  }, [litGraphData, litGraphTarget]);
 
-  const loadGraph = useCallback(async (paperId, paperTitle = '') => {
+  const loadGraph = useCallback(async (paperId, paperTitle = '', force = false) => {
     if (!paperId || !paperId.trim()) return;
     const cleanId = paperId.trim();
+
+    // Check if we already have this target loaded and don't need to rebuild
+    if (!force && litGraphDataRef.current && litGraphTargetRef.current === cleanId) {
+      if (paperTitle || litGraphDataRef.current.seed_title) {
+        setSeedTitle(paperTitle || litGraphDataRef.current.seed_title);
+      }
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setSelectedNode(null);
@@ -426,18 +464,19 @@ export default function LitGraphView() {
         radius: citationRadius(n.citationCount),
       }));
 
-      setGraphData(data);
+      setLitGraphTarget(cleanId);
+      setLitGraphData(data);
     } catch (e) {
       setError(e.message);
     }
     setLoading(false);
-  }, [sessionId]);
+  }, [sessionId, setLitGraphData, setLitGraphTarget]);
 
   const handleSelectPaper = useCallback((paper) => {
     const pid = paper.paperId || paper.id || paper.doi || paper.title;
     const title = paper.title || pid;
     lastLoadedRef.current = pid;
-    loadGraph(pid, title);
+    loadGraph(pid, title, true);
     if (setSearchQuery && paper.title) {
       setSearchQuery(paper.title);
     }
@@ -459,7 +498,7 @@ export default function LitGraphView() {
 
   // Auto-load graph on mount or when query/session changes
   useEffect(() => {
-    if (graphData || loading) return;
+    if (loading) return;
 
     let targetToLoad = null;
     let displayTitle = '';
@@ -482,11 +521,20 @@ export default function LitGraphView() {
       displayTitle = activeWorkspace.title.trim();
     }
 
+    // If we already have litGraphData in cache and target matches or no explicit target specified, don't re-fetch
+    if (litGraphData && (!targetToLoad || litGraphTarget === targetToLoad)) {
+      if (!seedTitle && litGraphData.seed_title) {
+        setSeedTitle(litGraphData.seed_title);
+      }
+      lastLoadedRef.current = litGraphTarget;
+      return;
+    }
+
     if (targetToLoad && lastLoadedRef.current !== targetToLoad) {
       lastLoadedRef.current = targetToLoad;
-      loadGraph(targetToLoad, displayTitle);
+      loadGraph(targetToLoad, displayTitle, false);
     }
-  }, [urlPaperId, urlQuery, searchQuery, searchResults, activeWorkspace?.title, graphData, loading, loadGraph]);
+  }, [urlPaperId, urlQuery, searchQuery, searchResults, activeWorkspace?.title, loading, loadGraph, litGraphData, litGraphTarget, seedTitle]);
 
   // Filtered graph (year + node count)
   const filteredGraph = useMemo(() => {
@@ -717,6 +765,30 @@ export default function LitGraphView() {
               {filteredGraph?.nodes.length} nodes · {filteredGraph?.links.length} edges
             </span>
             <YearLegend minYear={yearBounds[0]} maxYear={yearBounds[1]} />
+            <button
+              onClick={() => loadGraph(litGraphTarget || activeQuery, seedTitle, true)}
+              disabled={loading}
+              title="Force rebuild literature graph"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '4px 9px',
+                borderRadius: 'var(--radius-sm)',
+                border: '1px solid var(--border-subtle)',
+                background: 'var(--bg-subtle)',
+                color: 'var(--text-secondary)',
+                fontSize: 12,
+                cursor: loading ? 'not-allowed' : 'pointer',
+                opacity: loading ? 0.6 : 1,
+                fontWeight: 500,
+              }}
+              onMouseEnter={(e) => { if (!loading) e.currentTarget.style.background = 'var(--bg-card)'; }}
+              onMouseLeave={(e) => { if (!loading) e.currentTarget.style.background = 'var(--bg-subtle)'; }}
+            >
+              <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
+              <span>Rebuild</span>
+            </button>
           </div>
         )}
 
@@ -881,7 +953,7 @@ export default function LitGraphView() {
             <div style={{ flex: 1, overflow: 'hidden' }}>
               <DetailsPanel
                 node={selectedNode}
-                onMakeSeed={(node) => loadGraph(node.id, node.title)}
+                onMakeSeed={(node) => loadGraph(node.id, node.title, true)}
                 onClose={() => { setSelectedNode(null); setHighlightNodes(new Set()); setHighlightLinks(new Set()); }}
               />
             </div>

@@ -112,6 +112,25 @@ export function AppProvider({ children }) {
     }
   });
 
+  const [litGraphData, setLitGraphData] = useState(() => {
+    try {
+      const ws = JSON.parse(localStorage.getItem('rc_active_workspace') || 'null');
+      const saved = sessionStorage.getItem(getWsKey(ws?.id, 'litgraph_data'));
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const [litGraphTarget, setLitGraphTarget] = useState(() => {
+    try {
+      const ws = JSON.parse(localStorage.getItem('rc_active_workspace') || 'null');
+      return sessionStorage.getItem(getWsKey(ws?.id, 'litgraph_target')) || '';
+    } catch {
+      return '';
+    }
+  });
+
   // Fetch workspaces on initial mount
   const fetchWorkspaces = async () => {
     try {
@@ -158,6 +177,8 @@ export function AppProvider({ children }) {
       const savedGraphs = localStorage.getItem(getWsKey(wsId, 'added_graph_papers'));
       const savedReader = localStorage.getItem(getWsKey(wsId, 'reader_paper'));
       const savedComparisons = localStorage.getItem(getWsKey(wsId, 'comparison_papers'));
+      const savedLitData = sessionStorage.getItem(getWsKey(wsId, 'litgraph_data'));
+      const savedLitTarget = sessionStorage.getItem(getWsKey(wsId, 'litgraph_target'));
 
       setSearchQuery(q);
       setSearchResults(savedResults ? JSON.parse(savedResults) : []);
@@ -165,6 +186,8 @@ export function AppProvider({ children }) {
       setAddedToGraphPaperIds(savedGraphs ? JSON.parse(savedGraphs) : []);
       setActiveReaderPaperState(savedReader ? JSON.parse(savedReader) : null);
       setComparisonPapers(savedComparisons ? JSON.parse(savedComparisons) : []);
+      setLitGraphData(savedLitData ? JSON.parse(savedLitData) : null);
+      setLitGraphTarget(savedLitTarget || '');
     } catch (e) {
       console.error('Error loading workspace state:', e);
     }
@@ -183,8 +206,29 @@ export function AppProvider({ children }) {
       } else {
         localStorage.removeItem(getWsKey(activeWsId, 'reader_paper'));
       }
+      if (litGraphData) {
+        sessionStorage.setItem(getWsKey(activeWsId, 'litgraph_data'), JSON.stringify(litGraphData));
+      } else {
+        sessionStorage.removeItem(getWsKey(activeWsId, 'litgraph_data'));
+      }
+      if (litGraphTarget) {
+        sessionStorage.setItem(getWsKey(activeWsId, 'litgraph_target'), litGraphTarget);
+      } else {
+        sessionStorage.removeItem(getWsKey(activeWsId, 'litgraph_target'));
+      }
+    } else {
+      if (litGraphData) {
+        sessionStorage.setItem(getWsKey(null, 'litgraph_data'), JSON.stringify(litGraphData));
+      } else {
+        sessionStorage.removeItem(getWsKey(null, 'litgraph_data'));
+      }
+      if (litGraphTarget) {
+        sessionStorage.setItem(getWsKey(null, 'litgraph_target'), litGraphTarget);
+      } else {
+        sessionStorage.removeItem(getWsKey(null, 'litgraph_target'));
+      }
     }
-  }, [activeWsId, searchQuery, searchResults, sourceCounts, addedToGraphPaperIds, comparisonPapers, activeReaderPaper]);
+  }, [activeWsId, searchQuery, searchResults, sourceCounts, addedToGraphPaperIds, comparisonPapers, activeReaderPaper, litGraphData, litGraphTarget]);
 
   const openWorkspaceModal = (initialTitle = '') => {
     setWorkspaceModalInitialTitle(initialTitle || '');
@@ -258,6 +302,8 @@ export function AppProvider({ children }) {
     setAddedToGraphPaperIds([]);
     setActiveReaderPaperState(null);
     setComparisonPapers([]);
+    setLitGraphData(null);
+    setLitGraphTarget('');
   };
 
   const deleteWorkspace = async (wsId) => {
@@ -465,6 +511,10 @@ export function AppProvider({ children }) {
         searchError,
         setSearchError,
         performSearch,
+        litGraphData,
+        setLitGraphData,
+        litGraphTarget,
+        setLitGraphTarget,
       }}
     >
       {children}
