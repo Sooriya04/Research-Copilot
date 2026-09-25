@@ -82,6 +82,58 @@ const EDGE_COLORS = {
   relates_to: '#a1a1aa',
 };
 
+const METHOD_EXTRACTION_PATTERNS = [
+  [/\b(?:dataset[- ])?bias\b|\balgorithmic\s+bias\b|\bfairness\b/i, 'Dataset Bias & Fairness'],
+  [/\bconcept\s+drift\b/i, 'Concept Drift'],
+  [/\brobustness\b|\bmodel\s+robustness\b|\bprecautionary\s+measures\b/i, 'Model Robustness'],
+  [/\bsecurity\b|\badversar(?:ies|ial)\b|\bdefense\s+mechanisms?\b|\bvulnerabilit(?:ies|y)\b|\bpoisoning\b/i, 'Security & Defense'],
+  [/\bprivacy\b|\bdata\s+privacy\b|\bdifferential\s+privacy\b|\bprivacy[- ]preserving\b/i, 'Privacy-Preserving Methods'],
+  [/\bsupervised\s+(?:machine\s+)?learning\b/i, 'Supervised Learning'],
+  [/\blearning\s+curves?\b/i, 'Learning Curves Analysis'],
+  [/\bdata\s+acquisition\b|\bdata\s+sourcing\b|\bchanging\s+data\s+sources\b/i, 'Data Sourcing & Acquisition'],
+  [/\bmodel\s+selection\b|\balgorithm\s+selection\b/i, 'Model Selection'],
+  [/\bhyperparameters?\b|\bhyperparameter\s+(?:optimization|tuning|configuration)\b/i, 'Hyperparameter Optimization'],
+  [/\bearly\s+stopping\b/i, 'Early Stopping'],
+  [/\bpre[- ]trained\s+(?:language\s+)?models?\b|\blanguage\s+models?\b/i, 'Pre-trained Language Models'],
+  [/\bbert\b/i, 'BERT Architecture'],
+  [/\bfake\s+news\s+detection\b/i, 'Fake News Detection'],
+  [/\bbenchmark\s+study\b|\bbenchmark\s+evaluation\b/i, 'Benchmark Evaluation'],
+  [/\bdecentralized\b|\bserver[- ]free\b|\bpeer[- ]to[- ]peer\b/i, 'Decentralized Learning'],
+  [/\bvertical\s+(?:asynchronous\s+)?federated\s+learning\b|\bvertical\s+fl\b/i, 'Vertical Federated Learning'],
+  [/\bhorizontal\s+federated\s+learning\b|\bhfl\b/i, 'Horizontal Federated Learning'],
+  [/\basynchronous\b|\bdelay[- ]tolerant\b|\basync\b/i, 'Asynchronous Optimization'],
+  [/\bgossip\s+(?:protocol|algorithm|approach)\b/i, 'Gossip Protocol'],
+  [/\b(?:stochastic\s+)?aggregation\b|\bmodel\s+aggregation\b/i, 'Aggregation Methods'],
+  [/\bfedavg\b|\bfederated\s+averaging\b/i, 'Federated Averaging'],
+  [/\bbyzantine\b|\bbyzantine[- ]robust\b/i, 'Byzantine Robustness'],
+  [/\battention\s+mechanisms?\b|\bself[- ]attention\b/i, 'Attention Mechanism'],
+  [/\btransformers?\b|\bvision\s+transformer\b/i, 'Transformer'],
+  [/\bconvolutional\s+neural\s+network\b|\bcnn\b/i, 'Convolutional Networks'],
+  [/\bgraph\s+neural\s+network\b|\bgnn\b/i, 'Graph Neural Networks'],
+  [/\bdiffusion\s+models?\b/i, 'Diffusion Models'],
+  [/\btransfer\s+learning\b|\bdomain\s+adaptation\b/i, 'Transfer Learning'],
+  [/\bknowledge\s+distillation\b/i, 'Knowledge Distillation'],
+  [/\breinforcement\s+learning\b|\brlhf\b|\bdpo\b/i, 'Reinforcement Learning'],
+  [/\btest[- ]time\s+compute\b|\btest[- ]time\s+scaling\b|\bmcts\b/i, 'Test-Time Compute'],
+  [/\bparameter[- ]efficient\b|\blora\b|\bpeft\b/i, 'Parameter-Efficient Fine-Tuning'],
+  [/\bin[- ]context\s+learning\b|\bfew[- ]shot\b/i, 'In-Context Learning'],
+  [/\bhuman[- ]computer\s+interaction\b|\bhci\b/i, 'Human-Computer Interaction'],
+  [/\busability\b|\bheuristic\s+evaluation\b/i, 'Usability & Heuristic Evaluation'],
+];
+
+const DATASET_EXTRACTION_PATTERNS = [
+  [/\bmnist\b/i, 'MNIST'],
+  [/\bcifar[- ]?10\b/i, 'CIFAR-10'],
+  [/\bcifar[- ]?100\b/i, 'CIFAR-100'],
+  [/\bimagenet\b/i, 'ImageNet'],
+  [/\bsquad\b/i, 'SQuAD'],
+  [/\bglue\b/i, 'GLUE'],
+  [/\bsuperglue\b/i, 'SuperGLUE'],
+  [/\bmmlu\b/i, 'MMLU'],
+  [/\bgsm8k\b/i, 'GSM8K'],
+  [/\bhumaneval\b/i, 'HumanEval'],
+];
+
 export default function KnowledgeGraphView() {
   const {
     theme,
@@ -187,14 +239,36 @@ export default function KnowledgeGraphView() {
             label: 'Explores',
           });
 
+          const fullText = `${p.title || ''} ${p.abstract || ''}`;
+          const pMethods = Array.isArray(p.methods) ? [...p.methods] : [];
+          const pDatasets = Array.isArray(p.datasets) ? [...p.datasets] : [];
+
+          METHOD_EXTRACTION_PATTERNS.forEach(([pat, label]) => {
+            if (pat.test(fullText) && !pMethods.includes(label)) {
+              pMethods.push(label);
+            }
+          });
+
+          DATASET_EXTRACTION_PATTERNS.forEach(([pat, label]) => {
+            if (pat.test(fullText) && !pDatasets.includes(label)) {
+              pDatasets.push(label);
+            }
+          });
+
+          (p.topics || []).forEach(t => {
+            if (typeof t === 'string' && t.length >= 3 && t.length <= 30 && !pMethods.includes(t)) {
+              pMethods.push(t);
+            }
+          });
+
           // Map methods
-          (p.methods || []).forEach(m => {
+          pMethods.forEach(m => {
             if (!methodPapersMap.has(m)) methodPapersMap.set(m, []);
             methodPapersMap.get(m).push(pId);
           });
 
           // Map datasets
-          (p.datasets || []).forEach(d => {
+          pDatasets.forEach(d => {
             if (!datasetPapersMap.has(d)) datasetPapersMap.set(d, []);
             datasetPapersMap.get(d).push(pId);
           });
