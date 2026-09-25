@@ -5,6 +5,7 @@ import React, {
   useCallback,
   useMemo,
 } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import ForceGraph2D from 'react-force-graph-2d';
 import * as d3 from 'd3';
 import {
@@ -48,13 +49,19 @@ function citationRadius(count) {
 }
 
 // ── Search Autocomplete ───────────────────────────────────────────────────────
-function SearchBar({ onSelectPaper }) {
-  const [query, setQuery] = useState('');
+function SearchBar({ onSelectPaper, initialQuery = '' }) {
+  const [query, setQuery] = useState(initialQuery);
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const debounceRef = useRef(null);
   const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (initialQuery && initialQuery !== query) {
+      setQuery(initialQuery);
+    }
+  }, [initialQuery]);
 
   const doSearch = useCallback(async (q) => {
     if (q.length < 2) { setResults([]); return; }
@@ -99,11 +106,14 @@ function SearchBar({ onSelectPaper }) {
             if (data && data.length > 0) {
               handleSelect(data[0]);
             } else {
-              setResults([]);
-              setOpen(true);
+              handleSelect({ paperId: query.trim(), title: query.trim() });
             }
+          } else {
+            handleSelect({ paperId: query.trim(), title: query.trim() });
           }
-        } catch {}
+        } catch {
+          handleSelect({ paperId: query.trim(), title: query.trim() });
+        }
         setLoading(false);
       }
     } else if (e.key === 'Escape') {
@@ -351,7 +361,13 @@ function YearLegend({ minYear, maxYear }) {
 // ── Main LitGraph View ────────────────────────────────────────────────────────
 export default function LitGraphView() {
   const fgRef = useRef(null);
-  const { activeWorkspace, searchResults } = useApp();
+  const lastLoadedRef = useRef(null);
+  const [searchParams] = useSearchParams();
+  const { activeWorkspace, searchResults, searchQuery, sessionId, setSearchQuery } = useApp();
+
+  const urlQuery = (searchParams.get('q') || searchParams.get('query') || '').trim();
+  const urlPaperId = (searchParams.get('paperId') || searchParams.get('id') || '').trim();
+  const activeQuery = urlQuery || searchQuery || activeWorkspace?.title || '';
 
   const [graphData, setGraphData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -371,20 +387,31 @@ export default function LitGraphView() {
   const [yearBounds, setYearBounds] = useState([1990, new Date().getFullYear()]);
 
   const loadGraph = useCallback(async (paperId, paperTitle = '') => {
+    if (!paperId || !paperId.trim()) return;
+    const cleanId = paperId.trim();
     setLoading(true);
     setError(null);
     setSelectedNode(null);
     setHighlightNodes(new Set());
     setHighlightLinks(new Set());
-    setSeedTitle(paperTitle);
+    setSeedTitle(paperTitle || cleanId);
 
     try {
-      const res = await fetch(`/api/v1/litgraph/graph/${encodeURIComponent(paperId)}`);
+      const isIdOrDoi = cleanId.startsWith('10.') || cleanId.toUpperCase().startsWith('W') || cleanId.startsWith('arxiv:') || cleanId.startsWith('doi:') || cleanId.startsWith('sess-');
+      const url = isIdOrDoi
+        ? `/api/v1/litgraph/graph/${encodeURIComponent(cleanId)}`
+        : `/api/v1/litgraph/query?q=${encodeURIComponent(cleanId)}&session_id=${encodeURIComponent(sessionId || '')}`;
+
+      const res = await fetch(url);
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || `HTTP ${res.status}`);
       }
       const data = await res.json();
+
+      if (data.seed_title) {
+        setSeedTitle(data.seed_title);
+      }
 
       // Compute year bounds
       const years = data.nodes.map((n) => n.year).filter(Boolean);
@@ -404,7 +431,62 @@ export default function LitGraphView() {
       setError(e.message);
     }
     setLoading(false);
-  }, []);
+  }, [sessionId]);
+
+  const handleSelectPaper = useCallback((paper) => {
+    const pid = paper.paperId || paper.id || paper.doi || paper.title;
+    const title = paper.title || pid;
+    lastLoadedRef.current = pid;
+    loadGraph(pid, title);
+    if (setSearchQuery && paper.title) {
+      setSearchQuery(paper.title);
+    }
+    // Update active research session in SQLite
+    fetch('/api/v1/workbench/sessions/active', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: sessionId,
+        query: title,
+        seed_paper: {
+          id: pid,
+          title: title,
+          year: paper.year,
+        }
+      })
+    }).catch(() => {});
+  }, [loadGraph, sessionId, setSearchQuery]);
+
+  // Auto-load graph on mount or when query/session changes
+  useEffect(() => {
+    if (graphData || loading) return;
+
+    let targetToLoad = null;
+    let displayTitle = '';
+
+    if (urlPaperId) {
+      targetToLoad = urlPaperId;
+      displayTitle = urlPaperId;
+    } else if (urlQuery) {
+      targetToLoad = urlQuery;
+      displayTitle = urlQuery;
+    } else if (searchResults && searchResults.length > 0) {
+      const topPaper = searchResults[0];
+      targetToLoad = topPaper.openalex_id || topPaper.doi || topPaper.arxiv_id || topPaper.id || topPaper.title;
+      displayTitle = topPaper.title;
+    } else if (searchQuery && searchQuery.trim().length >= 2) {
+      targetToLoad = searchQuery.trim();
+      displayTitle = searchQuery.trim();
+    } else if (activeWorkspace?.title) {
+      targetToLoad = activeWorkspace.title.trim();
+      displayTitle = activeWorkspace.title.trim();
+    }
+
+    if (targetToLoad && lastLoadedRef.current !== targetToLoad) {
+      lastLoadedRef.current = targetToLoad;
+      loadGraph(targetToLoad, displayTitle);
+    }
+  }, [urlPaperId, urlQuery, searchQuery, searchResults, activeWorkspace?.title, graphData, loading, loadGraph]);
 
   // Filtered graph (year + node count)
   const filteredGraph = useMemo(() => {
@@ -589,9 +671,10 @@ export default function LitGraphView() {
   if (!filteredGraph && !loading && !error) {
     return (
       <LandingState
-        onSelectPaper={(p) => loadGraph(p.paperId, p.title)}
+        onSelectPaper={handleSelectPaper}
         activeWorkspace={activeWorkspace}
         searchResults={searchResults}
+        activeQuery={activeQuery}
       />
     );
   }
@@ -625,7 +708,7 @@ export default function LitGraphView() {
         </div>
 
         <div style={{ flex: 1, minWidth: 280, maxWidth: 520 }}>
-          <SearchBar onSelectPaper={(p) => loadGraph(p.paperId, p.title)} />
+          <SearchBar onSelectPaper={handleSelectPaper} initialQuery={activeQuery} />
         </div>
 
         {graphData && (
@@ -810,7 +893,7 @@ export default function LitGraphView() {
 }
 
 // ── Landing page when no graph loaded ────────────────────────────────────────
-function LandingState({ onSelectPaper, activeWorkspace, searchResults }) {
+function LandingState({ onSelectPaper, activeWorkspace, searchResults, activeQuery = '' }) {
   const EXAMPLES = [
     { paperId: 'W4407759090', title: 'A-Mem: Agentic Memory for LLM Agents' },
     { paperId: 'W4393065402', title: 'A survey on large language model based autonomous agents' },
@@ -832,16 +915,29 @@ function LandingState({ onSelectPaper, activeWorkspace, searchResults }) {
       </div>
 
       <div style={{ width: '100%', maxWidth: 520 }}>
-        <SearchBar onSelectPaper={onSelectPaper} />
+        <SearchBar onSelectPaper={onSelectPaper} initialQuery={activeQuery} />
       </div>
 
-      {activeWorkspace && searchResults && searchResults.length > 0 && (
+      {activeQuery && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%', maxWidth: 520 }}>
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={() => onSelectPaper({ paperId: activeQuery, title: activeQuery })}
+            style={{ width: '100%', padding: '9px 14px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, fontSize: 12.5, fontWeight: 600 }}
+          >
+            <Network size={14} />
+            <span>Map Bibliometric Cluster for "{activeQuery}"</span>
+          </button>
+        </div>
+      )}
+
+      {searchResults && searchResults.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%', maxWidth: 520 }}>
           <p style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: 0, textAlign: 'center' }}>
-            Papers from your active workspace (<strong>{activeWorkspace.title}</strong>):
+            {activeWorkspace ? `Papers from workspace (${activeWorkspace.title}):` : 'Papers from active research session:'}
           </p>
-          {searchResults.slice(0, 3).map((p, idx) => {
-            const pid = p.openalex_id || p.id || p.canonical_id || p.arxiv_id || `paper-${idx}`;
+          {searchResults.slice(0, 4).map((p, idx) => {
+            const pid = p.openalex_id || p.doi || p.arxiv_id || p.id || p.canonical_id || `paper-${idx}`;
             return (
               <button
                 key={pid}

@@ -1,6 +1,6 @@
 import uuid
-from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import Any, Dict, List, Optional
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,9 +31,17 @@ class ProjectOut(BaseModel):
 
 class SessionOut(BaseModel):
     id: str
-    project_id: Optional[str]
+    project_id: Optional[str] = None
     query: str
     status: str
+    state_json: Optional[Dict[str, Any]] = None
+    created_at: Optional[str] = None
+
+class SessionActiveUpdate(BaseModel):
+    query: Optional[str] = None
+    session_id: Optional[str] = None
+    seed_paper: Optional[Dict[str, Any]] = None
+    state_json: Optional[Dict[str, Any]] = None
 
 @router.get("/projects", response_model=List[ProjectOut])
 async def list_projects(db: AsyncSession = Depends(get_db)):
@@ -67,8 +75,109 @@ async def list_sessions(db: AsyncSession = Depends(get_db)):
         q_norm = (s.query or "").strip().lower()
         if q_norm and q_norm not in ignored_dummy_queries and q_norm not in seen_queries:
             seen_queries.add(q_norm)
-            unique_sessions.append(SessionOut(id=s.id, project_id=s.project_id, query=s.query, status=s.status))
+            unique_sessions.append(
+                SessionOut(
+                    id=s.id,
+                    project_id=s.project_id,
+                    query=s.query,
+                    status=s.status,
+                    state_json=s.state_json or {},
+                    created_at=s.created_at.isoformat() if s.created_at else None,
+                )
+            )
     return unique_sessions
+
+@router.get("/sessions/active", response_model=Optional[SessionOut])
+async def get_active_session(request: Request, db: AsyncSession = Depends(get_db)):
+    """Fetch the active research session (from session cookie or newest SQLite record)."""
+    active_id = None
+    if hasattr(request, "session"):
+        active_id = request.session.get("session_id")
+    
+    if active_id:
+        sess = await db.get(SessionModel, active_id)
+        if sess:
+            return SessionOut(
+                id=sess.id,
+                project_id=sess.project_id,
+                query=sess.query,
+                status=sess.status,
+                state_json=sess.state_json or {},
+                created_at=sess.created_at.isoformat() if sess.created_at else None,
+            )
+            
+    # Fallback: Latest active research session
+    result = await db.execute(select(SessionModel).order_by(SessionModel.created_at.desc()).limit(1))
+    latest = result.scalar_one_or_none()
+    if latest:
+        return SessionOut(
+            id=latest.id,
+            project_id=latest.project_id,
+            query=latest.query,
+            status=latest.status,
+            state_json=latest.state_json or {},
+            created_at=latest.created_at.isoformat() if latest.created_at else None,
+        )
+    return None
+
+@router.post("/sessions/active", response_model=SessionOut)
+async def set_active_session(req: SessionActiveUpdate, request: Request, db: AsyncSession = Depends(get_db)):
+    """Set or update the active research session with query and seed paper."""
+    sid = req.session_id or (request.session.get("session_id") if hasattr(request, "session") else None) or f"sess-{uuid.uuid4().hex[:8]}"
+    existing = await db.get(SessionModel, sid)
+    
+    current_state = dict(existing.state_json or {}) if existing else {}
+    if req.state_json:
+        current_state.update(req.state_json)
+    if req.seed_paper:
+        current_state["seed_paper"] = req.seed_paper
+        
+    query_text = req.query.strip() if req.query else (existing.query if existing else "Research Exploration")
+    
+    if not existing:
+        existing = SessionModel(
+            id=sid,
+            query=query_text,
+            status="active",
+            state_json=current_state,
+        )
+        db.add(existing)
+    else:
+        if req.query:
+            existing.query = req.query.strip()
+        existing.state_json = current_state
+        
+    await db.commit()
+    
+    if hasattr(request, "session"):
+        request.session["session_id"] = sid
+        request.session["active_query"] = existing.query
+        if current_state.get("seed_paper"):
+            request.session["seed_paper"] = current_state["seed_paper"]
+            
+    return SessionOut(
+        id=existing.id,
+        project_id=existing.project_id,
+        query=existing.query,
+        status=existing.status,
+        state_json=existing.state_json or {},
+        created_at=existing.created_at.isoformat() if existing.created_at else None,
+    )
+
+@router.get("/sessions/{session_id}", response_model=SessionOut)
+async def get_session_by_id(session_id: str, db: AsyncSession = Depends(get_db)):
+    """Fetch details of a specific research session."""
+    sess = await db.get(SessionModel, session_id)
+    if not sess:
+        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found.")
+    return SessionOut(
+        id=sess.id,
+        project_id=sess.project_id,
+        query=sess.query,
+        status=sess.status,
+        state_json=sess.state_json or {},
+        created_at=sess.created_at.isoformat() if sess.created_at else None,
+    )
 
 @router.get("/artifacts/{session_id}")
 async def list_session_artifacts(session_id: str, db: AsyncSession = Depends(get_db)):

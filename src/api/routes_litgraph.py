@@ -11,8 +11,12 @@ import time
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from src.core.database import get_db, get_db_session
+from src.core.models import SessionModel
 
 router = APIRouter(prefix="/api/v1/litgraph", tags=["LitGraph — Bibliometric Similarity"])
 
@@ -161,15 +165,29 @@ def parse_openalex_work(work: Dict[str, Any], is_seed: bool = False) -> Dict[str
 
 async def search_openalex(client: httpx.AsyncClient, query: str, limit: int = 8) -> List[SearchResult]:
     try:
-        resp = await client.get(
-            f"{OPENALEX_BASE}/works",
-            params={"search": query, "per-page": limit},
-            headers=HEADERS,
-            timeout=8.0,
-        )
-        if resp.status_code != 200:
-            return []
-        data = resp.json().get("results", [])
+        clean_q = re.sub(r"[^\w\s-]", " ", query).strip()
+        data = []
+        if clean_q:
+            # 1. Try high-precision title search filter
+            resp = await client.get(
+                f"{OPENALEX_BASE}/works",
+                params={"filter": f"title.search:{clean_q}", "per-page": max(limit, 10)},
+                headers=HEADERS,
+                timeout=8.0,
+            )
+            if resp.status_code == 200:
+                data = resp.json().get("results", [])
+
+        # 2. Fallback to general search if title filter returned nothing
+        if not data:
+            resp = await client.get(
+                f"{OPENALEX_BASE}/works",
+                params={"search": query, "per-page": max(limit, 10)},
+                headers=HEADERS,
+                timeout=8.0,
+            )
+            if resp.status_code == 200:
+                data = resp.json().get("results", [])
         results = []
         for p in data:
             pid = clean_id(p.get("id"))
@@ -191,7 +209,24 @@ async def search_openalex(client: httpx.AsyncClient, query: str, limit: int = 8)
                     abstract=abstract,
                 )
             )
-        return results
+
+        # Relevance ranking: prioritize titles containing the actual search query terms
+        query_words = set(re.findall(r"\b[a-zA-Z0-9]{3,}\b", query.lower()))
+        def relevance_score(item: SearchResult) -> float:
+            title_words = set(re.findall(r"\b[a-zA-Z0-9]{3,}\b", (item.title or "").lower()))
+            overlap = len(query_words & title_words)
+            # Boost matches where multiple query terms appear in the title
+            score = overlap * 15.0
+            if overlap == len(query_words) and len(query_words) > 0:
+                score += 25.0
+            # Small citation bonus
+            score += min((item.citationCount or 0) / 1000.0, 3.0)
+            return score
+
+        if query_words:
+            results.sort(key=relevance_score, reverse=True)
+
+        return results[:limit]
     except Exception:
         return []
 
@@ -204,11 +239,21 @@ async def fetch_openalex_work(client: httpx.AsyncClient, paper_id: str) -> Optio
         return cached
 
     try:
-        if clean_pid.startswith("10.") or "doi.org" in clean_pid:
+        if clean_pid.startswith("arxiv:"):
+            arxiv_num = clean_pid.replace("arxiv:", "").strip()
+            url = f"{OPENALEX_BASE}/works/https://doi.org/10.48550/arxiv.{arxiv_num}"
+        elif clean_pid.startswith("10.") or "doi.org" in clean_pid:
             url = f"{OPENALEX_BASE}/works/https://doi.org/{clean_pid}"
         elif clean_pid.upper().startswith("W"):
             url = f"{OPENALEX_BASE}/works/{clean_pid}"
         else:
+            # Topic or title string: search candidates with relevance ranking
+            candidates = await search_openalex(client, clean_pid, limit=6)
+            if candidates:
+                top_candidate = await fetch_openalex_work(client, candidates[0].paperId)
+                if top_candidate:
+                    _cache_set(cache_key, top_candidate)
+                    return top_candidate
             url = f"{OPENALEX_BASE}/works?search={clean_pid}&per-page=1"
 
         resp = await client.get(url, headers=HEADERS, timeout=8.0)
@@ -336,9 +381,26 @@ def build_similarity_graph(seed: Dict[str, Any], candidates: List[Dict[str, Any]
     return nodes, links
 
 
+async def resolve_target_paper_id(paper_id: str) -> str:
+    pid = paper_id.strip()
+    if pid.startswith("sess-"):
+        try:
+            async with get_db_session() as db:
+                sess = await db.get(SessionModel, pid)
+                if sess and sess.state_json and sess.state_json.get("seed_paper"):
+                    sp = sess.state_json["seed_paper"]
+                    return sp.get("doi") or sp.get("arxiv_id") or sp.get("title") or (sess.query or pid)
+                if sess and sess.query:
+                    return sess.query
+        except Exception:
+            pass
+    return pid
+
+
 # ── Core Graph Engine ────────────────────────────────────────────────────────
 async def build_litgraph_pipeline(paper_id: str) -> LitGraphResponse:
-    clean_pid = clean_id(paper_id)
+    resolved_id = await resolve_target_paper_id(paper_id)
+    clean_pid = clean_id(resolved_id)
     cache_key = f"litgraph:v3:{clean_pid}"
     cached = _cache_get(cache_key)
     if cached is not None:
@@ -442,6 +504,40 @@ async def search_papers(q: str = Query(..., min_length=2, description="Paper tit
 
     _cache_set(cache_key, results)
     return results
+
+
+@router.get("/query", response_model=LitGraphResponse)
+async def get_litgraph_by_query(
+    q: str = Query(..., min_length=2, description="Research query or topic"),
+    session_id: Optional[str] = Query(None, description="Optional active session ID to resolve top paper"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Build a bibliometric similarity graph based on a search bar query or active research session.
+    Automatically prioritizes the seed paper from the session if available.
+    """
+    target = q.strip()
+    if session_id:
+        sess = await db.get(SessionModel, session_id.strip())
+        if sess and sess.state_json and sess.state_json.get("seed_paper"):
+            sp = sess.state_json["seed_paper"]
+            target = sp.get("doi") or sp.get("arxiv_id") or sp.get("title") or target
+    return await build_litgraph_pipeline(target)
+
+
+@router.get("/session/{session_id}", response_model=LitGraphResponse)
+async def get_litgraph_by_session(session_id: str, db: AsyncSession = Depends(get_db)):
+    """Build a bibliometric similarity graph directly from an active research session."""
+    sess = await db.get(SessionModel, session_id.strip())
+    if not sess:
+        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found.")
+    
+    target = sess.query
+    if sess.state_json and sess.state_json.get("seed_paper"):
+        sp = sess.state_json["seed_paper"]
+        target = sp.get("doi") or sp.get("arxiv_id") or sp.get("title") or target
+        
+    return await build_litgraph_pipeline(target)
 
 
 @router.get("/graph/{paper_id:path}", response_model=LitGraphResponse)

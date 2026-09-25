@@ -4,7 +4,7 @@ import time
 import uuid
 from typing import Dict, List, Optional
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -280,7 +280,7 @@ async def search_huggingface_endpoint(q: str = Query(..., min_length=1), limit: 
 
 
 @router.post("/search/unified", response_model=UnifiedSearchResponse)
-async def search_unified_endpoint(req: UnifiedSearchRequest, db: AsyncSession = Depends(get_db)):
+async def search_unified_endpoint(req: UnifiedSearchRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """Parallel multi-source unified search with automated deduplication and detailed session tracking."""
     start_time = time.time()
     logger.info("==================================================")
@@ -397,6 +397,48 @@ async def search_unified_endpoint(req: UnifiedSearchRequest, db: AsyncSession = 
     except Exception as graph_err:
         logger.warning("Could not initialize topic head node in graph store: %s", graph_err)
 
+    # Prepare structured session state with seed paper for downstream tools (LitGraph, Graph, Workbench)
+    top_papers_meta = []
+    for p in unique_papers[:15]:
+        authors_formatted = []
+        for a in (p.authors or [])[:4]:
+            if hasattr(a, "name"):
+                authors_formatted.append(a.name)
+            elif isinstance(a, dict) and "name" in a:
+                authors_formatted.append(a["name"])
+            else:
+                authors_formatted.append(str(a))
+        top_papers_meta.append({
+            "id": p.id or p.canonical_id,
+            "title": p.title,
+            "year": p.year,
+            "doi": p.doi,
+            "arxiv_id": p.arxiv_id,
+            "authors": authors_formatted,
+            "primary_source": p.primary_source,
+            "citation_count": p.citation_count or 0,
+            "abstract": (p.abstract or "")[:350],
+        })
+
+    session_payload = {
+        "query": req.query.strip(),
+        "total_papers": len(unique_papers),
+        "sources": sources,
+        "duration_ms": duration_ms,
+        "top_papers": top_papers_meta,
+        "seed_paper": top_papers_meta[0] if top_papers_meta else None,
+    }
+
+    # Also persist to Starlette/FastAPI session cookie if available
+    try:
+        if request and hasattr(request, "session"):
+            request.session["active_query"] = req.query.strip()
+            request.session["session_id"] = session_id
+            if top_papers_meta:
+                request.session["seed_paper"] = top_papers_meta[0]
+    except Exception as sess_err:
+        logger.debug("Could not write to request.session: %s", sess_err)
+
     # Persist or update session in SQLite (deduplicating by session_id or query)
     try:
         existing_sess = await db.get(SessionModel, session_id)
@@ -412,13 +454,13 @@ async def search_unified_endpoint(req: UnifiedSearchRequest, db: AsyncSession = 
                 id=session_id,
                 query=req.query.strip(),
                 status="completed",
-                state_json={"total_papers": len(unique_papers), "sources": sources, "duration_ms": duration_ms}
+                state_json=session_payload,
             )
             db.add(new_session)
         else:
             existing_sess.query = req.query.strip()
             existing_sess.status = "completed"
-            existing_sess.state_json = {"total_papers": len(unique_papers), "sources": sources, "duration_ms": duration_ms}
+            existing_sess.state_json = session_payload
         await db.commit()
     except Exception as db_err:
         logger.warning("Could not persist session record: %s", db_err)

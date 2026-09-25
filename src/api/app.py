@@ -2,6 +2,7 @@ import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.sessions import SessionMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -43,6 +44,16 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+    )
+
+    # FastAPI / Starlette Session Middleware for server-side & cookie session tracking
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=os.environ.get("SESSION_SECRET_KEY", "research-copilot-secure-session-key-2026-prod"),
+        session_cookie="rc_session",
+        max_age=86400 * 14,
+        same_site="lax",
+        https_only=False,
     )
 
     # Health Check Endpoint

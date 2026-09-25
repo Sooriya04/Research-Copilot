@@ -116,7 +116,7 @@ export default function KnowledgeGraphView() {
 
   const fetchGraphData = async () => {
     setLoading(true);
-    const activeTopic = (activeWorkspace?.title || searchQuery || '').trim();
+    const activeTopic = (searchQuery || activeWorkspace?.title || '').trim();
     const wsId = (activeWorkspace?.id || '').trim();
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 6000);
@@ -383,7 +383,7 @@ export default function KnowledgeGraphView() {
     let nodesPool = [];
     let edgesPool = [];
 
-    const activeTopicStr = (activeWorkspace?.title || searchQuery || '').trim();
+    const activeTopicStr = (searchQuery || activeWorkspace?.title || '').trim();
     const topicId = activeTopicStr
       ? `topic-${activeTopicStr.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-')}`
       : (rawNodes.find(n => (n.node_type || '').toLowerCase() === 'topic')?.id || 'topic-main');
