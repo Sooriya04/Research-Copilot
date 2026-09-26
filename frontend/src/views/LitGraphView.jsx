@@ -5,7 +5,6 @@ import React, {
   useCallback,
   useMemo,
 } from 'react';
-import { useSearchParams } from 'react-router-dom';
 import ForceGraph2D from 'react-force-graph-2d';
 import * as d3 from 'd3';
 import {
@@ -49,19 +48,13 @@ function citationRadius(count) {
 }
 
 // ── Search Autocomplete ───────────────────────────────────────────────────────
-function SearchBar({ onSelectPaper, initialQuery = '' }) {
-  const [query, setQuery] = useState(initialQuery);
+function SearchBar({ onSelectPaper }) {
+  const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const debounceRef = useRef(null);
   const inputRef = useRef(null);
-
-  useEffect(() => {
-    if (initialQuery && initialQuery !== query) {
-      setQuery(initialQuery);
-    }
-  }, [initialQuery]);
 
   const doSearch = useCallback(async (q) => {
     if (q.length < 2) { setResults([]); return; }
@@ -106,14 +99,11 @@ function SearchBar({ onSelectPaper, initialQuery = '' }) {
             if (data && data.length > 0) {
               handleSelect(data[0]);
             } else {
-              handleSelect({ paperId: query.trim(), title: query.trim() });
+              setResults([]);
+              setOpen(true);
             }
-          } else {
-            handleSelect({ paperId: query.trim(), title: query.trim() });
           }
-        } catch {
-          handleSelect({ paperId: query.trim(), title: query.trim() });
-        }
+        } catch {}
         setLoading(false);
       }
     } else if (e.key === 'Escape') {
@@ -361,25 +351,17 @@ function YearLegend({ minYear, maxYear }) {
 // ── Main LitGraph View ────────────────────────────────────────────────────────
 export default function LitGraphView() {
   const fgRef = useRef(null);
-  const lastLoadedRef = useRef(null);
-  const [searchParams] = useSearchParams();
   const {
     activeWorkspace,
     searchResults,
-    searchQuery,
     sessionId,
-    setSearchQuery,
     litGraphData,
     setLitGraphData,
     litGraphTarget,
     setLitGraphTarget,
   } = useApp();
 
-  const urlQuery = (searchParams.get('q') || searchParams.get('query') || '').trim();
-  const urlPaperId = (searchParams.get('paperId') || searchParams.get('id') || '').trim();
-  const activeQuery = urlQuery || searchQuery || activeWorkspace?.title || '';
-
-  const graphData = litGraphData;
+  const [graphData, setGraphData] = useState(() => litGraphData || null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [selectedNode, setSelectedNode] = useState(null);
@@ -388,7 +370,7 @@ export default function LitGraphView() {
   const [hoverNode, setHoverNode] = useState(null);
   const [panelOpen, setPanelOpen] = useState(true);
 
-  // Filters & bounds
+  // Filters
   const [minYearFilter, setMinYearFilter] = useState(() => {
     if (litGraphData?.nodes?.length) {
       const years = litGraphData.nodes.map((n) => n.year).filter(Boolean);
@@ -397,7 +379,9 @@ export default function LitGraphView() {
     return 1990;
   });
   const [maxNodes, setMaxNodes] = useState(45);
-  const [seedTitle, setSeedTitle] = useState(() => litGraphData?.seed_title || '');
+  const [seedTitle, setSeedTitle] = useState(() => litGraphData?.seed_title || litGraphTarget || '');
+
+  // Derived year bounds
   const [yearBounds, setYearBounds] = useState(() => {
     if (litGraphData?.nodes?.length) {
       const years = litGraphData.nodes.map((n) => n.year).filter(Boolean);
@@ -408,37 +392,32 @@ export default function LitGraphView() {
     return [1990, new Date().getFullYear()];
   });
 
-  const litGraphDataRef = useRef(litGraphData);
-  const litGraphTargetRef = useRef(litGraphTarget);
+  // Hydrate when litGraphData updates in the background from parallel search
   useEffect(() => {
-    litGraphDataRef.current = litGraphData;
-    litGraphTargetRef.current = litGraphTarget;
-  }, [litGraphData, litGraphTarget]);
-
-  const loadGraph = useCallback(async (paperId, paperTitle = '', force = false) => {
-    if (!paperId || !paperId.trim()) return;
-    const cleanId = paperId.trim();
-
-    // Check if we already have this target loaded and don't need to rebuild
-    if (!force && litGraphDataRef.current && litGraphTargetRef.current === cleanId) {
-      if (paperTitle || litGraphDataRef.current.seed_title) {
-        setSeedTitle(paperTitle || litGraphDataRef.current.seed_title);
-      }
-      return;
+    if (litGraphData && litGraphData !== graphData) {
+      setGraphData(litGraphData);
+      if (litGraphData.seed_title) setSeedTitle(litGraphData.seed_title);
+      const years = litGraphData.nodes?.map((n) => n.year).filter(Boolean) || [];
+      const mn = years.length ? Math.min(...years) : 1990;
+      const mx = years.length ? Math.max(...years) : new Date().getFullYear();
+      setYearBounds([mn, mx]);
+      setMinYearFilter(mn);
     }
+  }, [litGraphData]);
 
+  const loadGraph = useCallback(async (paperId, paperTitle = '') => {
     setLoading(true);
     setError(null);
     setSelectedNode(null);
     setHighlightNodes(new Set());
     setHighlightLinks(new Set());
-    setSeedTitle(paperTitle || cleanId);
+    setSeedTitle(paperTitle);
 
     try {
-      const isIdOrDoi = cleanId.startsWith('10.') || cleanId.toUpperCase().startsWith('W') || cleanId.startsWith('arxiv:') || cleanId.startsWith('doi:') || cleanId.startsWith('sess-');
+      const isIdOrDoi = paperId.startsWith('10.') || paperId.toUpperCase().startsWith('W') || paperId.startsWith('arxiv:') || paperId.startsWith('doi:') || paperId.startsWith('sess-');
       const url = isIdOrDoi
-        ? `/api/v1/litgraph/graph/${encodeURIComponent(cleanId)}`
-        : `/api/v1/litgraph/query?q=${encodeURIComponent(cleanId)}&session_id=${encodeURIComponent(sessionId || '')}`;
+        ? `/api/v1/litgraph/graph/${encodeURIComponent(paperId)}`
+        : `/api/v1/litgraph/query?q=${encodeURIComponent(paperId)}&session_id=${encodeURIComponent(sessionId || '')}`;
 
       const res = await fetch(url);
       if (!res.ok) {
@@ -464,77 +443,14 @@ export default function LitGraphView() {
         radius: citationRadius(n.citationCount),
       }));
 
-      setLitGraphTarget(cleanId);
-      setLitGraphData(data);
+      setGraphData(data);
+      if (setLitGraphData) setLitGraphData(data);
+      if (setLitGraphTarget) setLitGraphTarget(paperId);
     } catch (e) {
       setError(e.message);
     }
     setLoading(false);
   }, [sessionId, setLitGraphData, setLitGraphTarget]);
-
-  const handleSelectPaper = useCallback((paper) => {
-    const pid = paper.paperId || paper.id || paper.doi || paper.title;
-    const title = paper.title || pid;
-    lastLoadedRef.current = pid;
-    loadGraph(pid, title, true);
-    if (setSearchQuery && paper.title) {
-      setSearchQuery(paper.title);
-    }
-    // Update active research session in SQLite
-    fetch('/api/v1/workbench/sessions/active', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        session_id: sessionId,
-        query: title,
-        seed_paper: {
-          id: pid,
-          title: title,
-          year: paper.year,
-        }
-      })
-    }).catch(() => {});
-  }, [loadGraph, sessionId, setSearchQuery]);
-
-  // Auto-load graph on mount or when query/session changes
-  useEffect(() => {
-    if (loading) return;
-
-    let targetToLoad = null;
-    let displayTitle = '';
-
-    if (urlPaperId) {
-      targetToLoad = urlPaperId;
-      displayTitle = urlPaperId;
-    } else if (urlQuery) {
-      targetToLoad = urlQuery;
-      displayTitle = urlQuery;
-    } else if (searchResults && searchResults.length > 0) {
-      const topPaper = searchResults[0];
-      targetToLoad = topPaper.openalex_id || topPaper.doi || topPaper.arxiv_id || topPaper.id || topPaper.title;
-      displayTitle = topPaper.title;
-    } else if (searchQuery && searchQuery.trim().length >= 2) {
-      targetToLoad = searchQuery.trim();
-      displayTitle = searchQuery.trim();
-    } else if (activeWorkspace?.title) {
-      targetToLoad = activeWorkspace.title.trim();
-      displayTitle = activeWorkspace.title.trim();
-    }
-
-    // If we already have litGraphData in cache and target matches or no explicit target specified, don't re-fetch
-    if (litGraphData && (!targetToLoad || litGraphTarget === targetToLoad)) {
-      if (!seedTitle && litGraphData.seed_title) {
-        setSeedTitle(litGraphData.seed_title);
-      }
-      lastLoadedRef.current = litGraphTarget;
-      return;
-    }
-
-    if (targetToLoad && lastLoadedRef.current !== targetToLoad) {
-      lastLoadedRef.current = targetToLoad;
-      loadGraph(targetToLoad, displayTitle, false);
-    }
-  }, [urlPaperId, urlQuery, searchQuery, searchResults, activeWorkspace?.title, loading, loadGraph, litGraphData, litGraphTarget, seedTitle]);
 
   // Filtered graph (year + node count)
   const filteredGraph = useMemo(() => {
@@ -560,8 +476,16 @@ export default function LitGraphView() {
       (l) => nodeIds.has(l.source?.id || l.source) && nodeIds.has(l.target?.id || l.target)
     );
 
+    // Keep seed and only nodes that have at least 1 edge (prevent isolated dots in void space)
+    const connectedIds = new Set();
+    links.forEach((l) => {
+      connectedIds.add(l.source?.id || l.source);
+      connectedIds.add(l.target?.id || l.target);
+    });
+    const connectedNodes = nodes.filter((n) => n.isSeed || connectedIds.has(n.id));
+
     // Color nodes
-    const coloredNodes = nodes.map((n) => ({
+    const coloredNodes = connectedNodes.map((n) => ({
       ...n,
       color: yearToColor(n.year, minY, maxY, n.isSeed),
     }));
@@ -613,14 +537,14 @@ export default function LitGraphView() {
 
       // Glow for seed or selected/hovered node
       if (node.isSeed) {
-        ctx.shadowColor = 'rgba(245, 158, 11, 0.6)'; // Amber glow
+        ctx.shadowColor = 'rgba(245, 158, 11, 0.7)'; // Amber glow
         ctx.shadowBlur = 18;
       } else if (isSelected || isHovered) {
-        ctx.shadowColor = 'rgba(99, 102, 241, 0.5)'; // Indigo glow
+        ctx.shadowColor = 'rgba(99, 102, 241, 0.6)'; // Indigo glow
         ctx.shadowBlur = 14;
       } else {
-        ctx.shadowColor = 'rgba(0, 0, 0, 0.1)';
-        ctx.shadowBlur = 6;
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.12)';
+        ctx.shadowBlur = 4;
       }
 
       // Circle fill
@@ -637,19 +561,19 @@ export default function LitGraphView() {
         ? '#1e293b' // Slate 800
         : isHovered
         ? '#4f46e5' // Indigo 600
-        : 'rgba(0, 0, 0, 0.15)';
+        : 'rgba(0, 0, 0, 0.2)';
       ctx.stroke();
 
       ctx.shadowBlur = 0;
 
       // Draw title labels
-      const showLabel = node.isSeed || isSelected || isHovered || globalScale >= 1.6 || r >= 13;
+      const showLabel = node.isSeed || isSelected || isHovered || globalScale >= 1.2 || r >= 11;
       if (showLabel) {
         const rawTitle = node.title || node.id;
-        const maxLen = globalScale > 2.5 ? 40 : 26;
+        const maxLen = globalScale > 2.0 ? 45 : 28;
         const label = rawTitle.length > maxLen ? rawTitle.slice(0, maxLen - 1) + '…' : rawTitle;
 
-        const fontSize = Math.max(3, Math.min(4.5, 12 / globalScale));
+        const fontSize = Math.max(3.2, Math.min(5, 12 / globalScale));
         ctx.font = `600 ${fontSize}px Plus Jakarta Sans, sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
@@ -658,20 +582,24 @@ export default function LitGraphView() {
 
         // Subtle pill background for label readability (Light theme)
         const textWidth = ctx.measureText(label).width;
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
         ctx.beginPath();
-        const padding = 2 / globalScale;
+        const padding = 2.5 / globalScale;
         ctx.roundRect(
           node.x - textWidth / 2 - padding,
           labelY - padding / 2,
           textWidth + padding * 2,
           fontSize + padding * 1.5,
-          2 / globalScale
+          3 / globalScale
         );
         ctx.fill();
 
+        ctx.strokeStyle = 'rgba(203, 213, 225, 0.7)';
+        ctx.lineWidth = 0.5 / globalScale;
+        ctx.stroke();
+
         // Text fill (Dark text)
-        ctx.fillStyle = node.isSeed ? '#b45309' : '#334155'; // Dark amber / Slate 700
+        ctx.fillStyle = node.isSeed ? '#b45309' : (isSelected || isHovered ? '#0f172a' : '#334155');
         ctx.fillText(label, node.x, labelY);
       }
 
@@ -688,12 +616,14 @@ export default function LitGraphView() {
       if (!src || !tgt || typeof src.x !== 'number' || typeof tgt.x !== 'number') return;
 
       const isHighlighted = highlightLinks.size === 0 || highlightLinks.has(link);
+      const isFocused = highlightLinks.has(link);
+
       ctx.save();
-      ctx.globalAlpha = isHighlighted ? Math.min(0.85, Math.max(0.35, link.weight || 0.4)) : 0.05;
+      ctx.globalAlpha = isHighlighted ? (isFocused ? 0.95 : Math.max(0.35, (link.weight || 0.3) * 0.9)) : 0.05;
       
-      // Darker lines for light theme background
-      ctx.strokeStyle = isHighlighted ? (link.weight > 0.3 ? '#6366f1' : '#cbd5e1') : '#e2e8f0';
-      ctx.lineWidth = isHighlighted ? Math.max(1.2, (link.weight || 0.3) * 3) : 0.6;
+      // High contrast edges
+      ctx.strokeStyle = isFocused ? '#4f46e5' : (link.weight > 0.3 ? '#6366f1' : '#94a3b8');
+      ctx.lineWidth = isFocused ? 2.5 : Math.max(1.2, (link.weight || 0.25) * 2.8);
       ctx.beginPath();
       ctx.moveTo(src.x, src.y);
       ctx.lineTo(tgt.x, tgt.y);
@@ -706,12 +636,8 @@ export default function LitGraphView() {
   // Configure custom D3 physics forces on data update
   useEffect(() => {
     if (fgRef.current && filteredGraph) {
-      fgRef.current.d3Force('charge', d3.forceManyBody().strength(-240));
-      fgRef.current.d3Force(
-        'link',
-        d3.forceLink().id((d) => d.id).distance((d) => (1 - (d.weight || 0.2)) * 80 + 35).strength((d) => (d.weight || 0.3) * 0.75)
-      );
-      fgRef.current.d3Force('collide', d3.forceCollide().radius((d) => (d.radius || 8) + 8));
+      fgRef.current.d3Force('charge', d3.forceManyBody().strength(-140));
+      fgRef.current.d3Force('collide', d3.forceCollide().radius((d) => (d.radius || 8) + 6));
       fgRef.current.d3ReheatSimulation();
     }
   }, [filteredGraph]);
@@ -719,10 +645,9 @@ export default function LitGraphView() {
   if (!filteredGraph && !loading && !error) {
     return (
       <LandingState
-        onSelectPaper={handleSelectPaper}
+        onSelectPaper={(p) => loadGraph(p.paperId, p.title)}
         activeWorkspace={activeWorkspace}
         searchResults={searchResults}
-        activeQuery={activeQuery}
       />
     );
   }
@@ -756,7 +681,7 @@ export default function LitGraphView() {
         </div>
 
         <div style={{ flex: 1, minWidth: 280, maxWidth: 520 }}>
-          <SearchBar onSelectPaper={handleSelectPaper} initialQuery={activeQuery} />
+          <SearchBar onSelectPaper={(p) => loadGraph(p.paperId, p.title)} />
         </div>
 
         {graphData && (
@@ -765,30 +690,6 @@ export default function LitGraphView() {
               {filteredGraph?.nodes.length} nodes · {filteredGraph?.links.length} edges
             </span>
             <YearLegend minYear={yearBounds[0]} maxYear={yearBounds[1]} />
-            <button
-              onClick={() => loadGraph(litGraphTarget || activeQuery, seedTitle, true)}
-              disabled={loading}
-              title="Force rebuild literature graph"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 5,
-                padding: '4px 9px',
-                borderRadius: 'var(--radius-sm)',
-                border: '1px solid var(--border-subtle)',
-                background: 'var(--bg-subtle)',
-                color: 'var(--text-secondary)',
-                fontSize: 12,
-                cursor: loading ? 'not-allowed' : 'pointer',
-                opacity: loading ? 0.6 : 1,
-                fontWeight: 500,
-              }}
-              onMouseEnter={(e) => { if (!loading) e.currentTarget.style.background = 'var(--bg-card)'; }}
-              onMouseLeave={(e) => { if (!loading) e.currentTarget.style.background = 'var(--bg-subtle)'; }}
-            >
-              <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
-              <span>Rebuild</span>
-            </button>
           </div>
         )}
 
@@ -821,12 +722,14 @@ export default function LitGraphView() {
               backgroundColor="#f8fafc"
               nodeCanvasObject={paintNode}
               nodeCanvasObjectMode={() => 'replace'}
-              linkCanvasObjectMode={() => 'before'}
+              linkCanvasObjectMode={() => 'replace'}
               linkCanvasObject={paintLink}
-              d3AlphaDecay={0.02}
-              d3VelocityDecay={0.3}
-              warmupTicks={60}
-              cooldownTicks={100}
+              linkDistance={(l) => (1 - (l.weight || 0.2)) * 90 + 35}
+              linkWidth={(l) => (highlightLinks.size > 0 && !highlightLinks.has(l) ? 0.5 : Math.max(1.2, (l.weight || 0.25) * 2.8))}
+              d3AlphaDecay={0.025}
+              d3VelocityDecay={0.35}
+              warmupTicks={80}
+              cooldownTicks={120}
               onNodeClick={handleNodeClick}
               onBackgroundClick={handleBackgroundClick}
               onNodeHover={setHoverNode}
@@ -863,50 +766,6 @@ export default function LitGraphView() {
             <button className="btn btn-secondary btn-sm" onClick={() => fgRef.current?.zoomToFit(500)} title="Fit View">
               <Maximize2 size={14} />
             </button>
-          </div>
-
-          {/* Filter controls */}
-          <div
-            style={{
-              position: 'absolute',
-              bottom: 16,
-              left: '50%',
-              transform: 'translateX(-50%)',
-              background: 'var(--bg-card)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: 'var(--radius-md)',
-              padding: '10px 16px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 20,
-              boxShadow: '0 2px 12px rgba(0,0,0,0.1)',
-              fontSize: 12,
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Calendar size={12} style={{ color: 'var(--text-muted)' }} />
-              <span style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>From {minYearFilter}</span>
-              <input
-                type="range"
-                min={yearBounds[0]}
-                max={yearBounds[1]}
-                value={minYearFilter}
-                onChange={(e) => setMinYearFilter(Number(e.target.value))}
-                style={{ width: 100, accentColor: 'var(--accent-primary)' }}
-              />
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <SlidersHorizontal size={12} style={{ color: 'var(--text-muted)' }} />
-              <span style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Max {maxNodes} nodes</span>
-              <input
-                type="range"
-                min={10}
-                max={45}
-                value={maxNodes}
-                onChange={(e) => setMaxNodes(Number(e.target.value))}
-                style={{ width: 80, accentColor: 'var(--accent-primary)' }}
-              />
-            </div>
           </div>
         </div>
 
@@ -953,7 +812,7 @@ export default function LitGraphView() {
             <div style={{ flex: 1, overflow: 'hidden' }}>
               <DetailsPanel
                 node={selectedNode}
-                onMakeSeed={(node) => loadGraph(node.id, node.title, true)}
+                onMakeSeed={(node) => loadGraph(node.id, node.title)}
                 onClose={() => { setSelectedNode(null); setHighlightNodes(new Set()); setHighlightLinks(new Set()); }}
               />
             </div>
@@ -965,7 +824,7 @@ export default function LitGraphView() {
 }
 
 // ── Landing page when no graph loaded ────────────────────────────────────────
-function LandingState({ onSelectPaper, activeWorkspace, searchResults, activeQuery = '' }) {
+function LandingState({ onSelectPaper, activeWorkspace, searchResults }) {
   const EXAMPLES = [
     { paperId: 'W4407759090', title: 'A-Mem: Agentic Memory for LLM Agents' },
     { paperId: 'W4393065402', title: 'A survey on large language model based autonomous agents' },
@@ -987,29 +846,16 @@ function LandingState({ onSelectPaper, activeWorkspace, searchResults, activeQue
       </div>
 
       <div style={{ width: '100%', maxWidth: 520 }}>
-        <SearchBar onSelectPaper={onSelectPaper} initialQuery={activeQuery} />
+        <SearchBar onSelectPaper={onSelectPaper} />
       </div>
 
-      {activeQuery && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%', maxWidth: 520 }}>
-          <button
-            className="btn btn-primary btn-sm"
-            onClick={() => onSelectPaper({ paperId: activeQuery, title: activeQuery })}
-            style={{ width: '100%', padding: '9px 14px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, fontSize: 12.5, fontWeight: 600 }}
-          >
-            <Network size={14} />
-            <span>Map Bibliometric Cluster for "{activeQuery}"</span>
-          </button>
-        </div>
-      )}
-
-      {searchResults && searchResults.length > 0 && (
+      {activeWorkspace && searchResults && searchResults.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%', maxWidth: 520 }}>
           <p style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: 0, textAlign: 'center' }}>
-            {activeWorkspace ? `Papers from workspace (${activeWorkspace.title}):` : 'Papers from active research session:'}
+            Papers from your active workspace (<strong>{activeWorkspace.title}</strong>):
           </p>
-          {searchResults.slice(0, 4).map((p, idx) => {
-            const pid = p.openalex_id || p.doi || p.arxiv_id || p.id || p.canonical_id || `paper-${idx}`;
+          {searchResults.slice(0, 3).map((p, idx) => {
+            const pid = p.openalex_id || p.id || p.canonical_id || p.arxiv_id || `paper-${idx}`;
             return (
               <button
                 key={pid}

@@ -626,7 +626,14 @@ function BenchmarksTab({ paper }) {
 
 
 // ─── Main Anara Reader ────────────────────────────────────────────────────────
-export default function AnaraPaperReader({ paper, pdfUrl, markdownContent, onBack, backLabel = 'Back' }) {
+export default function AnaraPaperReader({
+  paper,
+  pdfUrl,
+  markdownContent,
+  loadingPdf = false,
+  onBack,
+  backLabel = 'Back',
+}) {
   const [sidebarTab, setSidebarTab] = useState('ask'); // 'ask' | 'annotations' | 'details'
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [viewMode, setViewMode] = useState('pdf'); // 'pdf' | 'markdown'
@@ -635,6 +642,7 @@ export default function AnaraPaperReader({ paper, pdfUrl, markdownContent, onBac
   const [askPrompt, setAskPrompt] = useState('');
   const [commentTarget, setCommentTarget] = useState(null);
   const [commentText, setCommentText] = useState('');
+  const [iframeLoading, setIframeLoading] = useState(true);
   const pdfContainerRef = useRef(null);
 
   // ── Floating toolbar on text selection (markdown view) ──
@@ -691,11 +699,20 @@ export default function AnaraPaperReader({ paper, pdfUrl, markdownContent, onBac
   const hasPdf = !!pdfUrl;
   const hasMarkdown = !!markdownContent;
 
+  useEffect(() => {
+    if (pdfUrl) {
+      setIframeLoading(true);
+    }
+  }, [pdfUrl]);
+
   // Auto-select best default view
   useEffect(() => {
-    if (!hasPdf && hasMarkdown) setViewMode('markdown');
-    else setViewMode('pdf');
-  }, [hasPdf, hasMarkdown]);
+    if (!hasPdf && !loadingPdf && hasMarkdown) {
+      setViewMode('markdown');
+    } else {
+      setViewMode('pdf');
+    }
+  }, [hasPdf, hasMarkdown, loadingPdf]);
 
   const SIDEBAR_WIDTH = 320;
 
@@ -808,11 +825,62 @@ export default function AnaraPaperReader({ paper, pdfUrl, markdownContent, onBac
           }}
         >
           {viewMode === 'pdf' && hasPdf ? (
-            <iframe
-              src={pdfUrl}
-              title="Research Paper PDF"
-              style={{ width: '100%', height: '100%', border: 'none', display: 'block' }}
-            />
+            <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+              {iframeLoading && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    inset: 0,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    background: '#525659',
+                    color: '#f8fafc',
+                    gap: 12,
+                    zIndex: 10,
+                  }}
+                >
+                  <Loader2 size={34} className="animate-spin" style={{ color: 'var(--accent-primary)' }} />
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: 14, fontWeight: 600 }}>Loading PDF Document…</div>
+                    <div style={{ fontSize: 12, color: 'rgba(255, 255, 255, 0.7)', marginTop: 4 }}>
+                      Rendering PDF pages and viewer
+                    </div>
+                  </div>
+                </div>
+              )}
+              <iframe
+                src={pdfUrl}
+                title="Research Paper PDF"
+                onLoad={() => setIframeLoading(false)}
+                style={{ width: '100%', height: '100%', border: 'none', display: 'block' }}
+              />
+            </div>
+          ) : viewMode === 'pdf' && loadingPdf ? (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                height: '100%',
+                color: 'var(--text-muted)',
+                gap: 14,
+                textAlign: 'center',
+                padding: 24,
+              }}
+            >
+              <Loader2 size={36} className="animate-spin" style={{ color: 'var(--accent-primary)' }} />
+              <div>
+                <h4 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', margin: '0 0 6px 0' }}>
+                  Loading PDF…
+                </h4>
+                <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: 0, maxWidth: 360 }}>
+                  Resolving open-access preprint document and preparing viewer...
+                </p>
+              </div>
+            </div>
           ) : viewMode === 'markdown' && hasMarkdown ? (
             <div
               style={{
@@ -841,14 +909,28 @@ export default function AnaraPaperReader({ paper, pdfUrl, markdownContent, onBac
               }}
             >
               <FileText size={40} style={{ opacity: 0.3 }} />
-              <p style={{ fontSize: 14, margin: 0 }}>
-                {viewMode === 'pdf' ? 'No PDF available for this paper.' : 'No markdown content available.'}
+              <p style={{ fontSize: 14, margin: 0, fontWeight: 500, color: 'var(--text-secondary)' }}>
+                {viewMode === 'pdf' ? 'PDF not available for this paper.' : 'No markdown content available.'}
               </p>
-              {viewMode === 'pdf' && hasMarkdown && (
-                <button className="btn btn-secondary btn-sm" onClick={() => setViewMode('markdown')}>
-                  Switch to Markdown
-                </button>
-              )}
+              <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+                {viewMode === 'pdf' && hasMarkdown && (
+                  <button className="btn btn-secondary btn-sm" onClick={() => setViewMode('markdown')}>
+                    Switch to Markdown View
+                  </button>
+                )}
+                {paper?.url && (
+                  <a
+                    href={paper.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="btn btn-secondary btn-sm"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6, textDecoration: 'none' }}
+                  >
+                    <ExternalLink size={13} />
+                    <span>Open Publisher Link</span>
+                  </a>
+                )}
+              </div>
             </div>
           )}
         </div>

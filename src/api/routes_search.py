@@ -429,6 +429,18 @@ async def search_unified_endpoint(req: UnifiedSearchRequest, request: Request, d
         "seed_paper": top_papers_meta[0] if top_papers_meta else None,
     }
 
+    # Asynchronously pre-warm LitGraph pipeline in background for this query / seed paper
+    try:
+        from src.api.routes_litgraph import build_litgraph_pipeline
+        target_lit = req.query.strip()
+        if unique_papers:
+            top_p = unique_papers[0]
+            target_lit = top_p.doi or top_p.arxiv_id or top_p.openalex_id or top_p.title or target_lit
+        asyncio.create_task(build_litgraph_pipeline(target_lit))
+        logger.info("[UNIFIED SEARCH] Dispatched background LitGraph pre-warm for: %s", target_lit)
+    except Exception as bg_lit_err:
+        logger.debug("Background LitGraph pre-warm skipped: %s", bg_lit_err)
+
     # Also persist to Starlette/FastAPI session cookie if available
     try:
         if request and hasattr(request, "session"):

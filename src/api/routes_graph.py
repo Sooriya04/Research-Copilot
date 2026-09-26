@@ -308,13 +308,18 @@ async def get_graph_elements(
     if scoped or topic or workspace_id:
         allowed_node_ids = set(anchor_ids)
         for a_id in anchor_ids:
-            for p_id in graph_store.graph.successors(a_id):
-                allowed_node_ids.add(p_id)
-                for child_id in graph_store.graph.successors(p_id):
-                    allowed_node_ids.add(child_id)
-                for parent_id in graph_store.graph.predecessors(p_id):
-                    if parent_id in anchor_ids:
-                        allowed_node_ids.add(parent_id)
+            if a_id in graph_store.graph:
+                for p_id in graph_store.graph.successors(a_id):
+                    allowed_node_ids.add(p_id)
+        # Include all bidirectional neighbors (citations, methods) of scoped papers
+        paper_neighbors = set()
+        for p_id in list(allowed_node_ids):
+            if p_id in graph_store.graph:
+                for succ in graph_store.graph.successors(p_id):
+                    paper_neighbors.add(succ)
+                for pred in graph_store.graph.predecessors(p_id):
+                    paper_neighbors.add(pred)
+        allowed_node_ids.update(paper_neighbors)
 
     # Identify paper nodes within allowed scope
     paper_ids = set()

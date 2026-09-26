@@ -36,6 +36,37 @@ export default function LibraryReaderView() {
   });
 
   const [converting, setConverting] = useState(false);
+  const [resolvingPdf, setResolvingPdf] = useState(false);
+
+  // Background OA resolution if PDF url is missing
+  useEffect(() => {
+    if (!paper) return;
+    const directPdf = resolvePdf(paper);
+    if (!directPdf) {
+      const ident = paper.arxiv_id || paper.doi || paper.id || paper.title;
+      if (ident) {
+        setResolvingPdf(true);
+        fetch(`/api/v1/paper/${encodeURIComponent(ident)}`)
+          .then((res) => (res.ok ? res.json() : null))
+          .then((data) => {
+            if (data?.paper?.pdf_url) {
+              const proxied = buildProxyPdfUrl(data.paper.pdf_url);
+              if (proxied) setPaper((prev) => (prev ? { ...prev, pdf_url: proxied } : null));
+              return;
+            }
+            if (data?.candidates?.length > 0) {
+              const best = data.candidates.find((c) => c.format === 'pdf') || data.candidates[0];
+              if (best?.url) {
+                const proxied = buildProxyPdfUrl(best.url);
+                if (proxied) setPaper((prev) => (prev ? { ...prev, pdf_url: proxied } : null));
+              }
+            }
+          })
+          .catch(() => {})
+          .finally(() => setResolvingPdf(false));
+      }
+    }
+  }, [paper?.id, paper?.arxiv_id, paper?.doi]);
 
   // If paper lacks markdown, attempt background conversion via PyMuPDF4LLM
   useEffect(() => {
@@ -132,6 +163,7 @@ export default function LibraryReaderView() {
         paper={paper}
         pdfUrl={pdfUrl}
         markdownContent={markdownContent}
+        loadingPdf={resolvingPdf}
         onBack={() => navigate('/library')}
         backLabel="Library"
       />

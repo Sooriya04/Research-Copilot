@@ -11,6 +11,7 @@ import {
   X,
   Loader2,
   Plus,
+  Check,
   Search,
   Filter,
   Sparkles,
@@ -82,58 +83,6 @@ const EDGE_COLORS = {
   relates_to: '#a1a1aa',
 };
 
-const METHOD_EXTRACTION_PATTERNS = [
-  [/\b(?:dataset[- ])?bias\b|\balgorithmic\s+bias\b|\bfairness\b/i, 'Dataset Bias & Fairness'],
-  [/\bconcept\s+drift\b/i, 'Concept Drift'],
-  [/\brobustness\b|\bmodel\s+robustness\b|\bprecautionary\s+measures\b/i, 'Model Robustness'],
-  [/\bsecurity\b|\badversar(?:ies|ial)\b|\bdefense\s+mechanisms?\b|\bvulnerabilit(?:ies|y)\b|\bpoisoning\b/i, 'Security & Defense'],
-  [/\bprivacy\b|\bdata\s+privacy\b|\bdifferential\s+privacy\b|\bprivacy[- ]preserving\b/i, 'Privacy-Preserving Methods'],
-  [/\bsupervised\s+(?:machine\s+)?learning\b/i, 'Supervised Learning'],
-  [/\blearning\s+curves?\b/i, 'Learning Curves Analysis'],
-  [/\bdata\s+acquisition\b|\bdata\s+sourcing\b|\bchanging\s+data\s+sources\b/i, 'Data Sourcing & Acquisition'],
-  [/\bmodel\s+selection\b|\balgorithm\s+selection\b/i, 'Model Selection'],
-  [/\bhyperparameters?\b|\bhyperparameter\s+(?:optimization|tuning|configuration)\b/i, 'Hyperparameter Optimization'],
-  [/\bearly\s+stopping\b/i, 'Early Stopping'],
-  [/\bpre[- ]trained\s+(?:language\s+)?models?\b|\blanguage\s+models?\b/i, 'Pre-trained Language Models'],
-  [/\bbert\b/i, 'BERT Architecture'],
-  [/\bfake\s+news\s+detection\b/i, 'Fake News Detection'],
-  [/\bbenchmark\s+study\b|\bbenchmark\s+evaluation\b/i, 'Benchmark Evaluation'],
-  [/\bdecentralized\b|\bserver[- ]free\b|\bpeer[- ]to[- ]peer\b/i, 'Decentralized Learning'],
-  [/\bvertical\s+(?:asynchronous\s+)?federated\s+learning\b|\bvertical\s+fl\b/i, 'Vertical Federated Learning'],
-  [/\bhorizontal\s+federated\s+learning\b|\bhfl\b/i, 'Horizontal Federated Learning'],
-  [/\basynchronous\b|\bdelay[- ]tolerant\b|\basync\b/i, 'Asynchronous Optimization'],
-  [/\bgossip\s+(?:protocol|algorithm|approach)\b/i, 'Gossip Protocol'],
-  [/\b(?:stochastic\s+)?aggregation\b|\bmodel\s+aggregation\b/i, 'Aggregation Methods'],
-  [/\bfedavg\b|\bfederated\s+averaging\b/i, 'Federated Averaging'],
-  [/\bbyzantine\b|\bbyzantine[- ]robust\b/i, 'Byzantine Robustness'],
-  [/\battention\s+mechanisms?\b|\bself[- ]attention\b/i, 'Attention Mechanism'],
-  [/\btransformers?\b|\bvision\s+transformer\b/i, 'Transformer'],
-  [/\bconvolutional\s+neural\s+network\b|\bcnn\b/i, 'Convolutional Networks'],
-  [/\bgraph\s+neural\s+network\b|\bgnn\b/i, 'Graph Neural Networks'],
-  [/\bdiffusion\s+models?\b/i, 'Diffusion Models'],
-  [/\btransfer\s+learning\b|\bdomain\s+adaptation\b/i, 'Transfer Learning'],
-  [/\bknowledge\s+distillation\b/i, 'Knowledge Distillation'],
-  [/\breinforcement\s+learning\b|\brlhf\b|\bdpo\b/i, 'Reinforcement Learning'],
-  [/\btest[- ]time\s+compute\b|\btest[- ]time\s+scaling\b|\bmcts\b/i, 'Test-Time Compute'],
-  [/\bparameter[- ]efficient\b|\blora\b|\bpeft\b/i, 'Parameter-Efficient Fine-Tuning'],
-  [/\bin[- ]context\s+learning\b|\bfew[- ]shot\b/i, 'In-Context Learning'],
-  [/\bhuman[- ]computer\s+interaction\b|\bhci\b/i, 'Human-Computer Interaction'],
-  [/\busability\b|\bheuristic\s+evaluation\b/i, 'Usability & Heuristic Evaluation'],
-];
-
-const DATASET_EXTRACTION_PATTERNS = [
-  [/\bmnist\b/i, 'MNIST'],
-  [/\bcifar[- ]?10\b/i, 'CIFAR-10'],
-  [/\bcifar[- ]?100\b/i, 'CIFAR-100'],
-  [/\bimagenet\b/i, 'ImageNet'],
-  [/\bsquad\b/i, 'SQuAD'],
-  [/\bglue\b/i, 'GLUE'],
-  [/\bsuperglue\b/i, 'SuperGLUE'],
-  [/\bmmlu\b/i, 'MMLU'],
-  [/\bgsm8k\b/i, 'GSM8K'],
-  [/\bhumaneval\b/i, 'HumanEval'],
-];
-
 export default function KnowledgeGraphView() {
   const {
     theme,
@@ -146,6 +95,7 @@ export default function KnowledgeGraphView() {
     searchResults,
     activeWorkspace,
     addedToGraphPaperIds,
+    setAddedToGraphPaperIds,
   } = useApp();
   const navigate = useNavigate();
   const [graphMode, setGraphMode] = useState('graph'); // 'graph' | 'matrix' | 'compare'
@@ -153,6 +103,12 @@ export default function KnowledgeGraphView() {
   const [neighborhood, setNeighborhood] = useState(null);
   const [loading, setLoading] = useState(false);
   const [seeding, setSeeding] = useState(false);
+
+  // Search within Knowledge Graph state
+  const [graphSearchInput, setGraphSearchInput] = useState(() => searchQuery || activeWorkspace?.title || '');
+  const [graphSearchResults, setGraphSearchResults] = useState([]);
+  const [graphSearchLoading, setGraphSearchLoading] = useState(false);
+  const [paperIngestingMap, setPaperIngestingMap] = useState({});
 
   const [rawNodes, setRawNodes] = useState([]);
   const [rawEdges, setRawEdges] = useState([]);
@@ -194,140 +150,10 @@ export default function KnowledgeGraphView() {
 
       const backendPaperNodes = loadedNodes.filter(n => (n.node_type || '').toLowerCase() === 'paper');
 
-      // If backend has no paper nodes but the workspace has searchResults, build visualization dynamically
-      if (backendPaperNodes.length === 0 && searchResults && searchResults.length > 0) {
-        const topicId = `topic-${activeTopic ? activeTopic.toLowerCase().replace(/[^a-z0-9]+/g, '-') : 'main'}`;
-        const topicLabel = activeTopic || 'Research Topic';
-        const generatedNodes = [{
-          id: topicId,
-          label: topicLabel.slice(0, 35),
-          node_type: 'topic',
-          title: `[TOPIC] ${topicLabel}`,
-          data: { name: topicLabel, id: topicId, query: topicLabel },
-        }];
-        const generatedEdges = [];
-
-        // Track shared methods and datasets across papers to create mutual bridge circles
-        const methodPapersMap = new Map();
-        const datasetPapersMap = new Map();
-
-        searchResults.slice(0, 20).forEach((p, idx) => {
-          const pId = p.id || p.canonical_id || p.arxiv_id || `paper-${idx}`;
-          const pTitle = p.title || `Paper ${idx + 1}`;
-          
-          generatedNodes.push({
-            id: pId,
-            label: pTitle.slice(0, 35),
-            node_type: 'paper',
-            title: `[PAPER] ${pTitle} (${p.year || 2024})`,
-            data: {
-              id: pId,
-              title: pTitle,
-              year: p.year || 2024,
-              authors: p.authors || [],
-              pdf_url: p.pdf_url || p.open_access_pdf,
-              methods: p.methods || [],
-              datasets: p.datasets || [],
-            },
-          });
-
-          // Connect topic to paper
-          generatedEdges.push({
-            source: topicId,
-            target: pId,
-            relation: 'covers',
-            label: 'Explores',
-          });
-
-          const fullText = `${p.title || ''} ${p.abstract || ''}`;
-          const pMethods = Array.isArray(p.methods) ? [...p.methods] : [];
-          const pDatasets = Array.isArray(p.datasets) ? [...p.datasets] : [];
-
-          METHOD_EXTRACTION_PATTERNS.forEach(([pat, label]) => {
-            if (pat.test(fullText) && !pMethods.includes(label)) {
-              pMethods.push(label);
-            }
-          });
-
-          DATASET_EXTRACTION_PATTERNS.forEach(([pat, label]) => {
-            if (pat.test(fullText) && !pDatasets.includes(label)) {
-              pDatasets.push(label);
-            }
-          });
-
-          (p.topics || []).forEach(t => {
-            if (typeof t === 'string' && t.length >= 3 && t.length <= 30 && !pMethods.includes(t)) {
-              pMethods.push(t);
-            }
-          });
-
-          // Map methods
-          pMethods.forEach(m => {
-            if (!methodPapersMap.has(m)) methodPapersMap.set(m, []);
-            methodPapersMap.get(m).push(pId);
-          });
-
-          // Map datasets
-          pDatasets.forEach(d => {
-            if (!datasetPapersMap.has(d)) datasetPapersMap.set(d, []);
-            datasetPapersMap.get(d).push(pId);
-          });
-        });
-
-        // Add shared method bridge circle nodes (connecting >= 2 papers)
-        methodPapersMap.forEach((pIds, mName) => {
-          if (pIds.length >= 2) {
-            const mId = `method-${mName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
-            generatedNodes.push({
-              id: mId,
-              label: mName.slice(0, 25),
-              node_type: 'method',
-              title: `[METHOD] ${mName}`,
-              data: { name: mName, id: mId },
-            });
-            pIds.forEach(pId => {
-              generatedEdges.push({
-                source: pId,
-                target: mId,
-                relation: 'uses_method',
-                label: 'Uses Method',
-              });
-            });
-          }
-        });
-
-        // Add shared dataset bridge circle nodes (connecting >= 2 papers)
-        datasetPapersMap.forEach((pIds, dName) => {
-          if (pIds.length >= 2) {
-            const dId = `dataset-${dName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
-            generatedNodes.push({
-              id: dId,
-              label: dName.slice(0, 25),
-              node_type: 'dataset',
-              title: `[DATASET] ${dName}`,
-              data: { name: dName, id: dId },
-            });
-            pIds.forEach(pId => {
-              generatedEdges.push({
-                source: pId,
-                target: dId,
-                relation: 'evaluates_on',
-                label: 'Evaluates On',
-              });
-            });
-          }
-        });
-
-        loadedNodes = generatedNodes;
-        loadedEdges = generatedEdges;
-      } else if (loadedNodes.length === 0 && activeTopic) {
-        loadedNodes = [{
-          id: `topic-${activeTopic.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
-          label: activeTopic.slice(0, 35),
-          node_type: 'topic',
-          title: `[TOPIC] ${activeTopic}`,
-          data: { name: activeTopic },
-        }];
+      // Only show papers explicitly added to graph or workspace (no synthetic regex fallback)
+      if (backendPaperNodes.length === 0) {
+        loadedNodes = [];
+        loadedEdges = [];
       }
 
       setRawNodes(loadedNodes);
@@ -355,7 +181,92 @@ export default function KnowledgeGraphView() {
     setSelectedEntity(null);
     setNeighborhood(null);
     fetchGraphData();
-  }, [searchQuery, activeWorkspace?.id, activeWorkspace?.title, searchResults?.length, addedToGraphPaperIds?.length]);
+  }, [searchQuery, activeWorkspace?.id, activeWorkspace?.title, addedToGraphPaperIds?.length]);
+
+  const handleSearchPapers = async (customQuery) => {
+    const term = (customQuery !== undefined ? customQuery : graphSearchInput).trim();
+    if (!term) return;
+    setGraphSearchLoading(true);
+    try {
+      const res = await fetch(`/api/v1/search/unified?q=${encodeURIComponent(term)}&limit=10`);
+      if (res.ok) {
+        const data = await res.json();
+        const papers = data.results || (Array.isArray(data) ? data : []);
+        setGraphSearchResults(papers);
+      }
+    } catch (err) {
+      console.error('Failed to search papers for knowledge graph:', err);
+    } finally {
+      setGraphSearchLoading(false);
+    }
+  };
+
+  const handleTogglePaperInGraph = async (paper) => {
+    const pId = paper.id || paper.arxiv_id || paper.canonical_id || `paper-${paper.title?.slice(0, 15)}`;
+    const currentTopic = (searchQuery || activeWorkspace?.title || graphSearchInput || 'General Literature').trim();
+    const isAdded = addedToGraphPaperIds.includes(pId);
+
+    setPaperIngestingMap(prev => ({ ...prev, [pId]: 'loading' }));
+
+    if (isAdded) {
+      try {
+        await fetch('/api/v1/graph/remove-paper', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ paper_id: pId }),
+        });
+        setAddedToGraphPaperIds(prev => prev.filter(id => id !== pId));
+        setPaperIngestingMap(prev => {
+          const next = { ...prev };
+          delete next[pId];
+          return next;
+        });
+        await fetchGraphData();
+      } catch {
+        setPaperIngestingMap(prev => ({ ...prev, [pId]: 'error' }));
+      }
+    } else {
+      try {
+        const res = await fetch('/api/v1/graph/ingest-paper', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            topic: currentTopic,
+            workspace_id: activeWorkspace?.id || null,
+            paper_data: {
+              id: pId,
+              title: paper.title,
+              year: paper.year,
+              authors: (paper.authors || []).map(a => typeof a === 'string' ? a : a.name || String(a)),
+              abstract: paper.abstract || '',
+              topics: paper.topics || [],
+              arxiv_id: paper.arxiv_id || (pId.startsWith('arxiv:') ? pId.replace('arxiv:', '') : null),
+              doi: paper.doi || null,
+              openalex_id: paper.openalex_id || null,
+              url: paper.url || null,
+              primary_source: paper.primary_source || 'unknown',
+              citation_count: paper.citation_count || 0,
+              referenced_works: paper.referenced_works || paper.cited_papers || [],
+              cited_papers: paper.referenced_works || paper.cited_papers || [],
+              methods: paper.methods || [],
+              datasets: paper.datasets || [],
+              benchmarks: paper.benchmarks || [],
+            }
+          }),
+        });
+
+        if (res.ok) {
+          setPaperIngestingMap(prev => ({ ...prev, [pId]: 'done' }));
+          setAddedToGraphPaperIds(prev => (prev.includes(pId) ? prev : [...prev, pId]));
+          await fetchGraphData();
+        } else {
+          setPaperIngestingMap(prev => ({ ...prev, [pId]: 'error' }));
+        }
+      } catch {
+        setPaperIngestingMap(prev => ({ ...prev, [pId]: 'error' }));
+      }
+    }
+  };
 
   const handleClearGraph = async () => {
     try {
@@ -364,6 +275,7 @@ export default function KnowledgeGraphView() {
       setRawEdges([]);
       setSelectedEntity(null);
       setNeighborhood(null);
+      setAddedToGraphPaperIds([]);
     } catch (err) {
       console.error('Failed to clear graph:', err);
     }
@@ -490,6 +402,11 @@ export default function KnowledgeGraphView() {
         .filter(n => (n.node_type || '').toLowerCase() === 'paper')
         .map(n => n.id)
     );
+
+    // If no papers have been added yet, return empty so the prompt/search empty state is displayed
+    if (paperIds.size === 0) {
+      return { nodes: [], edges: [] };
+    }
 
     // Reify direct inter-paper edges (e.g. Paper A cites Paper B) into explicit relationship circles
     // matching the user's sketch: Paper A -> (Relationship Circle) -> Paper B
@@ -1023,6 +940,175 @@ export default function KnowledgeGraphView() {
         </div>
       </div>
 
+      {/* Search Literature to Add to Knowledge Graph */}
+      {graphMode === 'graph' && (
+        <div
+          className="card"
+          style={{
+            padding: '12px 16px',
+            marginBottom: 12,
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-md)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Search size={15} style={{ color: 'var(--accent-primary)' }} />
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+                Search Papers & Add to Knowledge Graph
+              </span>
+              <span className="badge badge-neutral" style={{ fontSize: 11 }}>
+                {addedToGraphPaperIds.length} Added
+              </span>
+            </div>
+            {graphSearchResults.length > 0 && (
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => setGraphSearchResults([])}
+                style={{ fontSize: 11.5, padding: '2px 8px' }}
+              >
+                Clear Results
+              </button>
+            )}
+          </div>
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleSearchPapers();
+            }}
+            style={{ display: 'flex', gap: 8, alignItems: 'center' }}
+          >
+            <div style={{ position: 'relative', flex: 1 }}>
+              <input
+                type="text"
+                value={graphSearchInput}
+                onChange={(e) => setGraphSearchInput(e.target.value)}
+                placeholder="Search literature by topic, keyword, or paper title to add to graph (e.g. FlashAttention, LoRA, KV Cache)..."
+                style={{
+                  width: '100%',
+                  padding: '8px 12px 8px 32px',
+                  background: 'var(--bg-secondary)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-sm)',
+                  fontSize: 13,
+                  color: 'var(--text-primary)',
+                  outline: 'none',
+                }}
+              />
+              <Search
+                size={14}
+                style={{
+                  position: 'absolute',
+                  left: 10,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  color: 'var(--text-muted)',
+                }}
+              />
+            </div>
+            <button
+              type="submit"
+              className="btn btn-primary btn-sm"
+              disabled={graphSearchLoading || !graphSearchInput.trim()}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 90, justifyContent: 'center' }}
+            >
+              {graphSearchLoading ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
+              <span>Search</span>
+            </button>
+          </form>
+
+          {/* Search Results Paper Cards Tray */}
+          {graphSearchResults.length > 0 && (
+            <div
+              style={{
+                marginTop: 12,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+                maxHeight: 280,
+                overflowY: 'auto',
+                paddingRight: 4,
+              }}
+            >
+              {graphSearchResults.map((paper, idx) => {
+                const pId = paper.id || paper.arxiv_id || paper.canonical_id || `paper-${idx}`;
+                const isAdded = addedToGraphPaperIds.includes(pId);
+                const status = paperIngestingMap[pId];
+
+                return (
+                  <div
+                    key={pId || idx}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 12,
+                      padding: '8px 12px',
+                      background: 'var(--bg-secondary)',
+                      border: isAdded ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
+                      borderRadius: 'var(--radius-sm)',
+                    }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {paper.title}
+                      </div>
+                      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        {paper.year && <span>{paper.year}</span>}
+                        {paper.authors && paper.authors.length > 0 && (
+                          <span>&bull; {paper.authors.slice(0, 2).map(a => typeof a === 'string' ? a : a.name || String(a)).join(', ')}</span>
+                        )}
+                        {paper.citation_count !== undefined && paper.citation_count !== null && (
+                          <span>&bull; {paper.citation_count.toLocaleString()} citations</span>
+                        )}
+                        <span className="badge badge-neutral" style={{ fontSize: 10, padding: '1px 5px' }}>
+                          {paper.primary_source || (pId.startsWith('arxiv') ? 'arXiv' : 'literature')}
+                        </span>
+                      </div>
+                    </div>
+
+                    <button
+                      className={`btn btn-sm ${isAdded ? 'btn-secondary' : 'btn-primary'}`}
+                      onClick={() => handleTogglePaperInGraph(paper)}
+                      disabled={status === 'loading'}
+                      style={{
+                        minWidth: 120,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 6,
+                        flexShrink: 0,
+                        fontSize: 12,
+                      }}
+                    >
+                      {status === 'loading' ? (
+                        <>
+                          <Loader2 size={12} className="animate-spin" />
+                          <span>{isAdded ? 'Removing...' : 'Ingesting...'}</span>
+                        </>
+                      ) : isAdded ? (
+                        <>
+                          <Check size={12} style={{ color: 'var(--accent-primary)' }} />
+                          <span>In Graph</span>
+                          <span style={{ fontSize: 10, opacity: 0.7 }}>(Remove)</span>
+                        </>
+                      ) : (
+                        <>
+                          <Plus size={13} />
+                          <span>Add to Graph</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Filter & Control Bar */}
       {graphMode === 'graph' && rawNodes.length > 0 && (
         <div className="search-bar-box" style={{ padding: '10px 14px', marginBottom: 12, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -1177,10 +1263,10 @@ export default function KnowledgeGraphView() {
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)' }}>
                 <NetworkIcon size={44} style={{ marginBottom: 14, color: 'var(--accent-blue)' }} />
                 <h3 style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6 }}>
-                  Knowledge Graph is Ready to Explore
+                  Knowledge Graph is Ready
                 </h3>
-                <p style={{ fontSize: 13, maxWidth: 440, textAlign: 'center', marginBottom: 20 }}>
-                  Search any topic (e.g. "chain of thought") in Literature Search to auto-build nodes, or seed canonical literature.
+                <p style={{ fontSize: 13, maxWidth: 460, textAlign: 'center', marginBottom: 20 }}>
+                  Search literature using the bar above or in <strong>Literature Search</strong> and click <strong>+ Add to Graph</strong> on papers to build your citation graph.
                 </p>
                 <div style={{ display: 'flex', gap: 10 }}>
                   <button className="btn btn-primary" onClick={handleSeedGraph} disabled={seeding}>
@@ -1326,7 +1412,7 @@ export default function KnowledgeGraphView() {
                 )}
 
                 {selectedEntity.type === 'PAPER' && (
-                  <div style={{ marginBottom: 14 }}>
+                  <div style={{ marginBottom: 14, display: 'flex', flexDirection: 'column', gap: 6 }}>
                     <button
                       className="btn btn-primary btn-sm"
                       onClick={() => openInReader(selectedEntity.raw)}
@@ -1334,6 +1420,29 @@ export default function KnowledgeGraphView() {
                     >
                       <FileText size={12} />
                       <span>Open in PDF Reader</span>
+                    </button>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={async () => {
+                        const pid = selectedEntity.id;
+                        try {
+                          await fetch('/api/v1/graph/remove-paper', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ paper_id: pid }),
+                          });
+                          setAddedToGraphPaperIds(prev => prev.filter(id => id !== pid));
+                          setSelectedEntity(null);
+                          setNeighborhood(null);
+                          await fetchGraphData();
+                        } catch (err) {
+                          console.error('Failed to remove paper from graph:', err);
+                        }
+                      }}
+                      style={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 6, color: 'var(--text-muted)' }}
+                    >
+                      <Trash2 size={12} />
+                      <span>Remove from Graph</span>
                     </button>
                   </div>
                 )}

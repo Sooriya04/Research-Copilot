@@ -231,7 +231,7 @@ export function AppProvider({ children }) {
   }, [activeWsId, searchQuery, searchResults, sourceCounts, addedToGraphPaperIds, comparisonPapers, activeReaderPaper, litGraphData, litGraphTarget]);
 
   const openWorkspaceModal = (initialTitle = '') => {
-    setWorkspaceModalInitialTitle(initialTitle || '');
+    setWorkspaceModalInitialTitle(typeof initialTitle === 'string' ? initialTitle : '');
     setIsWorkspaceModalOpen(true);
   };
 
@@ -270,6 +270,29 @@ export function AppProvider({ children }) {
         localStorage.setItem(getWsKey(newWs.id, 'added_graph_papers'), '[]');
         localStorage.setItem(getWsKey(newWs.id, 'comparison_papers'), '[]');
         localStorage.removeItem(getWsKey(newWs.id, 'reader_paper'));
+
+        // Pre-fetch LitGraph in parallel for the newly created workspace topic and store it
+        if (initialQuery) {
+          fetch(`/api/v1/litgraph/query?q=${encodeURIComponent(initialQuery)}&session_id=${encodeURIComponent(newWs.id)}`)
+            .then(async (lRes) => {
+              if (lRes.ok) {
+                const lData = await lRes.json();
+                if (lData.nodes) {
+                  const minR = 5, maxR = 24;
+                  lData.nodes = lData.nodes.map((n) => {
+                    const count = n.citationCount || 0;
+                    const r = count > 0 ? Math.max(minR, Math.min(maxR, Math.sqrt(Math.log10(count + 1) * 80))) : minR;
+                    return { ...n, radius: r };
+                  });
+                }
+                setLitGraphData(lData);
+                setLitGraphTarget(initialQuery);
+                sessionStorage.setItem(getWsKey(newWs.id, 'litgraph_data'), JSON.stringify(lData));
+                sessionStorage.setItem(getWsKey(newWs.id, 'litgraph_target'), initialQuery);
+              }
+            })
+            .catch(() => {});
+        }
 
         closeWorkspaceModal();
         return newWs;
@@ -422,6 +445,32 @@ export function AppProvider({ children }) {
     setSearchResults([]);
     setSourceCounts({});
 
+    const currentWsId = activeWorkspace?.id || null;
+    const currentSessionId = activeWorkspace ? activeWorkspace.id : sessionId;
+
+    // Parallel search in LitGraph to pre-fetch and store information
+    fetch(`/api/v1/litgraph/query?q=${encodeURIComponent(q)}&session_id=${encodeURIComponent(currentSessionId || '')}`)
+      .then(async (lRes) => {
+        if (lRes.ok) {
+          const lData = await lRes.json();
+          if (lData.nodes) {
+            const minR = 5, maxR = 24;
+            lData.nodes = lData.nodes.map((n) => {
+              const count = n.citationCount || 0;
+              const r = count > 0 ? Math.max(minR, Math.min(maxR, Math.sqrt(Math.log10(count + 1) * 80))) : minR;
+              return { ...n, radius: r };
+            });
+          }
+          setLitGraphData(lData);
+          setLitGraphTarget(q);
+          sessionStorage.setItem(getWsKey(currentWsId, 'litgraph_data'), JSON.stringify(lData));
+          sessionStorage.setItem(getWsKey(currentWsId, 'litgraph_target'), q);
+        }
+      })
+      .catch((err) => {
+        console.debug('Parallel LitGraph fetch error:', err);
+      });
+
     try {
       const res = await fetch('/api/v1/search/unified', {
         method: 'POST',
@@ -430,7 +479,7 @@ export function AppProvider({ children }) {
           query: q,
           sources: sourcesToUse || selectedSources,
           limit_per_source: Number(limitNum),
-          session_id: activeWorkspace ? activeWorkspace.id : sessionId,
+          session_id: currentSessionId,
         }),
       });
 

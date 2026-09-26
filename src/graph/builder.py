@@ -97,6 +97,17 @@ class GraphBuilder:
             else:
                 authors_list.append(str(a))
 
+        openalex_id = getattr(paper_intel, "openalex_id", None) if not isinstance(paper_intel, dict) else paper_intel.get("openalex_id")
+        citation_count = getattr(paper_intel, "citation_count", 0) if not isinstance(paper_intel, dict) else (paper_intel.get("citation_count") or 0)
+        cited_list = (
+            getattr(paper_intel, "cited_papers", [])
+            or getattr(paper_intel, "referenced_works", [])
+            or (paper_intel.get("cited_papers", []) if isinstance(paper_intel, dict) else [])
+            or (paper_intel.get("referenced_works", []) if isinstance(paper_intel, dict) else [])
+            or []
+        )
+        clean_cited_list = [str(c).strip() for c in cited_list if c]
+
         paper_node = PaperNode(
             id=paper_id,
             title=title or "Untitled Paper",
@@ -105,130 +116,43 @@ class GraphBuilder:
             authors=authors_list,
             doi=doi,
             arxiv_id=arxiv_id,
+            openalex_id=openalex_id,
             abstract=abstract,
             topics=topics or [],
+            cited_papers=clean_cited_list,
+            referenced_works=clean_cited_list,
+            citation_count=int(citation_count) if str(citation_count).isdigit() else 0,
         )
 
-        # 2. Methods & Datasets derivation (Exclude generic stop-words and high-level taxonomy terms)
+        # 2. Methods & Datasets derivation (Only verified explicitly provided entities)
         STOP_WORDS = {
-            # Broad academic fields and disciplines
             "computer science", "artificial intelligence", "machine learning", "deep learning",
-            "natural language processing", "natural language processing techniques",
-            "information retrieval", "topic modeling", "software engineering", "mathematics",
-            "algorithm", "algorithms", "neural network", "neural networks", "data science",
-            "statistics", "applied mathematics", "computation and language",
-            "artificial intelligence (cs.ai)", "machine learning (cs.lg)", "computation and language (cs.cl)",
-            "explainable artificial intelligence (xai)", "adversarial robustness in machine learning",
-            "advanced neural network application", "machine learning in image processing",
-            "engineering", "linguistics", "physics", "biology", "medicine",
-            # Generic placeholders & filler words
+            "natural language processing", "information retrieval", "topic modeling", "software engineering",
             "empirical method", "benchmark evaluation", "general benchmark", "general",
             "method", "methods", "dataset", "datasets", "benchmark", "benchmarks",
             "analysis", "study", "studies", "overview", "survey", "surveys", "research",
             "framework", "frameworks", "system", "systems", "technique", "techniques",
             "approach", "approaches", "model", "models", "evaluation", "evaluations",
             "experiment", "experiments", "task", "tasks", "performance", "impact",
-            "investigation", "review", "reasoning", "reasoning & empirical analysis",
         }
 
         methods = getattr(paper_intel, "methods", []) if not isinstance(paper_intel, dict) else paper_intel.get("methods", [])
         datasets = getattr(paper_intel, "datasets", []) if not isinstance(paper_intel, dict) else paper_intel.get("datasets", [])
         benchmarks = getattr(paper_intel, "benchmarks", []) if not isinstance(paper_intel, dict) else paper_intel.get("benchmarks", [])
 
-        derived_methods = list(methods)
-        derived_datasets = list(datasets)
+        derived_methods: list = []
+        for m in methods:
+            m_str = m.get("name", "") if isinstance(m, dict) else str(m)
+            if m_str and m_str.lower() not in STOP_WORDS and len(m_str) >= 3:
+                derived_methods.append(m_str)
 
-        # Automated Domain Entity Extraction from Title, Abstract, and Topics
-        full_text = f"{title} {abstract}".strip()
+        derived_datasets: list = []
+        for d in datasets:
+            d_str = d.get("name", "") if isinstance(d, dict) else str(d)
+            if d_str and d_str.lower() not in STOP_WORDS and len(d_str) >= 3:
+                derived_datasets.append(d_str)
 
-        METHOD_PATTERNS = [
-            # Bias, Fairness & Robustness
-            (r"\b(?:dataset[- ])?bias\b|\balgorithmic\s+bias\b|\bfairness\b", "Dataset Bias & Fairness"),
-            (r"\bconcept\s+drift\b", "Concept Drift"),
-            (r"\brobustness\b|\bmodel\s+robustness\b|\bprecautionary\s+measures\b", "Model Robustness"),
-            (r"\bsecurity\b|\badversar(?:ies|ial)\b|\bdefense\s+mechanisms?\b|\bvulnerabilit(?:ies|y)\b|\bpoisoning\b", "Security & Defense"),
-            (r"\bprivacy\b|\bdata\s+privacy\b|\bdifferential\s+privacy\b|\bprivacy[- ]preserving\b", "Privacy-Preserving Methods"),
-            # Training, Optimization & Decision Making
-            (r"\bsupervised\s+(?:machine\s+)?learning\b", "Supervised Learning"),
-            (r"\blearning\s+curves?\b", "Learning Curves Analysis"),
-            (r"\bdata\s+acquisition\b|\bdata\s+sourcing\b|\bchanging\s+data\s+sources\b", "Data Sourcing & Acquisition"),
-            (r"\bmodel\s+selection\b|\balgorithm\s+selection\b", "Model Selection"),
-            (r"\bhyperparameters?\b|\bhyperparameter\s+(?:optimization|tuning|configuration)\b", "Hyperparameter Optimization"),
-            (r"\bearly\s+stopping\b", "Early Stopping"),
-            # NLP & Language Models
-            (r"\bpre[- ]trained\s+(?:language\s+)?models?\b|\blanguage\s+models?\b", "Pre-trained Language Models"),
-            (r"\bbert\b", "BERT Architecture"),
-            (r"\bfake\s+news\s+detection\b", "Fake News Detection"),
-            (r"\bbenchmark\s+study\b|\bbenchmark\s+evaluation\b", "Benchmark Evaluation"),
-            # Distributed & Federated Learning
-            (r"\bdecentralized\b|\bserver[- ]free\b|\bcentral\s+server\s+free\b|\bpeer[- ]to[- ]peer\b|\bp2p\b", "Decentralized Learning"),
-            (r"\bvertical\s+(?:asynchronous\s+)?federated\s+learning\b|\bvertical\s+fl\b|\bvafl\b", "Vertical Federated Learning"),
-            (r"\bhorizontal\s+federated\s+learning\b|\bhfl\b", "Horizontal Federated Learning"),
-            (r"\basynchronous\b|\bintermittent\b|\bdelay[- ]tolerant\b|\basync\b", "Asynchronous Optimization"),
-            (r"\bgossip\s+(?:protocol|algorithm|approach)\b|\bsegmented\s+gossip\b", "Gossip Protocol"),
-            (r"\b(?:stochastic\s+)?aggregation\b|\bmodel\s+aggregation\b|\bgradient\s+aggregation\b|\bsecure\s+aggregation\b", "Aggregation Methods"),
-            (r"\bfedavg\b|\bfederated\s+averaging\b", "Federated Averaging"),
-            (r"\bbyzantine\b|\bbyzantine[- ]robust\b", "Byzantine Robustness"),
-            # Neural Architectures & Representation
-            (r"\bautoencoders?\b|\bvariational\s+autoencoder\b|\bvae\b", "Autoencoders"),
-            (r"\battention\s+mechanisms?\b|\bself[- ]attention\b|\bmulti[- ]head\s+attention\b", "Attention Mechanism"),
-            (r"\btransformers?\b|\bvision\s+transformer\b|\bvit\b", "Transformer"),
-            (r"\bconvolutional\s+neural\s+network\b|\bcnn\b|\bconvolutions?\b", "Convolutional Networks"),
-            (r"\bgraph\s+neural\s+network\b|\bgnn\b|\bgraph\s+convolution\b", "Graph Neural Networks"),
-            (r"\bdiffusion\s+models?\b|\bscore[- ]based\b", "Diffusion Models"),
-            (r"\btransfer\s+learning\b|\bdomain\s+adaptation\b", "Transfer Learning"),
-            (r"\bknowledge\s+distillation\b|\bdistill(?:ed|ing)?\b", "Knowledge Distillation"),
-            (r"\bcontrastive\s+learning\b|\bsimclr\b", "Contrastive Learning"),
-            (r"\bself[- ]supervised\s+learning\b|\bssl\b", "Self-Supervised Learning"),
-            (r"\breinforcement\s+learning\b|\brlhf\b|\bdpo\b|\bppo\b", "Reinforcement Learning"),
-            (r"\bstochastic\s+gradient\s+descent\b|\bsgd\b|\bcoordinate\s+descent\b", "Stochastic Gradient Descent"),
-            (r"\bquantization\b|\bint8\b|\bint4\b|\bpruning\b|\bmodel\s+compression\b", "Model Quantization & Pruning"),
-            (r"\bparameter[- ]efficient\b|\blora\b|\bpeft\b|\bprompt\s+tuning\b", "Parameter-Efficient Fine-Tuning"),
-            (r"\bin[- ]context\s+learning\b|\bfew[- ]shot\b|\bzero[- ]shot\b", "In-Context Learning"),
-            (r"\btest[- ]time\s+compute\b|\btest[- ]time\s+scaling\b|\bmcts\b|\bbeam\s+search\b", "Test-Time Compute"),
-            (r"\bedge\s+(?:computing|devices|clients)\b|\biot\b|\bmobile\s+devices\b", "Edge Computing"),
-        ]
-
-        DATASET_PATTERNS = [
-            (r"\bmnist\b", "MNIST"),
-            (r"\bfashion[- ]mnist\b", "Fashion-MNIST"),
-            (r"\bfemnist\b", "FEMNIST"),
-            (r"\bcifar[- ]?10\b", "CIFAR-10"),
-            (r"\bcifar[- ]?100\b", "CIFAR-100"),
-            (r"\bimagenet\b", "ImageNet"),
-            (r"\bshakespeare\b", "Shakespeare"),
-            (r"\bceleba\b", "CelebA"),
-            (r"\bsquad\b", "SQuAD"),
-            (r"\bglue\b", "GLUE"),
-            (r"\bsuperglue\b", "SuperGLUE"),
-            (r"\bmmlu\b", "MMLU"),
-            (r"\bgsm8k\b", "GSM8K"),
-            (r"\bhumaneval\b", "HumanEval"),
-            (r"\bcoco\b", "COCO"),
-        ]
-
-        # Extract methods if derived_methods is sparse
-        if len(derived_methods) < 4 and full_text:
-            for pat, m_label in METHOD_PATTERNS:
-                if re.search(pat, full_text, re.IGNORECASE):
-                    if m_label not in derived_methods and m_label.lower() not in STOP_WORDS:
-                        derived_methods.append(m_label)
-
-        # Extract datasets if derived_datasets is sparse
-        if len(derived_datasets) < 3 and full_text:
-            for pat, d_label in DATASET_PATTERNS:
-                if re.search(pat, full_text, re.IGNORECASE):
-                    if d_label not in derived_datasets and d_label.lower() not in STOP_WORDS:
-                        derived_datasets.append(d_label)
-
-        # Extract domain concepts from topics
-        for t in (topics or []):
-            t_str = str(t).strip()
-            if t_str and t_str.lower() not in STOP_WORDS and len(t_str) >= 3 and len(t_str) <= 35:
-                if t_str not in derived_methods:
-                    derived_methods.append(t_str)
-
-        # Incorporate verified benchmarks from PapersWithCode or intelligence if present
+        # Incorporate verified benchmarks from PapersWithCode if present
         for b in benchmarks:
             if isinstance(b, dict):
                 d_name = b.get("dataset")
@@ -238,10 +162,6 @@ class GraphBuilder:
                 if t_name and str(t_name).strip().lower() not in STOP_WORDS:
                     derived_methods.append(str(t_name).strip())
 
-        # Pre-read existing nodes (before batch_write opens connection) to avoid re-adding
-        existing_paper = await self.store.get_node(paper_id)
-
-        # Collect all nodes/edges to write, then flush in a single DB transaction
         nodes_to_add: list = []
         edges_to_add: list = []
 
@@ -249,115 +169,105 @@ class GraphBuilder:
         nodes_to_add.append(paper_node)
         logger.info("Persisting PaperNode: %s", paper_id)
 
-        for m in derived_methods:
-            if isinstance(m, str):
-                method_name = m.strip()
-                category = "general"
-            elif isinstance(m, dict):
-                method_name = m.get("name", "").strip() or str(m)
-                category = m.get("category", "general")
-            elif hasattr(m, "name"):
-                method_name = getattr(m, "name", "").strip()
-                category = getattr(m, "category", "general")
-            else:
-                method_name = str(m).strip()
-                category = "general"
-
-            if not method_name or method_name.lower() in STOP_WORDS or len(method_name) < 3:
-                continue
-
+        for method_name in set(derived_methods):
             method_id = slugify_id(method_name)
             existing_method = await self.store.get_node(method_id)
             if not existing_method:
-                method_node = MethodNode(id=method_id, name=method_name, category=category)
+                method_node = MethodNode(id=method_id, name=method_name, category="general")
                 nodes_to_add.append(method_node)
-                logger.info("Adding MethodNode: %s (%s)", method_id, method_name)
-
             edges_to_add.append(ResearchEdge(source_id=paper_id, target_id=method_id, relation=Relation.USES_METHOD))
 
-        # 3. Datasets
-        for d in derived_datasets:
-            if isinstance(d, str):
-                dataset_name = d.strip()
-                domain = "general"
-            elif isinstance(d, dict):
-                dataset_name = d.get("name", "").strip() or str(d)
-                domain = d.get("domain", "general")
-            elif hasattr(d, "name"):
-                dataset_name = getattr(d, "name", "").strip()
-                domain = getattr(d, "domain", "general")
-            else:
-                dataset_name = str(d).strip()
-                domain = "general"
-
-            if not dataset_name or dataset_name.lower() in STOP_WORDS or len(dataset_name) < 3:
-                continue
-
+        for dataset_name in set(derived_datasets):
             dataset_id = slugify_id(dataset_name)
             existing_dataset = await self.store.get_node(dataset_id)
             if not existing_dataset:
-                dataset_node = DatasetNode(id=dataset_id, name=dataset_name, domain=domain)
+                dataset_node = DatasetNode(id=dataset_id, name=dataset_name, domain="general")
                 nodes_to_add.append(dataset_node)
-                logger.info("Adding DatasetNode: %s (%s)", dataset_id, dataset_name)
-
             edges_to_add.append(ResearchEdge(source_id=paper_id, target_id=dataset_id, relation=Relation.EVALUATES_ON))
 
         # Helper to clean and normalize any paper identifier
-        def _clean_ref(raw_val: str) -> str:
+        def _clean_ref(raw_val: Any) -> str:
+            if not raw_val:
+                return ""
             s = str(raw_val).strip().lower()
             s = re.sub(r"^https?://(dx\.)?doi\.org/", "", s)
             s = re.sub(r"^doi:\s*", "", s)
             s = re.sub(r"^https?://openalex\.org/", "", s)
             s = re.sub(r"^openalex:\s*", "", s)
+            s = re.sub(r"^https?://arxiv\.org/(abs|pdf)/", "", s)
             s = re.sub(r"^arxiv:\s*", "", s)
+            s = re.sub(r"\.pdf$", "", s)
             s = re.sub(r"v\d+$", "", s)
             return s.strip()
 
-        # 4. Citations (Cross-Paper Links strictly between papers that exist in the store)
-        cited_list = (
-            getattr(paper_intel, "cited_papers", [])
-            or getattr(paper_intel, "referenced_works", [])
-            or (paper_intel.get("cited_papers", []) if isinstance(paper_intel, dict) else [])
-            or (paper_intel.get("referenced_works", []) if isinstance(paper_intel, dict) else [])
-        )
-        for cited_id in cited_list:
-            cid_clean = _clean_ref(cited_id)
-            if not cid_clean:
-                continue
-
-            # Look up if any stored paper matches this clean reference
-            for nid in self.store.graph.nodes:
-                if nid == paper_id:
-                    continue
-                node_data = self.store.graph.nodes.get(nid, {})
-                if node_data.get("node_type") != NodeType.PAPER.value:
-                    continue
-                node_clean_id = _clean_ref(nid)
-                node_doi = _clean_ref(node_data.get("doi", ""))
-                node_arxiv = _clean_ref(node_data.get("arxiv_id", ""))
-                if cid_clean in (node_clean_id, node_doi, node_arxiv) and cid_clean:
-                    edges_to_add.append(ResearchEdge(source_id=paper_id, target_id=nid, relation=Relation.CITES))
-                    break
-
-        # 5. Check reverse citations: did any existing paper in the graph cite THIS new paper?
         this_clean_id = _clean_ref(paper_id)
         this_clean_doi = _clean_ref(doi or "")
         this_clean_arxiv = _clean_ref(arxiv_id or "")
+        this_clean_openalex = _clean_ref(openalex_id or "")
+        this_clean_title = re.sub(r"[^a-z0-9 ]", "", (title or "").lower()).strip()
+        this_refs_set = {_clean_ref(c) for c in clean_cited_list if _clean_ref(c)}
 
+        # 3. Robust Citation Mapping between added papers
         for nid in list(self.store.graph.nodes):
             if nid == paper_id:
                 continue
             node_data = self.store.graph.nodes.get(nid, {})
             if node_data.get("node_type") != NodeType.PAPER.value:
                 continue
-            cited_by_existing = node_data.get("cited_papers") or node_data.get("referenced_works") or []
-            if not cited_by_existing:
-                continue
-            clean_existing_cited = [_clean_ref(c) for c in cited_by_existing]
-            if (this_clean_id and this_clean_id in clean_existing_cited) or \
-               (this_clean_doi and this_clean_doi in clean_existing_cited) or \
-               (this_clean_arxiv and this_clean_arxiv in clean_existing_cited):
-                edges_to_add.append(ResearchEdge(source_id=nid, target_id=paper_id, relation=Relation.CITES))
+
+            node_clean_id = _clean_ref(nid)
+            node_doi = _clean_ref(node_data.get("doi", ""))
+            node_arxiv = _clean_ref(node_data.get("arxiv_id", ""))
+            node_openalex = _clean_ref(node_data.get("openalex_id", ""))
+            node_title = re.sub(r"[^a-z0-9 ]", "", str(node_data.get("title", "")).lower()).strip()
+
+            existing_cited = (
+                node_data.get("cited_papers")
+                or node_data.get("referenced_works")
+                or []
+            )
+            node_refs_set = {_clean_ref(c) for c in existing_cited if _clean_ref(c)}
+
+            # A. Does this paper cite the existing paper?
+            paper_cites_existing = False
+            for target_ref in [node_clean_id, node_doi, node_arxiv, node_openalex]:
+                if target_ref and target_ref in this_refs_set:
+                    paper_cites_existing = True
+                    break
+            if not paper_cites_existing and len(node_title) >= 15:
+                for r in clean_cited_list:
+                    if node_title in str(r).lower():
+                        paper_cites_existing = True
+                        break
+
+            if paper_cites_existing:
+                edges_to_add.append(ResearchEdge(source_id=paper_id, target_id=nid, relation=Relation.CITES, weight=2.0))
+
+            # B. Does existing paper cite this paper?
+            existing_cites_paper = False
+            for target_ref in [this_clean_id, this_clean_doi, this_clean_arxiv, this_clean_openalex]:
+                if target_ref and target_ref in node_refs_set:
+                    existing_cites_paper = True
+                    break
+            if not existing_cites_paper and len(this_clean_title) >= 15:
+                for r in existing_cited:
+                    if this_clean_title in str(r).lower():
+                        existing_cites_paper = True
+                        break
+
+            if existing_cites_paper:
+                edges_to_add.append(ResearchEdge(source_id=nid, target_id=paper_id, relation=Relation.CITES, weight=2.0))
+
+            # C. Bibliographic / Co-Citation coupling (shared references)
+            if not paper_cites_existing and not existing_cites_paper:
+                mutual_refs = this_refs_set.intersection(node_refs_set)
+                if len(mutual_refs) >= 1:
+                    edges_to_add.append(ResearchEdge(
+                        source_id=paper_id,
+                        target_id=nid,
+                        relation=Relation.CITES,
+                        weight=1.0 + min(len(mutual_refs) * 0.2, 1.5)
+                    ))
 
         # Flush all collected nodes and edges in a single DB transaction
         async with self.store.batch_write() as db:

@@ -56,6 +56,7 @@ export default function PaperReaderView() {
 
   const [inputVal, setInputVal] = useState('');
   const [loading, setLoading] = useState(false);
+  const [resolvingPdf, setResolvingPdf] = useState(false);
   const [convertingMarkdown, setConvertingMarkdown] = useState(false);
   const [currentDoc, setCurrentDoc] = useState(null);
   const [errorMessage, setErrorMessage] = useState(null);
@@ -63,6 +64,7 @@ export default function PaperReaderView() {
   // Resolve PDF url from OA lookup when no direct link
   const fetchOaCandidate = (lookupQuery) => {
     if (!lookupQuery) return;
+    setResolvingPdf(true);
     fetch(`/api/v1/paper/${encodeURIComponent(lookupQuery)}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
@@ -79,7 +81,10 @@ export default function PaperReaderView() {
           }
         }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        setResolvingPdf(false);
+      });
   };
 
   useEffect(() => {
@@ -130,9 +135,12 @@ export default function PaperReaderView() {
     }
 
     if (!pdfLink) {
+      setResolvingPdf(true);
       fetchOaCandidate(
         cleanArxiv || activeReaderPaper.doi || pId || activeReaderPaper.title
       );
+    } else {
+      setResolvingPdf(false);
     }
   }, [activeReaderPaper]);
 
@@ -383,6 +391,7 @@ export default function PaperReaderView() {
           paper={currentDoc}
           pdfUrl={currentDoc.pdfUrl}
           markdownContent={currentDoc.markdown_content}
+          loadingPdf={loading || resolvingPdf}
           onBack={() => navigate(-1)}
           backLabel="Back"
         />

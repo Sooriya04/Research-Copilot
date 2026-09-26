@@ -341,16 +341,18 @@ def build_similarity_graph(seed: Dict[str, Any], candidates: List[Dict[str, Any]
 
             scored_neighbors.append((sim, qid))
 
-        # Sort and take top 3-4 most similar neighbors
+        # Sort and connect to top similar neighbors
         scored_neighbors.sort(reverse=True)
-        top_k = 6 if pid == seed["id"] else 3
+        top_k = 10 if pid == seed["id"] else 4
         for score, neighbor_id in scored_neighbors[:top_k]:
+            if score < 0.04 and pid != seed["id"]:
+                continue
             edge_key = tuple(sorted([pid, neighbor_id]))
             if edge_key not in seen_edges:
                 seen_edges.add(edge_key)
-                links.append(LitGraphLink(source=pid, target=neighbor_id, weight=round(max(score, 0.15), 4)))
+                links.append(LitGraphLink(source=pid, target=neighbor_id, weight=round(max(score, 0.22), 4)))
 
-    # Ensure all nodes are connected
+    # Ensure all nodes are connected into the graph
     connected_ids: Set[str] = {seed["id"]}
     for l in links:
         connected_ids.add(l.source)
@@ -359,7 +361,7 @@ def build_similarity_graph(seed: Dict[str, Any], candidates: List[Dict[str, Any]
     # For any paper that remained unconnected, link to seed
     for p in all_papers:
         if p["id"] not in connected_ids:
-            links.append(LitGraphLink(source=seed["id"], target=p["id"], weight=0.20))
+            links.append(LitGraphLink(source=seed["id"], target=p["id"], weight=0.26))
             connected_ids.add(p["id"])
 
     nodes = [

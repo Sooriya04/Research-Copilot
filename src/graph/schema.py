@@ -59,8 +59,12 @@ class PaperNode(BaseGraphNode):
     authors: List[str] = Field(default_factory=list)
     doi: Optional[str] = None
     arxiv_id: Optional[str] = None
+    openalex_id: Optional[str] = None
     abstract: Optional[str] = None
     topics: List[str] = Field(default_factory=list)
+    cited_papers: List[str] = Field(default_factory=list)
+    referenced_works: List[str] = Field(default_factory=list)
+    citation_count: int = 0
     node_type: Literal[NodeType.PAPER] = NodeType.PAPER
 
 

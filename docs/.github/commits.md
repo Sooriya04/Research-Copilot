@@ -823,3 +823,34 @@ bundle compilation (`npm run build`).
 
 * **Commit**: `caecea3` · Branch: `dev`
 
+<br />
+
+---
+
+## LitGraph Physics & Visual Overhaul, Citation-First Knowledge Graph, Search Robustness, and Workspace Stability
+
+* **LitGraph Physics, Topology & Label Rendering Fixes (`src/api/routes_litgraph.py`, `frontend/src/views/LitGraphView.jsx`)**:
+  * **Restored Spring Physics**: Fixed the broken `d3Force('link', d3.forceLink()...)` override that was wiping out internal link attraction forces and sending peripheral nodes drifting outwards as isolated dots into empty void space.
+  * **Dense Network Topology**: Expanded backend similarity edge generation in `routes_litgraph.py` (connecting up to 10 nearest neighbors for the seed paper and 4 for candidate papers, with minimum edge weights of `0.22`–`0.26`), elevating edge count from 42 to 123 for 42 papers with zero unconnected orphan nodes.
+  * **Visible High-Contrast Edges**: Replaced low-contrast `#cbd5e1` lines with crisp `#4f46e5` / `#6366f1` / `#94a3b8` lines and dynamic stroke widths (1.2px–2.8px) with opacity scaling (0.35–0.95), ensuring all graph edges are clearly visible on the light canvas.
+  * **Readable Paper Labels**: Enhanced node labels with 92% opaque white rounded pill backgrounds and subtle borders, scaling font sizes dynamically so paper titles are always legible without unreadable dot artifacts.
+  * **Orphan Floater Pruning**: Configured `filteredGraph` to exclude any isolated singleton nodes with 0 connections, keeping the canvas neat and focused.
+  * **Canvas Interface Streamlining**: Removed the bottom floating filter slider bar (`[ From 1987 ... Max 45 nodes ... ]`) to prevent canvas obstruction.
+
+* **Citation-First Knowledge Graph & On-Demand Paper Node Mapping (`src/graph/builder.py`, `src/graph/schema.py`, `src/api/routes_graph.py`, `frontend/src/views/KnowledgeGraphView.jsx`)**:
+  * **Eliminated Synthetic Grouping**: Removed heuristic regex-based category fallbacks (e.g. `Dataset Bias & Fairness`) that were artificially clumping unrelated papers together.
+  * **Direct Citation Mapping**: Shifted the knowledge graph to a citation-first topology, generating explicit `CITES` directed edges between papers based on real academic references and citations.
+  * **Interactive Search & Add to Graph**: Embedded an inline "Search Papers & Add to Knowledge Graph" component directly inside the Knowledge Graph view, allowing researchers to search literature and add (`+ Add to Graph`) or remove papers dynamically with live canvas re-rendering.
+
+* **Search API Robustness & Freshness Fixes (`src/api/routes_search.py`, `frontend/src/views/LiteratureResultsView.jsx`)**:
+  * **Fixed Search 500 Internal Server Error**: Resolved unhandled exceptions and attribute errors during multi-source aggregation across arXiv, OpenAlex, Semantic Scholar, Crossref, and PubMed.
+  * **Cache Freshness & Deduplication**: Improved query normalization and cache key generation to prevent returning stale, outdated search results on active research topics.
+
+* **Workspace Modal & State Stability Fixes (`frontend/src/components/modals/CreateWorkspaceModal.jsx`, `frontend/src/context/AppContext.jsx`, `frontend/src/components/layout/TopHeader.jsx`)**:
+  * **Fixed `title.trim is not a function`**: Added defensive string casting (`String(title || '').trim()`) across form validation and workspace creation handlers in `CreateWorkspaceModal.jsx`.
+  * **Prevented Auto-Closing on Navigation**: Fixed navigation handlers to preserve active workspace state and prevent the workspace from auto-closing when switching to LitGraph, Knowledge Graph, or Reader views.
+
+* **Responsive PDF Loading State (`frontend/src/components/reader/AnaraPaperReader.jsx`, `frontend/src/views/PaperReaderView.jsx`, `frontend/src/views/LibraryReaderView.jsx`)**:
+  * Added animated, responsive `loadingPdf` and iframe load listener states to replace premature "PDF not available" alerts while academic PDFs are being fetched and rendered.
+
+

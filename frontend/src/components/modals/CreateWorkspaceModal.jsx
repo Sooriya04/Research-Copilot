@@ -130,7 +130,7 @@ export default function CreateWorkspaceModal() {
   const [activeTab, setActiveTab] = useState('create'); // 'create', 'upload', 'import', 'library'
   
   // Tab 1: New Workspace form
-  const [title, setTitle] = useState(workspaceModalInitialTitle || '');
+  const [title, setTitle] = useState(typeof workspaceModalInitialTitle === 'string' ? workspaceModalInitialTitle : '');
   const [description, setDescription] = useState('');
   
   // Tab 2: Upload File form
@@ -149,8 +149,10 @@ export default function CreateWorkspaceModal() {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    if (workspaceModalInitialTitle) {
+    if (typeof workspaceModalInitialTitle === 'string') {
       setTitle(workspaceModalInitialTitle);
+    } else {
+      setTitle('');
     }
   }, [workspaceModalInitialTitle]);
 
@@ -159,7 +161,7 @@ export default function CreateWorkspaceModal() {
   // Handle Tab 1: Create Blank Workspace
   const handleCreateSubmit = async (e) => {
     if (e) e.preventDefault();
-    const cleanTitle = title.trim();
+    const cleanTitle = typeof title === 'string' ? title.trim() : '';
     if (!cleanTitle) {
       setError('Workspace title or paper name is required.');
       return;
@@ -610,7 +612,7 @@ export default function CreateWorkspaceModal() {
                 <button
                   type="submit"
                   className="btn btn-primary"
-                  disabled={loading || !title.trim()}
+                  disabled={loading || !(typeof title === 'string' && title.trim())}
                   style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 18px' }}
                 >
                   <span>{loading ? 'Creating Workspace...' : 'Launch Workspace'}</span>

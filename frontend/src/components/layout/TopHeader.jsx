@@ -54,7 +54,7 @@ export default function TopHeader() {
         ) : (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span
-              onClick={openWorkspaceModal}
+              onClick={() => openWorkspaceModal()}
               style={{ cursor: 'pointer', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
               title="Click to switch or create workspace"
             >
