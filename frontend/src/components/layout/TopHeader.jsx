@@ -20,13 +20,14 @@ const VIEW_TITLES = {
   '/experiment-studio': 'Benchmarks & SOTA',
   '/manuscript': 'Manuscript Draft',
   '/research-gaps': 'Research Gap Finder',
+  '/settings': 'Settings',
 };
 
 export default function TopHeader() {
   const location = useLocation();
   const { theme, toggleTheme, openCmdPalette, activeWorkspace, openWorkspaceModal, deactivateWorkspace } = useApp();
 
-  const currentTitle = VIEW_TITLES[location.pathname] || 'Workspace';
+  const currentTitle = VIEW_TITLES[location.pathname] || location.pathname.replace('/', '') || 'Workspace';
   const wsTitle = activeWorkspace ? activeWorkspace.title : 'Research Workspace';
 
   const isLibraryRoute = location.pathname.startsWith('/library') || location.pathname.startsWith('/library-reader');
@@ -50,6 +51,12 @@ export default function TopHeader() {
             <span style={{ color: 'var(--text-muted)' }}>Research Copilot</span>
             <span style={{ margin: '0 6px', color: 'var(--text-muted)' }}>/</span>
             <strong id="header-view-title" style={{ color: 'var(--text-primary)' }}>Overview</strong>
+          </>
+        ) : location.pathname === '/settings' ? (
+          <>
+            <span style={{ color: 'var(--text-muted)' }}>Research Copilot</span>
+            <span style={{ margin: '0 6px', color: 'var(--text-muted)' }}>/</span>
+            <strong id="header-view-title" style={{ color: 'var(--text-primary)' }}>Settings</strong>
           </>
         ) : (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

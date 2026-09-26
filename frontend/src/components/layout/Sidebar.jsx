@@ -14,6 +14,7 @@ import {
   GitBranch,
   Library,
   Workflow,
+  Settings,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 
@@ -161,17 +162,32 @@ export default function Sidebar() {
         </NavLink>
       </nav>
 
-      {/* Footer — flush edge-to-edge border */}
-      <div className="sidebar-footer" style={{ height: 48, padding: '0 16px', borderTop: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-        <div className="system-status-indicator" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div
-            className="status-dot"
-            id="mini-status-dot"
-            style={{ backgroundColor: systemConnected ? '#10b981' : '#ef4444', width: 6, height: 6, borderRadius: '50%' }}
-          ></div>
-          <span id="mini-status-text" style={{ fontSize: 11.5 }}>
-            {systemConnected ? 'SQLite & API Connected' : 'API Connecting...'}
-          </span>
+      {/* Footer */}
+      <div style={{ borderTop: '1px solid var(--border-subtle)', flexShrink: 0 }}>
+        {/* Settings nav item */}
+        <NavLink
+          to="/settings"
+          className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+          style={{ margin: '8px 12px 4px', borderRadius: 'var(--radius-sm)' }}
+        >
+          <div className="nav-item-left">
+            <Settings size={15} />
+            <span>Settings</span>
+          </div>
+        </NavLink>
+
+        {/* Status indicator */}
+        <div className="sidebar-footer" style={{ height: 40, padding: '0 16px', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+          <div className="system-status-indicator" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div
+              className="status-dot"
+              id="mini-status-dot"
+              style={{ backgroundColor: systemConnected ? '#10b981' : '#ef4444', width: 6, height: 6, borderRadius: '50%' }}
+            ></div>
+            <span id="mini-status-text" style={{ fontSize: 11.5 }}>
+              {systemConnected ? 'SQLite & API Connected' : 'API Connecting...'}
+            </span>
+          </div>
         </div>
       </div>
     </aside>

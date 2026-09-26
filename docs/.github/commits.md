@@ -853,4 +853,32 @@ bundle compilation (`npm run build`).
 * **Responsive PDF Loading State (`frontend/src/components/reader/AnaraPaperReader.jsx`, `frontend/src/views/PaperReaderView.jsx`, `frontend/src/views/LibraryReaderView.jsx`)**:
   * Added animated, responsive `loadingPdf` and iframe load listener states to replace premature "PDF not available" alerts while academic PDFs are being fetched and rendered.
 
+<br />
+
+---
+
+## AI Model Provider Settings Hub, SQLite Credential Persistence & UI Overhaul
+
+* **SQLite User Settings & Provider Credentials Storage (`src/core/models.py`, `src/api/routes_settings.py`, `src/api/app.py`)**:
+  * **Database Schema Extension**: Added `UserSettingsModel` table to SQLite via SQLAlchemy (`id`, `provider_id`, `api_key`, `base_url`, `model`, `updated_at`) to securely persist API keys and custom models locally rather than relying solely on ephemeral browser storage.
+  * **Settings REST API**: Implemented `/api/v1/settings/providers` endpoints supporting `GET` (returns masked keys), `POST` (upserts credentials and default models), and `DELETE` (removes stored provider credentials). Added internal `GET /providers/{provider_id}/key` for server-side LLM consumption.
+  * **Router Registration**: Registered `settings_router` in `src/api/app.py` with automated database schema migration on application lifespan startup (`init_db()`).
+
+* **Settings Interface & Provider Management (`frontend/src/views/SettingsView.jsx`)**:
+  * **Multi-Provider Support**: Added configuration cards for **OpenAI**, **Google Gemini**, **NVIDIA NIM**, **Groq**, and **Ollama (Local)**.
+  * **Custom Model Selection & Quick Chips**: Added custom model text inputs per provider alongside one-click suggestion chips (e.g. `gemini-2.0-flash`, `gpt-4o`, `llama-3.3-70b-versatile`, `deepseek-r1`).
+  * **Responsive Full-Width Canvas Layout**: Replaced the restricted 820px max-width container with a responsive auto-filling CSS grid (`repeat(auto-fill, minmax(460px, 1fr))`), eliminating empty right-side whitespace on wide screens and matching the native `.view-panel active` / `.panel-header` design system.
+  * **Clean Professional Typography**: Removed all informal emojis and unicode symbols in favor of clean SaaS typography and SVGs.
+
+* **Browser Password Manager & Autofill Suppression (`frontend/src/views/SettingsView.jsx`)**:
+  * **Eliminated Credential Popups**: Removed native `type="password"` and `autoComplete="new-password"` triggers that caused Firefox and Chrome to suggest saved logins or pop up "Use a Securely Generated Password".
+  * **CSS `text-security` Masking**: Replaced password inputs with `type="text"` combined with CSS `WebkitTextSecurity: disc` / `textSecurity: disc` to render bullets `•••••` while typing or stored, with an eye toggle for visibility.
+  * **Extension Bypass**: Added `data-lpignore="true"`, `data-1p-ignore="true"`, and `data-form-type="other"` to prevent 1Password, Bitwarden, and LastPass from injecting overlays into API key fields.
+
+* **Header Breadcrumbs & Navigation Integration (`frontend/src/components/layout/TopHeader.jsx`, `frontend/src/components/layout/Sidebar.jsx`, `frontend/src/App.jsx`)**:
+  * **TopHeader Breadcrumb Fix**: Fixed header breadcrumb to cleanly display `Research Copilot / Settings` without displaying redundant `/ Workspace` prefixes on settings routes.
+  * **Sidebar Link**: Positioned the Settings navigation link cleanly in the sidebar footer right above the live system status indicator.
+  * **Routing**: Registered `/settings` route in `App.jsx` with full client-side router navigation.
+
+
 

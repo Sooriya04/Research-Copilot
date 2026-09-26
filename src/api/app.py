@@ -15,6 +15,7 @@ from src.api.routes_paper_intelligence import router as paper_intelligence_route
 from src.api.routes_rank import router as rank_router
 from src.api.routes_search import router as search_router
 from src.api.routes_workbench import router as workbench_router
+from src.api.routes_settings import router as settings_router
 from src.core.config import settings
 from src.core.database import init_db
 from src.core.logger import logger
@@ -71,6 +72,7 @@ def create_app() -> FastAPI:
     app.include_router(litgraph_router)
     app.include_router(workbench_router)
     app.include_router(chat_router)
+    app.include_router(settings_router)
 
     # Static Assets for Extracted Markdown & Images
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))

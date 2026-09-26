@@ -20,6 +20,7 @@ import BenchmarksView from './views/BenchmarksView';
 import ManuscriptView from './views/ManuscriptView';
 import ResearchGapView from './views/ResearchGapView';
 import WorkspacesView from './views/WorkspacesView';
+import SettingsView from './views/SettingsView';
 
 export default function App() {
   const navigate = useNavigate();
@@ -59,6 +60,7 @@ export default function App() {
             <Route path="/experiment-studio" element={<BenchmarksView />} />
             <Route path="/manuscript" element={<ManuscriptView />} />
             <Route path="/research-gaps" element={<ResearchGapView />} />
+            <Route path="/settings" element={<SettingsView />} />
             <Route path="*" element={<OverviewView />} />
           </Routes>
         </div>

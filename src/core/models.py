@@ -105,3 +105,14 @@ class CitationEdgeModel(Base):
     source_paper_id = Column(String, index=True, nullable=False)
     target_paper_id = Column(String, index=True, nullable=False)
     created_at = Column(DateTime, default=utcnow)
+
+class UserSettingsModel(Base):
+    """User API key settings stored securely in SQLite."""
+    __tablename__ = "user_settings"
+    
+    id = Column(String, primary_key=True, default="default")  # single-row singleton
+    provider_id = Column(String, primary_key=True)             # openai / gemini / nvidia / groq / ollama
+    api_key = Column(Text, nullable=True)
+    base_url = Column(Text, nullable=True)                     # for ollama
+    model = Column(String, nullable=True)                      # user-selected model
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
