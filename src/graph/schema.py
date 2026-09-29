@@ -29,6 +29,7 @@ class Relation(str, Enum):
     LIMITED_BY = "limited_by"
     HAS_GAP = "has_gap"
     HAS_CLAIM = "has_claim"
+    IMPROVES_UPON = "improves_upon"
 
 
 def slugify_id(text: str) -> str:

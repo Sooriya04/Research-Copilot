@@ -374,6 +374,18 @@ export default function LiteratureResultsView() {
                 Added to Graph ({inGraphCount})
               </button>
 
+              {inGraphCount > 0 && (
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={() => navigate('/graph')}
+                  style={{ padding: '3px 10px', fontSize: 11.5, display: 'flex', alignItems: 'center', gap: 4, background: 'var(--accent-primary)', color: '#fff', fontWeight: 600 }}
+                  title="Open Knowledge Graph to build cross-paper relationships with Gemini"
+                >
+                  <Sparkles size={11} />
+                  <span>Build / View AI Graph ({inGraphCount}) &rarr;</span>
+                </button>
+              )}
+
               {availableSources.map(src => (
                 <button
                   key={src}

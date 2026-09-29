@@ -1,5 +1,6 @@
 import json
-import logging
+import os
+import aiosqlite
 from typing import Any, Dict, List, Optional
 from src.core.logger import logger
 from src.graph.normalizer import extract_heuristic_entities, normalize_entity
@@ -11,10 +12,34 @@ _EXTRACTION_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
 class AbstractEntityExtractor:
-    """Lightweight scientific entity extractor operating strictly on Title + Abstract."""
+    """Lightweight scientific entity extractor operating strictly on Title + Abstract with SQLite caching."""
 
-    def __init__(self, provider: Optional[GeminiFlashLiteProvider] = None):
+    def __init__(self, provider: Optional[GeminiFlashLiteProvider] = None, db_path: str = "./data/research_copilot.db"):
         self.provider = provider or GeminiFlashLiteProvider()
+        self.db_path = db_path
+        self._table_initialized = False
+
+    async def _ensure_db(self) -> None:
+        """Create paper_extractions table if not exists."""
+        if not self._table_initialized:
+            try:
+                os.makedirs(os.path.dirname(os.path.abspath(self.db_path)), exist_ok=True)
+                async with aiosqlite.connect(self.db_path) as db:
+                    await db.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS paper_extractions (
+                            cache_key TEXT PRIMARY KEY,
+                            identifier TEXT,
+                            title TEXT,
+                            data_json TEXT NOT NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        );
+                        """
+                    )
+                    await db.commit()
+                self._table_initialized = True
+            except Exception as e:
+                logger.warning("[AbstractExtractor] Failed initializing SQLite table: %s", e)
 
     async def extract_entities(
         self,
@@ -22,11 +47,29 @@ class AbstractEntityExtractor:
         abstract: str,
         identifier: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Extract methods, datasets, tasks, and metrics from Title + Abstract only."""
+        """Extract methods, datasets, tasks, and metrics from Title + Abstract only (SQLite-cached)."""
         cache_key = (identifier or title or "").strip().lower()
         if cache_key and cache_key in _EXTRACTION_CACHE:
-            logger.debug("[AbstractExtractor] Cache hit for '%s'", cache_key)
+            logger.debug("[AbstractExtractor] In-memory cache hit for '%s'", cache_key)
             return _EXTRACTION_CACHE[cache_key]
+
+        await self._ensure_db()
+
+        # Check SQLite cache
+        if cache_key:
+            try:
+                async with aiosqlite.connect(self.db_path) as db:
+                    async with db.execute(
+                        "SELECT data_json FROM paper_extractions WHERE cache_key = ?", (cache_key,)
+                    ) as cursor:
+                        row = await cursor.fetchone()
+                        if row:
+                            cached_data = json.loads(row[0])
+                            _EXTRACTION_CACHE[cache_key] = cached_data
+                            logger.info("[AbstractExtractor] SQLite cache hit for '%s' (0 LLM cost)", cache_key)
+                            return cached_data
+            except Exception as e:
+                logger.debug("[AbstractExtractor] SQLite read check failed: %s", e)
 
         combined_text = f"TITLE: {title}\nABSTRACT: {abstract}".strip()
         if not combined_text:
@@ -37,6 +80,15 @@ class AbstractEntityExtractor:
             heuristic_res = extract_heuristic_entities(combined_text)
             if cache_key:
                 _EXTRACTION_CACHE[cache_key] = heuristic_res
+                try:
+                    async with aiosqlite.connect(self.db_path) as db:
+                        await db.execute(
+                            "INSERT OR REPLACE INTO paper_extractions (cache_key, identifier, title, data_json) VALUES (?, ?, ?, ?)",
+                            (cache_key, identifier or "", title or "", json.dumps(heuristic_res))
+                        )
+                        await db.commit()
+                except Exception:
+                    pass
             return heuristic_res
 
         system_instruction = (
@@ -119,5 +171,14 @@ class AbstractEntityExtractor:
 
         if cache_key:
             _EXTRACTION_CACHE[cache_key] = result
+            try:
+                async with aiosqlite.connect(self.db_path) as db:
+                    await db.execute(
+                        "INSERT OR REPLACE INTO paper_extractions (cache_key, identifier, title, data_json) VALUES (?, ?, ?, ?)",
+                        (cache_key, identifier or "", title or "", json.dumps(result))
+                    )
+                    await db.commit()
+            except Exception as e:
+                logger.debug("[AbstractExtractor] SQLite write error: %s", e)
 
         return result

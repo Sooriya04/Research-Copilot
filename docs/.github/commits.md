@@ -983,3 +983,51 @@ bundle compilation (`npm run build`).
   * **OpenAlex API Key Support**: Added `openalex_api_key` configuration to `Settings` loaded directly from `.env`, passing `Authorization: Bearer <key>` to OpenAlex endpoints across `access_resolver.py`, `paper_enricher.py`, and `routes_litgraph.py` for 100,000+ daily quota and 50 req/s.
   * **Gemini Provider Update (`gemini-3.5-flash-lite`)**: Upgraded default model from retired `gemini-2.0-flash-lite` (which triggered 404s) to Google's current `gemini-3.5-flash-lite` with automatic alias fallback (`gemini-flash-lite-latest`).
   * **REST Payload Compliance**: Updated payload structure to use `system_instruction: {"parts": [{"text": ...}]}` separating system instructions from conversation turns. Live extraction verified producing valid structured JSON in <5s.
+* **LocalStorage Quota Exceeded Prevention & Safe Storage Layer (`frontend/src/context/AppContext.jsx`)**:
+  * **Root Cause**: Browser `localStorage` has a strict ~5MB quota per origin. Raw `localStorage.setItem` calls in `useEffect` and `performSearch` were attempting to serialize entire search result collections (dozens of papers with full paragraphs) and raw 45-paper LitGraph networks, throwing `DOMException: The quota has been exceeded` and crashing the React `AppProvider`.
+  * **Safe Storage Utilities (`safeStorageSet`, `safeStorageRemove`)**: Wrapped all browser storage operations in defensive handlers. When a `QuotaExceededError` occurs, the utility automatically purges historical non-critical caches (`_reader_paper`, `_litgraph_data`, old `_search_results`), retries, and fails gracefully without crashing React or interrupting user navigation.
+  * **Compact Storage Serialization**: Designed `compactPaperForStorage` (reducing paper payload size by ~98% by preserving essential metadata: `id`, `title`, `authors`, `year`, `doi`, `arxiv_id`, `citation_count`, truncated abstract) and `compactLitGraphForStorage` (preserving lightweight node IDs, titles, and link topologies).
+  * **Proactive Startup Memory Recovery**: Added a mount effect in `AppProvider` that inspects total `localStorage` footprint and automatically frees memory if bloated above ~2MB from previous crashes.
+
+<br />
+
+## Implement Batch AI Knowledge Graph Synthesis, SQLite Persistent Retrieval & Interactive Entity Inspector
+
+* **AI Knowledge Graph Synthesis Engine (`src/graph/synthesizer.py`)**:
+  * **Batch Multi-Paper Synthesis Pipeline**: Added `GraphSynthesizer` enabling researchers to stage multiple papers in their workspace over time and trigger batch semantic synthesis with a single action.
+  * **SQLite Persistent Synthesis Cache (`graph_synthesis_cache`)**:
+    * Computes a deterministic SHA-256 hash across sorted canonical paper IDs in the workspace.
+    * Checks SQLite cache prior to invoking external APIs or LLMs.
+    * Subsequent workspace visits or rebuild requests with unchanged papers load directly from SQLite with **zero LLM calls and zero token cost**.
+  * **Structured Inter-Paper Intelligence**: Formulates a compact multi-paper batch prompt (<1,500 tokens for 3-10 papers) using `gemini-3.5-flash-lite` to extract grounded semantic relationships:
+    * `EXTENDS`: Papers directly building upon or adapting prior architectures.
+    * `COMPARED_TO`: Papers evaluated against one another as empirical baselines.
+    * `IMPROVES_UPON`: Empirical superiority or computational/memory efficiency gains.
+    * `CONTRADICTS`: Opposing empirical findings or disputed claims.
+    * `HAS_GAP`: Combinatorial research gaps discovered between unmerged methods and benchmarks.
+  * **Deterministic Heuristic Fallback**: Generates rule-based citation links, shared dataset/method bridges, and combinatorial gap proposals when offline or on LLM rate limits.
+
+* **SQLite Persistent Entity Extraction Cache (`src/engines/abstract_entity_extractor.py`)**:
+  * Added persistent storage in SQLite table `paper_extractions` in `./data/research_copilot.db`.
+  * Checks both in-memory cache and SQLite before calling Gemini. Extracted paper entities (methods, datasets, tasks, metrics) are permanently cached, preventing re-extraction costs across sessions.
+
+* **Graph Schema Enhancements (`src/graph/schema.py`, `src/api/routes_graph.py`)**:
+  * Added `Relation.IMPROVES_UPON` to the canonical `Relation` enum.
+  * Added endpoints `POST /api/v1/graph/build-workspace-graph` and `GET /api/v1/graph/workspace-cache-status`.
+
+* **Interactive Entity & Relationship Inspector (`frontend/src/views/KnowledgeGraphView.jsx`)**:
+  * **Entity Overview & Description Card**: Added `getNodeDescription()` providing concise scientific explanations and metadata badges (Category, Domain, Citations, Year, Authors) for all node types (`METHOD`, `DATASET`, `PAPER`, `GAP`, `TOPIC`), resolving the missing description issue in the inspector panel.
+  * **Plain-English Connection Explanations**: Added `getDetailedConnectionExplanation()` generating clear human-readable sentences for every incoming and outgoing link in the `Connected Relationships` list (e.g. *"Implemented and relied upon by 'AxBench: Steering LLMs? Even Simple Baselines...' as part of its core architecture"*).
+  * **Build AI Graph Toolbar & Canvas Integration**:
+    * Added prominent "Build AI Graph (N)" button in the toolbar with live synthesis progress ("Checking SQLite cache..." -> "Synthesizing with Gemini...").
+    * Added "Re-synthesize" button to force fresh Gemini execution when desired.
+    * Added Synthesis Status Banner showing SQLite cache hit vs Gemini synthesis, with relation and gap counts.
+    * Added customized empty state when papers are staged in workspace, guiding users to build the graph.
+    * Added "Build / View AI Graph" shortcut chip in `LiteratureResultsView.jsx`.
+  * **Distinct Node & Edge Styling**:
+    * Gap nodes styled as high-contrast rose diamonds (`#f43f5e`).
+    * Distinct edge colors: `EXTENDS` (indigo), `COMPARED_TO` (amber), `IMPROVES_UPON` (emerald), `CONTRADICTS` (rose-red), `HAS_GAP` (fuchsia).
+
+* **Comprehensive Verification**:
+  * Added unit test suite in `tests/test_workspace_graph_synthesis.py` verifying cache miss -> Gemini extraction -> SQLite persistence, and subsequent cache hit with 0 LLM calls.
+  * All 14 tests passed in `pytest`. Frontend built cleanly with 0 errors via `npm run build`.

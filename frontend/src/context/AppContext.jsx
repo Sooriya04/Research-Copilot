@@ -4,6 +4,86 @@ const AppContext = createContext(null);
 
 const getWsKey = (wsId, key) => (wsId ? `rc_ws_${wsId}_${key}` : `rc_${key}`);
 
+// Safe storage utilities to prevent "DOMException: The quota has been exceeded" crashes
+export const safeStorageSet = (key, value) => {
+  try {
+    localStorage.setItem(key, value);
+  } catch (err) {
+    console.warn(`[Storage] Quota exceeded while writing '${key}'. Auto-pruning bloated caches...`);
+    try {
+      const keysToPurge = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && (
+          k.includes('_search_results') ||
+          k.includes('_reader_paper') ||
+          k.includes('_litgraph_data')
+        )) {
+          if (k !== key) {
+            keysToPurge.push(k);
+          }
+        }
+      }
+      keysToPurge.forEach((k) => {
+        try { localStorage.removeItem(k); } catch {}
+      });
+      localStorage.setItem(key, value);
+    } catch {
+      console.warn(`[Storage] Pruning insufficient for '${key}'. Skipping persistence.`);
+    }
+  }
+};
+
+export const safeStorageRemove = (key) => {
+  try {
+    localStorage.removeItem(key);
+  } catch {}
+};
+
+// Compact large paper payloads before storing in 5MB-limited localStorage
+const compactPaperForStorage = (p) => {
+  if (!p) return null;
+  return {
+    id: p.id,
+    title: p.title,
+    authors: (p.authors || []).slice(0, 5),
+    year: p.year,
+    doi: p.doi,
+    arxiv_id: p.arxiv_id,
+    openalex_id: p.openalex_id,
+    abstract: p.abstract ? String(p.abstract).slice(0, 300) : '',
+    citation_count: p.citation_count || 0,
+    primary_source: p.primary_source || 'unknown',
+    url: p.url,
+    pdf_url: p.pdf_url,
+    topics: (p.topics || []).slice(0, 5),
+  };
+};
+
+// Compact LitGraph data before storing in localStorage
+const compactLitGraphForStorage = (data) => {
+  if (!data) return null;
+  return {
+    target: data.target,
+    nodes: (data.nodes || []).slice(0, 45).map((n) => ({
+      id: n.id,
+      title: n.title,
+      authors: (n.authors || []).slice(0, 3),
+      year: n.year,
+      citationCount: n.citationCount || 0,
+      radius: n.radius,
+      isSeed: n.isSeed,
+      url: n.url,
+      doi: n.doi,
+    })),
+    links: (data.links || []).slice(0, 150).map((l) => ({
+      source: typeof l.source === 'object' ? l.source.id : l.source,
+      target: typeof l.target === 'object' ? l.target.id : l.target,
+      weight: l.weight,
+    })),
+  };
+};
+
 export function AppProvider({ children }) {
   const [theme, setTheme] = useState(() => localStorage.getItem('rc_theme') || 'light');
   const [sessionId, setSessionId] = useState(() => localStorage.getItem('rc_session_id') || `sess-${Math.random().toString(36).substring(2, 9)}`);
@@ -131,6 +211,29 @@ export function AppProvider({ children }) {
     }
   });
 
+  // Proactive cleanup on mount to recover quota if browser storage is already full from previous crashes
+  useEffect(() => {
+    try {
+      let totalLength = 0;
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        const v = localStorage.getItem(k);
+        if (v) totalLength += v.length;
+      }
+      if (totalLength > 2000000) {
+        console.info('[Storage] High localStorage usage detected. Auto-cleaning legacy cache blobs...');
+        for (let i = localStorage.length - 1; i >= 0; i--) {
+          const k = localStorage.key(i);
+          if (k && (k.includes('_reader_paper') || k.includes('_litgraph_data') || k.includes('_search_results'))) {
+            localStorage.removeItem(k);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[Storage] Startup cleanup notice:', e);
+    }
+  }, []);
+
   // Long-Term Workspace Research Memory & Hypotheses Ledger
   const [workspaceMemories, setWorkspaceMemories] = useState([]);
 
@@ -251,40 +354,48 @@ export function AppProvider({ children }) {
     }
   };
 
-  // Helper to persist scoped state for active workspace
+  // Helper to persist scoped state for active workspace safely without quota errors
   useEffect(() => {
-    if (activeWsId) {
-      localStorage.setItem(getWsKey(activeWsId, 'search_query'), searchQuery);
-      localStorage.setItem(getWsKey(activeWsId, 'search_results'), JSON.stringify(searchResults));
-      localStorage.setItem(getWsKey(activeWsId, 'source_counts'), JSON.stringify(sourceCounts));
-      localStorage.setItem(getWsKey(activeWsId, 'added_graph_papers'), JSON.stringify(addedToGraphPaperIds));
-      localStorage.setItem(getWsKey(activeWsId, 'comparison_papers'), JSON.stringify(comparisonPapers));
-      if (activeReaderPaper) {
-        localStorage.setItem(getWsKey(activeWsId, 'reader_paper'), JSON.stringify(activeReaderPaper));
+    try {
+      if (activeWsId) {
+        safeStorageSet(getWsKey(activeWsId, 'search_query'), searchQuery || '');
+        const compactResults = (searchResults || []).slice(0, 30).map(compactPaperForStorage);
+        safeStorageSet(getWsKey(activeWsId, 'search_results'), JSON.stringify(compactResults));
+        safeStorageSet(getWsKey(activeWsId, 'source_counts'), JSON.stringify(sourceCounts || {}));
+        safeStorageSet(getWsKey(activeWsId, 'added_graph_papers'), JSON.stringify(addedToGraphPaperIds || []));
+        safeStorageSet(getWsKey(activeWsId, 'comparison_papers'), JSON.stringify(comparisonPapers || []));
+        
+        if (activeReaderPaper) {
+          safeStorageSet(getWsKey(activeWsId, 'reader_paper'), JSON.stringify(compactPaperForStorage(activeReaderPaper)));
+        } else {
+          safeStorageRemove(getWsKey(activeWsId, 'reader_paper'));
+        }
+        
+        if (litGraphData) {
+          safeStorageSet(getWsKey(activeWsId, 'litgraph_data'), JSON.stringify(compactLitGraphForStorage(litGraphData)));
+        } else {
+          safeStorageRemove(getWsKey(activeWsId, 'litgraph_data'));
+        }
+        
+        if (litGraphTarget) {
+          safeStorageSet(getWsKey(activeWsId, 'litgraph_target'), litGraphTarget);
+        } else {
+          safeStorageRemove(getWsKey(activeWsId, 'litgraph_target'));
+        }
       } else {
-        localStorage.removeItem(getWsKey(activeWsId, 'reader_paper'));
+        if (litGraphData) {
+          safeStorageSet(getWsKey(null, 'litgraph_data'), JSON.stringify(compactLitGraphForStorage(litGraphData)));
+        } else {
+          safeStorageRemove(getWsKey(null, 'litgraph_data'));
+        }
+        if (litGraphTarget) {
+          safeStorageSet(getWsKey(null, 'litgraph_target'), litGraphTarget);
+        } else {
+          safeStorageRemove(getWsKey(null, 'litgraph_target'));
+        }
       }
-      if (litGraphData) {
-        localStorage.setItem(getWsKey(activeWsId, 'litgraph_data'), JSON.stringify(litGraphData));
-      } else {
-        localStorage.removeItem(getWsKey(activeWsId, 'litgraph_data'));
-      }
-      if (litGraphTarget) {
-        localStorage.setItem(getWsKey(activeWsId, 'litgraph_target'), litGraphTarget);
-      } else {
-        localStorage.removeItem(getWsKey(activeWsId, 'litgraph_target'));
-      }
-    } else {
-      if (litGraphData) {
-        localStorage.setItem(getWsKey(null, 'litgraph_data'), JSON.stringify(litGraphData));
-      } else {
-        localStorage.removeItem(getWsKey(null, 'litgraph_data'));
-      }
-      if (litGraphTarget) {
-        localStorage.setItem(getWsKey(null, 'litgraph_target'), litGraphTarget);
-      } else {
-        localStorage.removeItem(getWsKey(null, 'litgraph_target'));
-      }
+    } catch (e) {
+      console.warn('[Storage] Error persisting workspace state:', e);
     }
   }, [activeWsId, searchQuery, searchResults, sourceCounts, addedToGraphPaperIds, comparisonPapers, activeReaderPaper, litGraphData, litGraphTarget]);
 
@@ -308,10 +419,9 @@ export function AppProvider({ children }) {
       if (res.ok) {
         const newWs = await res.json();
         setWorkspaces((prev) => [newWs, ...prev.filter((w) => w.id !== newWs.id)]);
-        setActiveWorkspace(newWs);
-        localStorage.setItem('rc_active_workspace', JSON.stringify(newWs));
-        localStorage.setItem('rc_active_workspace_id', newWs.id);
-        localStorage.removeItem('rc_workspace_deactivated');
+        safeStorageSet('rc_active_workspace', JSON.stringify(newWs));
+        safeStorageSet('rc_active_workspace_id', newWs.id);
+        safeStorageRemove('rc_workspace_deactivated');
 
         // Initialize clean state for this fresh workspace
         const initialQuery = title.trim();
@@ -322,12 +432,12 @@ export function AppProvider({ children }) {
         setActiveReaderPaperState(null);
         setComparisonPapers([]);
 
-        localStorage.setItem(getWsKey(newWs.id, 'search_query'), initialQuery);
-        localStorage.setItem(getWsKey(newWs.id, 'search_results'), '[]');
-        localStorage.setItem(getWsKey(newWs.id, 'source_counts'), '{}');
-        localStorage.setItem(getWsKey(newWs.id, 'added_graph_papers'), '[]');
-        localStorage.setItem(getWsKey(newWs.id, 'comparison_papers'), '[]');
-        localStorage.removeItem(getWsKey(newWs.id, 'reader_paper'));
+        safeStorageSet(getWsKey(newWs.id, 'search_query'), initialQuery);
+        safeStorageSet(getWsKey(newWs.id, 'search_results'), '[]');
+        safeStorageSet(getWsKey(newWs.id, 'source_counts'), '{}');
+        safeStorageSet(getWsKey(newWs.id, 'added_graph_papers'), '[]');
+        safeStorageSet(getWsKey(newWs.id, 'comparison_papers'), '[]');
+        safeStorageRemove(getWsKey(newWs.id, 'reader_paper'));
 
         // Pre-fetch LitGraph in parallel for the newly created workspace topic and store it
         if (initialQuery) {
@@ -345,8 +455,8 @@ export function AppProvider({ children }) {
                 }
                 setLitGraphData(lData);
                 setLitGraphTarget(initialQuery);
-                localStorage.setItem(getWsKey(newWs.id, 'litgraph_data'), JSON.stringify(lData));
-                localStorage.setItem(getWsKey(newWs.id, 'litgraph_target'), initialQuery);
+                safeStorageSet(getWsKey(newWs.id, 'litgraph_data'), JSON.stringify(compactLitGraphForStorage(lData)));
+                safeStorageSet(getWsKey(newWs.id, 'litgraph_target'), initialQuery);
               }
             })
             .catch(() => {});
@@ -365,18 +475,18 @@ export function AppProvider({ children }) {
     const found = workspaces.find((w) => w.id === wsId);
     if (found) {
       setActiveWorkspace(found);
-      localStorage.setItem('rc_active_workspace', JSON.stringify(found));
-      localStorage.setItem('rc_active_workspace_id', found.id);
-      localStorage.removeItem('rc_workspace_deactivated');
+      safeStorageSet('rc_active_workspace', JSON.stringify(found));
+      safeStorageSet('rc_active_workspace_id', found.id);
+      safeStorageRemove('rc_workspace_deactivated');
       loadWorkspaceState(found.id, found.title);
     }
   };
 
   const deactivateWorkspace = () => {
     setActiveWorkspace(null);
-    localStorage.removeItem('rc_active_workspace');
-    localStorage.removeItem('rc_active_workspace_id');
-    localStorage.setItem('rc_workspace_deactivated', 'true');
+    safeStorageRemove('rc_active_workspace');
+    safeStorageRemove('rc_active_workspace_id');
+    safeStorageSet('rc_workspace_deactivated', 'true');
     setSearchQuery('');
     setSearchResults([]);
     setSourceCounts({});
@@ -520,8 +630,8 @@ export function AppProvider({ children }) {
           }
           setLitGraphData(lData);
           setLitGraphTarget(q);
-          localStorage.setItem(getWsKey(currentWsId, 'litgraph_data'), JSON.stringify(lData));
-          localStorage.setItem(getWsKey(currentWsId, 'litgraph_target'), q);
+          safeStorageSet(getWsKey(currentWsId, 'litgraph_data'), JSON.stringify(compactLitGraphForStorage(lData)));
+          safeStorageSet(getWsKey(currentWsId, 'litgraph_target'), q);
         }
       })
       .catch((err) => {

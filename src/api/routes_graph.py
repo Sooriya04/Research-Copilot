@@ -16,6 +16,7 @@ from src.graph.pipeline import build_default_research_pipeline
 from src.graph.schema import NodeType, Relation, ResearchEdge, ResearchGapNode, TopicNode, slugify_id
 from src.graph.state import create_initial_state
 from src.graph.store import ResearchGraphStore
+from src.graph.synthesizer import GraphSynthesizer
 
 router = APIRouter(prefix="/api/v1/graph", tags=["Research Loop & Graph Engine"])
 
@@ -24,6 +25,7 @@ graph_store = ResearchGraphStore()
 gap_detection_engine = GapDetectionEngine(store=graph_store)
 intel_engine = PaperIntelligenceEngine()
 paper_enricher = PaperEnricher()
+graph_synthesizer = GraphSynthesizer(store=graph_store, enricher=paper_enricher)
 
 
 class GraphNodeVisual(BaseModel):
@@ -61,6 +63,30 @@ class IngestPaperResponse(BaseModel):
 
 class RemovePaperRequest(BaseModel):
     paper_id: str
+
+
+class BuildWorkspaceGraphRequest(BaseModel):
+    workspace_id: Optional[str] = None
+    topic: Optional[str] = None
+    paper_ids: Optional[List[str]] = None
+    papers: Optional[List[Dict[str, Any]]] = None
+    force_refresh: bool = False
+
+
+class BuildWorkspaceGraphResponse(BaseModel):
+    status: str
+    workspace_id: Optional[str] = None
+    cached: bool = False
+    llm_called: bool = False
+    papers_count: int = 0
+    cross_paper_relations_count: int = 0
+    gaps_count: int = 0
+    synthesis_summary: Optional[str] = None
+    cross_paper_relations: List[Dict[str, Any]] = []
+    research_gaps: List[Dict[str, Any]] = []
+    nodes: List[Dict[str, Any]] = []
+    edges: List[Dict[str, Any]] = []
+    stats: Dict[str, Any] = {}
 
 
 @router.post("/clear")
@@ -223,6 +249,59 @@ async def ingest_paper_into_graph(req: IngestPaperRequest, db: AsyncSession = De
         nodes_count=graph_store.graph.number_of_nodes(),
         edges_count=graph_store.graph.number_of_edges(),
     )
+
+
+@router.post("/build-workspace-graph", response_model=BuildWorkspaceGraphResponse)
+async def build_workspace_graph_endpoint(req: BuildWorkspaceGraphRequest):
+    """Batch-synthesize knowledge graph for a workspace across added papers using Gemini & SQLite cache."""
+    papers_to_use = req.papers or []
+
+    # If papers list is empty but paper_ids provided, resolve or fetch
+    if not papers_to_use and req.paper_ids:
+        for pid in req.paper_ids:
+            # Check if paper already exists in graph_store
+            n = await graph_store.get_node(pid) or await graph_store.get_node(slugify_id(pid))
+            if n:
+                papers_to_use.append(n.model_dump(mode="json"))
+            else:
+                try:
+                    resolved = await paper_enricher.enrich_by_identifier(pid)
+                    papers_to_use.append(resolved)
+                except Exception:
+                    papers_to_use.append({"id": pid, "title": pid})
+
+    res = await graph_synthesizer.synthesize_workspace_graph(
+        workspace_id=req.workspace_id,
+        topic=req.topic,
+        papers=papers_to_use,
+        force_refresh=req.force_refresh,
+    )
+    return BuildWorkspaceGraphResponse(**res)
+
+
+@router.get("/workspace-cache-status")
+async def get_workspace_cache_status(
+    workspace_id: str = Query(..., description="Workspace ID"),
+    paper_ids: List[str] = Query(default=[], description="Paper IDs currently staged in workspace"),
+):
+    """Check if the given workspace and paper set has a pre-built synthesis in SQLite cache."""
+    cached = await graph_synthesizer.get_cached_synthesis(workspace_id, paper_ids)
+    if cached:
+        return {
+            "workspace_id": workspace_id,
+            "cached": True,
+            "nodes_count": cached.get("nodes_count", 0),
+            "edges_count": cached.get("edges_count", 0),
+            "cross_paper_relations_count": len(cached.get("cross_paper_relations", [])),
+            "gaps_count": len(cached.get("research_gaps", [])),
+            "synthesis_summary": cached.get("synthesis_summary", ""),
+        }
+    return {
+        "workspace_id": workspace_id,
+        "cached": False,
+        "nodes_count": 0,
+        "edges_count": 0,
+    }
 
 
 @router.get("/summary")

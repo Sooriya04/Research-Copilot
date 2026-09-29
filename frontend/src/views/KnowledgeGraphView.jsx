@@ -48,7 +48,7 @@ const NODE_THEMES = {
   metric: { bg: '#3f3f46', border: '#a1a1aa', text: '#f4f4f5', shape: 'circle', size: 16 },
   claim: { bg: '#3f3f46', border: '#a1a1aa', text: '#f4f4f5', shape: 'circle', size: 16 },
   limitation: { bg: '#3f3f46', border: '#a1a1aa', text: '#f4f4f5', shape: 'circle', size: 16 },
-  gap: { bg: '#3f3f46', border: '#a1a1aa', text: '#f4f4f5', shape: 'circle', size: 20 },
+  gap: { bg: '#881337', border: '#f43f5e', text: '#ffe4e6', shape: 'diamond', size: 22 },
 };
 
 const FRIENDLY_RELATION_LABELS = {
@@ -64,6 +64,9 @@ const FRIENDLY_RELATION_LABELS = {
   addresses: 'Solves',
   extends: 'Extends',
   compared_to: 'Compared With',
+  improves_upon: 'Improves Upon',
+  contradicts: 'Contradicts',
+  has_gap: 'Identified Gap',
   relates_to: 'Connected To',
 };
 
@@ -78,10 +81,182 @@ const EDGE_COLORS = {
   has_claim: '#a1a1aa',
   limited_by: '#a1a1aa',
   addresses: '#a1a1aa',
-  extends: '#a1a1aa',
-  compared_to: '#a1a1aa',
+  extends: '#818cf8',
+  compared_to: '#fbbf24',
+  improves_upon: '#34d399',
+  contradicts: '#f87171',
+  has_gap: '#f43f5e',
   relates_to: '#a1a1aa',
 };
+
+function getNodeDescription(entity) {
+  if (!entity) return '';
+  const type = (entity.type || '').toUpperCase();
+  const title = entity.title || '';
+  const raw = entity.raw || {};
+
+  if (raw.description && String(raw.description).trim()) return String(raw.description).trim();
+  if (raw.abstract && String(raw.abstract).trim()) return String(raw.abstract).trim();
+
+  const lower = title.toLowerCase();
+  if (type === 'METHOD') {
+    if (lower.includes('language model') || lower === 'llm' || lower.includes('llms')) {
+      return 'Core statistical and neural framework that models token distributions, predicting subsequent or masked tokens across massive textual corpora.';
+    }
+    if (lower.includes('lora') || lower.includes('low-rank')) {
+      return 'Parameter-efficient fine-tuning (PEFT) technique that freezes pre-trained model weights and injects trainable rank decomposition matrices into attention layers.';
+    }
+    if (lower.includes('flashattention') || lower.includes('flash attention')) {
+      return 'Exact, memory-efficient attention algorithm that leverages GPU SRAM tiling to eliminate memory bottlenecks and speed up sequence processing.';
+    }
+    if (lower.includes('transformer')) {
+      return 'Neural network architecture relying entirely on self-attention mechanisms to model global dependencies in parallel without recurrence.';
+    }
+    if (lower.includes('attention') || lower.includes('self-attention')) {
+      return 'Mechanism computing dynamic similarity weights across all token pairs in a sequence to capture long-range contextual dependencies.';
+    }
+    if (lower.includes('sparse autoencoder') || lower.includes('sae') || lower.includes('autoencoder')) {
+      return 'Unsupervised interpretability method that decomposes dense neural activations into sparse, human-interpretable feature representations.';
+    }
+    if (lower.includes('direct preference optimization') || lower.includes('dpo')) {
+      return 'Reinforcement learning alignment method that optimizes language model policies directly on pairwise preference data without fitting an auxiliary reward model.';
+    }
+    if (lower.includes('quantization') || lower.includes('qlora') || lower.includes('fp8') || lower.includes('int4')) {
+      return 'Compression and acceleration technique reducing model weight precision to conserve GPU memory while maintaining empirical fidelity.';
+    }
+    if (lower.includes('kv cache') || lower.includes('cache')) {
+      return 'Inference optimization mechanism caching computed key and value vectors across autoregressive decoding steps to prevent redundant computation.';
+    }
+    if (lower.includes('steering') || lower.includes('activation addition')) {
+      return 'Representation engineering technique intervening on model residual activations to guide behavior, tone, or safety without fine-tuning weights.';
+    }
+    return `Algorithmic method or neural technique categorized under '${raw.category || 'ML Architecture'}', utilized across connected research papers for modeling and optimization.`;
+  }
+
+  if (type === 'DATASET') {
+    if (lower.includes('glue') || lower.includes('superglue')) {
+      return 'Multi-task benchmark for evaluating natural language understanding across diverse classification, inference, and semantic tasks.';
+    }
+    if (lower.includes('mmlu')) {
+      return 'Massive Multitask Language Understanding benchmark measuring broad world knowledge and problem-solving across 57 academic subjects.';
+    }
+    if (lower.includes('gsm8k')) {
+      return 'Dataset of high-quality grade school math word problems designed to evaluate multi-step mathematical reasoning capabilities.';
+    }
+    if (lower.includes('wmt')) {
+      return 'Standardized machine translation benchmark collection featuring parallel sentence pairs across diverse language directions.';
+    }
+    if (lower.includes('axbench') || lower.includes('steering')) {
+      return 'Standardized steering and representation engineering benchmark evaluating model alignment and behavioral control.';
+    }
+    return `Standardized benchmark dataset and evaluation suite in domain '${raw.domain || 'General AI'}', used for empirical validation and ablation comparisons.`;
+  }
+
+  if (type === 'GAP') {
+    return raw.description || `Combinatorial research opportunity identified between method '${raw.method_id || 'technique'}' and dataset/task '${raw.dataset_id || 'benchmark'}'.`;
+  }
+
+  if (type === 'TOPIC') {
+    return 'Primary workspace research topic anchoring exploration and synthesizing connected literature.';
+  }
+
+  if (type === 'CLAIM') {
+    return 'Specific empirical or architectural assertion verified across experimental trials in the source paper.';
+  }
+
+  if (type === 'LIMITATION') {
+    return 'Reported computational, sample-efficiency, or generalization constraint identified by the authors.';
+  }
+
+  return raw.text || raw.title || 'Scientific research entity mapped in the active knowledge graph.';
+}
+
+function getDetailedConnectionExplanation(sourceType, targetType, relation, direction, currentTitle, neighborTitle) {
+  const rel = (relation || '').toLowerCase();
+  const isOut = direction === 'outgoing';
+  const cType = (sourceType || '').toUpperCase();
+
+  // uses_method
+  if (rel === 'uses_method') {
+    if (cType === 'PAPER') {
+      return isOut
+        ? `Adopts "${neighborTitle}" as its core methodology or algorithmic architecture.`
+        : `Utilized as a foundational technique by "${neighborTitle}".`;
+    } else {
+      // Current is METHOD
+      return isOut
+        ? `Applied by "${neighborTitle}" for experimental execution.`
+        : `Implemented and relied upon by "${neighborTitle}" as part of its core architecture.`;
+    }
+  }
+
+  // evaluates_on
+  if (rel === 'evaluates_on') {
+    if (cType === 'PAPER') {
+      return isOut
+        ? `Evaluates empirical performance and benchmark metrics on "${neighborTitle}".`
+        : `Benchmark dataset evaluating performance reported in "${neighborTitle}".`;
+    } else {
+      // Current is DATASET
+      return isOut
+        ? `Target benchmark evaluating results in "${neighborTitle}".`
+        : `Evaluated by "${neighborTitle}" to measure model quality and generalization.`;
+    }
+  }
+
+  // extends
+  if (rel === 'extends') {
+    return isOut
+      ? `Directly builds upon and extends the foundational concepts or architecture of "${neighborTitle}".`
+      : `Extended and adopted as a foundational baseline by "${neighborTitle}".`;
+  }
+
+  // compared_to
+  if (rel === 'compared_to') {
+    return isOut
+      ? `Empirically compared against "${neighborTitle}" as a competitive baseline.`
+      : `Evaluated alongside "${neighborTitle}" across common benchmark datasets.`;
+  }
+
+  // improves_upon
+  if (rel === 'improves_upon') {
+    return isOut
+      ? `Demonstrates superior empirical accuracy, throughput, or parameter efficiency over "${neighborTitle}".`
+      : `Outperformed in specific empirical metrics or computational efficiency by "${neighborTitle}".`;
+  }
+
+  // contradicts
+  if (rel === 'contradicts') {
+    return isOut
+      ? `Presents contrasting findings, challenging conclusions or scalability claims reported in "${neighborTitle}".`
+      : `Findings or claims challenged by contrasting results in "${neighborTitle}".`;
+  }
+
+  // cites
+  if (rel === 'cites') {
+    return isOut
+      ? `Cites and references "${neighborTitle}" in its related work literature.`
+      : `Cited and referenced by "${neighborTitle}".`;
+  }
+
+  // has_gap
+  if (rel === 'has_gap') {
+    return isOut
+      ? `Associated with unexplored combinatorial research gap "${neighborTitle}".`
+      : `Research gap derived from methodologies or benchmarks analyzed in "${neighborTitle}".`;
+  }
+
+  // covers / investigates
+  if (rel === 'covers' || rel === 'investigates') {
+    return isOut
+      ? `Explores research paper "${neighborTitle}" within this topic scope.`
+      : `Investigated under the overarching research topic "${neighborTitle}".`;
+  }
+
+  return isOut
+    ? `Directly connected via ${(relation || 'link').replace(/_/g, ' ')} to "${neighborTitle}".`
+    : `Connected via ${(relation || 'link').replace(/_/g, ' ')} from "${neighborTitle}".`;
+}
 
 export default function KnowledgeGraphView() {
   const {
@@ -113,6 +288,11 @@ export default function KnowledgeGraphView() {
   const [rawNodes, setRawNodes] = useState([]);
   const [rawEdges, setRawEdges] = useState([]);
   const [summaryData, setSummaryData] = useState(null);
+
+  // AI Graph Synthesis states (with SQLite cache)
+  const [buildingGraph, setBuildingGraph] = useState(false);
+  const [buildStatusMessage, setBuildStatusMessage] = useState('');
+  const [synthesisInfo, setSynthesisInfo] = useState(null);
 
   // Filter & Layout states
   const [nodeTypeFilter, setNodeTypeFilter] = useState('all');
@@ -159,6 +339,30 @@ export default function KnowledgeGraphView() {
       setRawNodes(loadedNodes);
       setRawEdges(loadedEdges);
 
+      // Check SQLite synthesis cache status for workspace
+      if (wsId) {
+        try {
+          const cacheUrl = `/api/v1/graph/workspace-cache-status?workspace_id=${encodeURIComponent(wsId)}${
+            (addedToGraphPaperIds || []).map(id => `&paper_ids=${encodeURIComponent(id)}`).join('')
+          }`;
+          const cacheRes = await fetch(cacheUrl, { signal: controller.signal });
+          if (cacheRes.ok) {
+            const cacheStatus = await cacheRes.json();
+            if (cacheStatus.cached) {
+              setSynthesisInfo({
+                cached: true,
+                llm_called: false,
+                cross_paper_relations_count: cacheStatus.cross_paper_relations_count || 0,
+                gaps_count: cacheStatus.gaps_count || 0,
+                synthesis_summary: cacheStatus.synthesis_summary || '',
+              });
+            }
+          }
+        } catch (cErr) {
+          console.debug('Cache status notice:', cErr);
+        }
+      }
+
       // 2. Fetch summary & coverage
       try {
         const sumRes = await fetch('/api/v1/graph/summary', { signal: controller.signal });
@@ -174,6 +378,64 @@ export default function KnowledgeGraphView() {
     } finally {
       clearTimeout(timeoutId);
       setLoading(false);
+    }
+  };
+
+  const handleBuildWorkspaceGraph = async (forceRefresh = false) => {
+    if (!addedToGraphPaperIds || addedToGraphPaperIds.length === 0) return;
+    setBuildingGraph(true);
+    setBuildStatusMessage('Checking SQLite cache...');
+
+    const activeTopic = (searchQuery || activeWorkspace?.title || graphSearchInput || 'General Literature').trim();
+    const wsId = (activeWorkspace?.id || '').trim();
+
+    try {
+      if (!forceRefresh) {
+        setBuildStatusMessage('Checking SQLite cache for pre-built graph...');
+      } else {
+        setBuildStatusMessage('Synthesizing relationships with Gemini Flash-Lite...');
+      }
+
+      const res = await fetch('/api/v1/graph/build-workspace-graph', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspace_id: wsId || null,
+          topic: activeTopic,
+          paper_ids: addedToGraphPaperIds,
+          force_refresh: forceRefresh,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setRawNodes(data.nodes || []);
+        setRawEdges(data.edges || []);
+        setSynthesisInfo({
+          cached: data.cached,
+          llm_called: data.llm_called,
+          cross_paper_relations_count: data.cross_paper_relations_count || 0,
+          gaps_count: data.gaps_count || 0,
+          synthesis_summary: data.synthesis_summary || '',
+          papers_count: data.papers_count || 0,
+        });
+
+        // Refresh coverage summary
+        try {
+          const sumRes = await fetch('/api/v1/graph/summary');
+          if (sumRes.ok) {
+            const sumData = await sumRes.json();
+            setSummaryData(sumData);
+          }
+        } catch {}
+      } else {
+        console.error('Failed to build workspace graph:', await res.text());
+      }
+    } catch (err) {
+      console.error('Error during graph synthesis:', err);
+    } finally {
+      setBuildingGraph(false);
+      setBuildStatusMessage('');
     }
   };
 
@@ -276,6 +538,7 @@ export default function KnowledgeGraphView() {
       setSelectedEntity(null);
       setNeighborhood(null);
       setAddedToGraphPaperIds([]);
+      setSynthesisInfo(null);
     } catch (err) {
       console.error('Failed to clear graph:', err);
     }
@@ -909,6 +1172,47 @@ export default function KnowledgeGraphView() {
           {graphMode === 'graph' && (
             <>
               <button
+                className="btn btn-primary btn-sm"
+                onClick={() => handleBuildWorkspaceGraph(false)}
+                disabled={buildingGraph || addedToGraphPaperIds.length === 0}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  background: 'var(--accent-primary)',
+                  color: '#ffffff',
+                  fontWeight: 600,
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                }}
+                title="Synthesize cross-paper connections (EXTENDS, COMPARED_TO, gaps) with Gemini Flash-Lite & SQLite cache"
+              >
+                {buildingGraph ? (
+                  <>
+                    <Loader2 size={13} className="animate-spin" />
+                    <span>{buildStatusMessage || 'Synthesizing...'}</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles size={13} />
+                    <span>Build AI Graph ({addedToGraphPaperIds.length})</span>
+                  </>
+                )}
+              </button>
+
+              {synthesisInfo && (
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => handleBuildWorkspaceGraph(true)}
+                  disabled={buildingGraph || addedToGraphPaperIds.length === 0}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                  title="Force re-synthesis with Gemini (bypasses SQLite cache)"
+                >
+                  <RotateCw size={12} className={buildingGraph ? 'animate-spin' : ''} />
+                  <span>Re-synthesize</span>
+                </button>
+              )}
+
+              <button
                 className="btn btn-secondary btn-sm"
                 onClick={fetchGraphData}
                 style={{ display: 'flex', alignItems: 'center', gap: 6 }}
@@ -1109,6 +1413,54 @@ export default function KnowledgeGraphView() {
         </div>
       )}
 
+      {/* Synthesis Status Banner */}
+      {graphMode === 'graph' && synthesisInfo && (
+        <div
+          className="card"
+          style={{
+            padding: '10px 16px',
+            marginBottom: 12,
+            background: synthesisInfo.cached ? 'rgba(16, 185, 129, 0.08)' : 'rgba(99, 102, 241, 0.08)',
+            border: `1px solid ${synthesisInfo.cached ? 'rgba(16, 185, 129, 0.35)' : 'rgba(99, 102, 241, 0.35)'}`,
+            borderRadius: 'var(--radius-md)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            flexWrap: 'wrap',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 260 }}>
+            <span style={{ fontSize: 18 }}>{synthesisInfo.cached ? '⚡' : '✨'}</span>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span>
+                  {synthesisInfo.cached
+                    ? 'Retrieved from SQLite Cache (0 Gemini tokens consumed)'
+                    : 'Synthesized with Gemini Flash-Lite & Cached in SQLite'}
+                </span>
+                <span className="badge badge-neutral" style={{ fontSize: 10 }}>
+                  {synthesisInfo.cached ? 'Zero API Cost' : 'Batch Synthesized'}
+                </span>
+              </div>
+              <div style={{ color: 'var(--text-muted)', fontSize: 11.5, marginTop: 2 }}>
+                {synthesisInfo.synthesis_summary ||
+                  `${synthesisInfo.cross_paper_relations_count || 0} cross-paper relations and ${synthesisInfo.gaps_count || 0} research gaps mapped across ${synthesisInfo.papers_count || addedToGraphPaperIds.length} papers.`}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+            <span className="badge badge-neutral" style={{ fontSize: 11 }}>
+              {synthesisInfo.cross_paper_relations_count || 0} Cross-Paper Relations
+            </span>
+            <span className="badge badge-neutral" style={{ fontSize: 11 }}>
+              {synthesisInfo.gaps_count || 0} Research Gaps
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Filter & Control Bar */}
       {graphMode === 'graph' && rawNodes.length > 0 && (
         <div className="search-bar-box" style={{ padding: '10px 14px', marginBottom: 12, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -1259,6 +1611,44 @@ export default function KnowledgeGraphView() {
             )}
             {filteredData.nodes.length > 0 ? (
               <div ref={containerRef} style={{ width: '100%', height: '100%' }}></div>
+            ) : addedToGraphPaperIds && addedToGraphPaperIds.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)', textAlign: 'center', padding: 24 }}>
+                <div
+                  style={{
+                    width: 54,
+                    height: 54,
+                    borderRadius: '50%',
+                    backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    marginBottom: 14,
+                  }}
+                >
+                  <Sparkles size={28} style={{ color: 'var(--accent-primary)' }} />
+                </div>
+                <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 6 }}>
+                  {addedToGraphPaperIds.length} Papers Added to Workspace Graph
+                </h3>
+                <p style={{ fontSize: 13, maxWidth: 500, textAlign: 'center', marginBottom: 20, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                  Click <strong>Build AI Knowledge Graph</strong> to synthesize cross-paper relationships (EXTENDS, COMPARED_TO, IMPROVES_UPON, shared architectures, research gaps) with Gemini Flash-Lite and save into SQLite for instant subsequent retrieval.
+                </p>
+                <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => handleBuildWorkspaceGraph(false)}
+                    disabled={buildingGraph}
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 18px', fontSize: 13 }}
+                  >
+                    {buildingGraph ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
+                    <span>{buildingGraph ? (buildStatusMessage || 'Synthesizing...') : `Build AI Knowledge Graph (${addedToGraphPaperIds.length})`}</span>
+                  </button>
+                  <button className="btn btn-secondary" onClick={handleSeedGraph} disabled={seeding}>
+                    {seeding ? <Loader2 size={13} className="animate-spin" /> : <Layers size={13} />}
+                    <span style={{ marginLeft: 6 }}>Seed Sample Graph</span>
+                  </button>
+                </div>
+              </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)' }}>
                 <NetworkIcon size={44} style={{ marginBottom: 14, color: 'var(--accent-blue)' }} />
@@ -1405,10 +1795,54 @@ export default function KnowledgeGraphView() {
                   </div>
                 )}
 
-                {selectedEntity.raw?.abstract && (
-                  <p style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.45, marginBottom: 12 }}>
-                    {selectedEntity.raw.abstract.slice(0, 220)}...
-                  </p>
+                {/* Node Description & Summary Card */}
+                {selectedEntity.type !== 'RELATIONSHIP' && (
+                  <div
+                    style={{
+                      padding: '10px 12px',
+                      borderRadius: 'var(--radius-sm)',
+                      background: 'var(--bg-secondary)',
+                      border: '1px solid var(--border-subtle)',
+                      marginBottom: 12,
+                    }}
+                  >
+                    <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 5, display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <Info size={12} style={{ color: 'var(--accent-primary)' }} />
+                      <span>About This {selectedEntity.type}</span>
+                    </div>
+                    <p style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.45, margin: 0 }}>
+                      {getNodeDescription(selectedEntity)}
+                    </p>
+
+                    {/* Metadata tags */}
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                      {selectedEntity.raw?.year && (
+                        <span className="badge badge-neutral" style={{ fontSize: 10 }}>
+                          Year: {selectedEntity.raw.year}
+                        </span>
+                      )}
+                      {selectedEntity.raw?.authors && selectedEntity.raw.authors.length > 0 && (
+                        <span className="badge badge-neutral" style={{ fontSize: 10 }}>
+                          {selectedEntity.raw.authors.length} Authors
+                        </span>
+                      )}
+                      {selectedEntity.raw?.citation_count !== undefined && selectedEntity.raw?.citation_count !== null && (
+                        <span className="badge badge-neutral" style={{ fontSize: 10 }}>
+                          {selectedEntity.raw.citation_count.toLocaleString()} Citations
+                        </span>
+                      )}
+                      {selectedEntity.raw?.category && (
+                        <span className="badge badge-neutral" style={{ fontSize: 10 }}>
+                          Category: {selectedEntity.raw.category}
+                        </span>
+                      )}
+                      {selectedEntity.raw?.domain && (
+                        <span className="badge badge-neutral" style={{ fontSize: 10 }}>
+                          Domain: {selectedEntity.raw.domain}
+                        </span>
+                      )}
+                    </div>
+                  </div>
                 )}
 
                 {selectedEntity.type === 'PAPER' && (
@@ -1450,12 +1884,15 @@ export default function KnowledgeGraphView() {
                 {/* Neighborhood & Relationships Section */}
                 {neighborhood && neighborhood.edges && neighborhood.edges.length > 0 && (
                   <div style={{ marginTop: 14, borderTop: '1px solid var(--border-subtle)', paddingTop: 12 }}>
-                    <h5 style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <Layers size={13} />
-                      Connected Relationships ({neighborhood.edges.length})
+                    <h5 style={{ fontSize: 12, fontWeight: 600, marginBottom: 4, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <Layers size={13} style={{ color: 'var(--accent-primary)' }} />
+                      <span>Connected Relationships ({neighborhood.edges.length})</span>
                     </h5>
+                    <p style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10 }}>
+                      How this node connects to other literature and entities in the graph:
+                    </p>
 
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                       {neighborhood.edges.map((edge, idx) => {
                         const neighborId = edge.direction === 'outgoing' ? edge.target : edge.source;
                         const targetNeighbor = neighborhood.neighbors?.find(n => n?.id === neighborId) ||
@@ -1463,45 +1900,72 @@ export default function KnowledgeGraphView() {
                           rawNodes.find(n => n.id === neighborId);
 
                         const neighborLabel = targetNeighbor?.title || targetNeighbor?.name || targetNeighbor?.data?.title || targetNeighbor?.data?.name || targetNeighbor?.label || neighborId;
+                        const neighborType = targetNeighbor?.node_type || targetNeighbor?.type || 'entity';
                         const relColor = EDGE_COLORS[edge.relation] || 'var(--accent-primary)';
+                        const friendlyRel = FRIENDLY_RELATION_LABELS[(edge.relation || '').toLowerCase()] || (edge.relation || 'connected').replace(/_/g, ' ');
+
+                        const connectionExplanation = getDetailedConnectionExplanation(
+                          selectedEntity.type,
+                          neighborType,
+                          edge.relation,
+                          edge.direction,
+                          selectedEntity.title,
+                          neighborLabel
+                        );
 
                         return (
                           <div
                             key={idx}
                             onClick={() => handleFocusNode(neighborId)}
                             style={{
-                              padding: '7px 10px',
+                              padding: '8px 10px',
                               borderRadius: 'var(--radius-sm)',
                               background: 'var(--bg-secondary)',
                               border: '1px solid var(--border-subtle)',
                               fontSize: 11.5,
                               cursor: 'pointer',
                               display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'space-between',
-                              gap: 6,
-                              transition: 'border-color 0.15s',
+                              flexDirection: 'column',
+                              gap: 4,
+                              transition: 'border-color 0.15s, background 0.15s',
                             }}
-                            onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--accent-primary)'; }}
-                            onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border-subtle)'; }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.borderColor = 'var(--accent-primary)';
+                              e.currentTarget.style.background = 'var(--bg-card)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.borderColor = 'var(--border-subtle)';
+                              e.currentTarget.style.background = 'var(--bg-secondary)';
+                            }}
                           >
-                            <div style={{ overflow: 'hidden' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
                               <span
                                 style={{
                                   fontSize: 9.5,
                                   fontWeight: 700,
                                   color: relColor,
                                   textTransform: 'uppercase',
-                                  display: 'block',
+                                  letterSpacing: '0.4px',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 4,
                                 }}
                               >
-                                {edge.direction === 'outgoing' ? '→ ' : '← '} {(edge.relation || 'connected').replace(/_/g, ' ')}
+                                <span>{edge.direction === 'outgoing' ? '→' : '←'}</span>
+                                <span>{friendlyRel}</span>
                               </span>
-                              <span style={{ color: 'var(--text-primary)', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block' }}>
-                                {String(neighborLabel).slice(0, 34)}
+                              <span style={{ fontSize: 9.5, color: 'var(--text-muted)', textTransform: 'capitalize' }}>
+                                {edge.direction === 'outgoing' ? 'outgoing' : 'incoming'}
                               </span>
                             </div>
-                            <ArrowRight size={12} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+
+                            <div style={{ color: 'var(--text-primary)', fontWeight: 600, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {neighborLabel}
+                            </div>
+
+                            <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.35, marginTop: 1, borderTop: '1px dashed var(--border-subtle)', paddingTop: 4 }}>
+                              💡 {connectionExplanation}
+                            </div>
                           </div>
                         );
                       })}
