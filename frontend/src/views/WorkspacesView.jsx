@@ -23,6 +23,7 @@ import {
   Lightbulb,
   XCircle,
   Workflow,
+  Brain,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
@@ -39,11 +40,42 @@ export default function WorkspacesView() {
     searchResults,
     addedToGraphPaperIds,
     activeReaderPaper,
+    workspaceMemories,
+    addWorkspaceMemory,
+    deleteWorkspaceMemory,
   } = useApp();
 
   const [filterTerm, setFilterTerm] = useState('');
   const [filterType, setFilterType] = useState('all'); // 'all', 'active'
   const [sortBy, setSortBy] = useState('recent'); // 'recent', 'name'
+
+  // Research Memory Ledger state
+  const [memoryFilter, setMemoryFilter] = useState('all');
+  const [isAddingMemory, setIsAddingMemory] = useState(false);
+  const [newCategory, setNewCategory] = useState('decision');
+  const [newTitle, setNewTitle] = useState('');
+  const [newContent, setNewContent] = useState('');
+  const [newStatus, setNewStatus] = useState('active');
+
+  const handleCreateMemory = async (e) => {
+    e.preventDefault();
+    if (!newTitle.trim() || !newContent.trim() || !activeWorkspace) return;
+    await addWorkspaceMemory(activeWorkspace.id, {
+      category: newCategory,
+      title: newTitle.trim(),
+      content: newContent.trim(),
+      status: newStatus,
+    });
+    setNewTitle('');
+    setNewContent('');
+    setIsAddingMemory(false);
+  };
+
+  const filteredMemories = useMemo(() => {
+    if (!workspaceMemories) return [];
+    if (memoryFilter === 'all') return workspaceMemories;
+    return workspaceMemories.filter((m) => m.category === memoryFilter);
+  }, [workspaceMemories, memoryFilter]);
 
   // Helper to read scoped stats for each workspace from localStorage
   const getWorkspaceStats = (wsId) => {
@@ -436,6 +468,305 @@ export default function WorkspacesView() {
               <span>Research Gaps</span>
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Active Workspace Long-Term Research Memory & Hypotheses Ledger */}
+      {activeWorkspace && (
+        <div
+          className="card"
+          style={{
+            marginBottom: 24,
+            padding: '20px 22px',
+            borderRadius: 'var(--radius-md, 10px)',
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-subtle)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: 8,
+                  backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                  color: 'var(--accent-primary)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Brain size={17} />
+              </div>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
+                    Workspace Research Memory & Hypotheses Ledger
+                  </h3>
+                  <span className="badge badge-blue" style={{ fontSize: 11 }}>
+                    {(workspaceMemories || []).length} Recorded
+                  </span>
+                </div>
+                <p style={{ margin: 0, fontSize: 12.5, color: 'var(--text-muted)' }}>
+                  Persistent architectural decisions, active hypotheses, hardware constraints, and empirical findings injected into AI reasoning.
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={() => setIsAddingMemory((v) => !v)}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}
+            >
+              <Plus size={13} />
+              <span>{isAddingMemory ? 'Cancel' : 'Add Memory'}</span>
+            </button>
+          </div>
+
+          {/* New Memory Form */}
+          {isAddingMemory && (
+            <form
+              onSubmit={handleCreateMemory}
+              style={{
+                marginBottom: 16,
+                padding: '14px 16px',
+                borderRadius: 'var(--radius-sm, 6px)',
+                background: 'var(--bg-subtle)',
+                border: '1px solid var(--border-subtle)',
+              }}
+            >
+              <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr 140px', gap: 10, marginBottom: 10 }}>
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>
+                    CATEGORY
+                  </label>
+                  <select
+                    value={newCategory}
+                    onChange={(e) => setNewCategory(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '6px 8px',
+                      borderRadius: 6,
+                      border: '1px solid var(--border-subtle)',
+                      background: 'var(--bg-input)',
+                      color: 'var(--text-primary)',
+                      fontSize: 12,
+                    }}
+                  >
+                    <option value="decision">Decision</option>
+                    <option value="hypothesis">Hypothesis</option>
+                    <option value="constraint">Constraint</option>
+                    <option value="finding">Finding</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>
+                    TITLE
+                  </label>
+                  <input
+                    type="text"
+                    value={newTitle}
+                    onChange={(e) => setNewTitle(e.target.value)}
+                    placeholder="e.g. BF16 Precision Target, LoRA Rank 16 Hypothesis..."
+                    style={{
+                      width: '100%',
+                      boxSizing: 'border-box',
+                      padding: '6px 10px',
+                      borderRadius: 6,
+                      border: '1px solid var(--border-subtle)',
+                      background: 'var(--bg-input)',
+                      color: 'var(--text-primary)',
+                      fontSize: 12,
+                    }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>
+                    STATUS
+                  </label>
+                  <select
+                    value={newStatus}
+                    onChange={(e) => setNewStatus(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '6px 8px',
+                      borderRadius: 6,
+                      border: '1px solid var(--border-subtle)',
+                      background: 'var(--bg-input)',
+                      color: 'var(--text-primary)',
+                      fontSize: 12,
+                    }}
+                  >
+                    <option value="active">Active</option>
+                    <option value="confirmed">Confirmed</option>
+                    <option value="refuted">Refuted</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ marginBottom: 10 }}>
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>
+                  DETAILS & RATIONALE
+                </label>
+                <textarea
+                  value={newContent}
+                  onChange={(e) => setNewContent(e.target.value)}
+                  placeholder="Record the exact rationale, hardware limit, or empirical observation..."
+                  rows={2}
+                  style={{
+                    width: '100%',
+                    boxSizing: 'border-box',
+                    padding: '8px 10px',
+                    borderRadius: 6,
+                    border: '1px solid var(--border-subtle)',
+                    background: 'var(--bg-input)',
+                    color: 'var(--text-primary)',
+                    fontSize: 12,
+                    fontFamily: 'inherit',
+                  }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setIsAddingMemory(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary btn-sm"
+                  disabled={!newTitle.trim() || !newContent.trim()}
+                >
+                  Save to Workspace Memory
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* Filter Tabs */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
+            {['all', 'decision', 'hypothesis', 'constraint', 'finding'].map((cat) => (
+              <button
+                key={cat}
+                type="button"
+                onClick={() => setMemoryFilter(cat)}
+                style={{
+                  border: 'none',
+                  padding: '3px 10px',
+                  borderRadius: 4,
+                  fontSize: 11.5,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  background: memoryFilter === cat ? 'var(--accent-primary)' : 'var(--bg-subtle)',
+                  color: memoryFilter === cat ? '#fff' : 'var(--text-muted)',
+                  textTransform: 'capitalize',
+                  transition: 'all 0.1s ease',
+                }}
+              >
+                {cat} {cat === 'all' ? `(${workspaceMemories.length})` : `(${workspaceMemories.filter((m) => m.category === cat).length})`}
+              </button>
+            ))}
+          </div>
+
+          {/* Memories List */}
+          {filteredMemories.length === 0 ? (
+            <div style={{ padding: '14px 16px', background: 'var(--bg-subtle)', borderRadius: 6, fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>
+              No {memoryFilter === 'all' ? '' : memoryFilter} memories recorded yet. Click "Add Memory" above to persist research decisions and constraints.
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 10 }}>
+              {filteredMemories.map((mem) => {
+                const badgeColor =
+                  mem.category === 'decision'
+                    ? 'badge-blue'
+                    : mem.category === 'hypothesis'
+                    ? 'badge-purple'
+                    : mem.category === 'constraint'
+                    ? 'badge-amber'
+                    : 'badge-emerald';
+
+                const statusColor =
+                  mem.status === 'confirmed'
+                    ? '#059669'
+                    : mem.status === 'refuted'
+                    ? '#e11d48'
+                    : 'var(--accent-primary)';
+
+                return (
+                  <div
+                    key={mem.id}
+                    style={{
+                      background: 'var(--bg-subtle)',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: 8,
+                      padding: '12px 14px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between',
+                    }}
+                  >
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span className={`badge ${badgeColor}`} style={{ textTransform: 'uppercase', fontSize: 10, fontWeight: 700 }}>
+                            {mem.category}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: 10,
+                              fontWeight: 700,
+                              padding: '1px 6px',
+                              borderRadius: 4,
+                              background: 'var(--bg-card)',
+                              color: statusColor,
+                              border: `1px solid ${statusColor}40`,
+                              textTransform: 'uppercase',
+                            }}
+                          >
+                            {mem.status}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => deleteWorkspaceMemory(activeWorkspace.id, mem.id)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            cursor: 'pointer',
+                            color: 'var(--text-muted)',
+                            padding: 2,
+                          }}
+                          title="Delete memory item"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+
+                      <h4 style={{ margin: '0 0 4px', fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
+                        {mem.title}
+                      </h4>
+                      <p style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                        {mem.content}
+                      </p>
+                    </div>
+
+                    {mem.created_at && (
+                      <div style={{ marginTop: 8, paddingTop: 6, borderTop: '1px solid var(--border-subtle)', fontSize: 10.5, color: 'var(--text-muted)' }}>
+                        Recorded: {mem.created_at.slice(0, 10)}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 

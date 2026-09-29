@@ -880,5 +880,31 @@ bundle compilation (`npm run build`).
   * **Sidebar Link**: Positioned the Settings navigation link cleanly in the sidebar footer right above the live system status indicator.
   * **Routing**: Registered `/settings` route in `App.jsx` with full client-side router navigation.
 
+<br />
+
+---
+
+## Multi-Factor PaperRank Scoring, Hugging Face Hub / Papers with Code Integration & Workspace Research Memory
+
+* **Multi-Factor PaperRank Scientific Scoring Engine (`src/engines/paper_rank.py`, `src/api/routes_search.py`)**:
+  * **6-Component Algorithm**: Extracted reusable `score_paper_list()` in `PaperRankEngine` implementing composite scientific scoring across **Topical Relevance (30%)**, **Citation Impact (20%)**, **Citation Graph Prestige / PageRank (20%)**, **Citation Velocity (10%)**, **Methodology Quality (10%)**, and **Reproducibility (10%)**.
+  * **Automatic Search Enrichment**: Integrated PaperRank scoring into `/api/v1/search/unified`. Every paper retrieved across arXiv, OpenAlex, Semantic Scholar, and Crossref is automatically evaluated, scored (0–100), and enriched with component breakdowns and methodology/reproducibility rubrics.
+  * **Frontend PaperRank Badges & Sorting (`frontend/src/views/LiteratureResultsView.jsx`)**: Added "PaperRank Score (Highest)" as the default sort option. Rendered interactive PaperRank pills with color tiers (green/blue/slate) and comprehensive tooltip breakdowns ($R, I, P, V, Q, S$) plus rubric badges (`Code`, `Dataset`, `Ablations`).
+
+* **Hugging Face Hub & Papers with Code Live Artifact Integration (`src/api/routes_paper_intelligence.py`, `frontend/src/components/modals/PaperDetailModal.jsx`)**:
+  * **Artifacts API Endpoint**: Added `GET /api/v1/paper/artifacts/{identifier:path}` querying Papers with Code for benchmark evaluation tables, CatalyzeX/PwC for verified code repositories, and Hugging Face Hub for direct model weights and dataset splits.
+  * **Enhanced Paper Details Modal**: Redesigned `PaperDetailModal.jsx` into a scientific dashboard featuring:
+    * **PaperRank Scorecard**: Full 6-factor progress bars and reproducibility checklist (`Code Verified`, `Dataset Link`, `Ablations`, `Empirical Eval`).
+    * **Papers with Code SOTA Table**: Interactive benchmark evaluation splits (Task, Dataset, Metric, Value).
+    * **Verified Code Repositories**: Star counts, framework indicators (PyTorch/JAX), and direct GitHub links.
+    * **Hugging Face Models & Datasets**: Live model cards with download counts and dataset split tags.
+
+* **Long-Term Workspace Research Memory & Hypotheses Ledger (`src/core/models.py`, `src/api/routes_workbench.py`, `src/api/routes_chat.py`, `frontend/src/views/WorkspacesView.jsx`, `frontend/src/views/ChatView.jsx`, `frontend/src/context/AppContext.jsx`)**:
+  * **SQLite Persistent Memory Schema**: Added `WorkspaceMemoryModel` table (`workspace_id`, `category`, `title`, `content`, `status`, `provenance_source`, `created_at`, `updated_at`) supporting `decision`, `hypothesis`, `constraint`, and `finding` categories.
+  * **Workbench REST API**: Implemented CRUD routes at `/api/v1/workbench/workspaces/{workspace_id}/memories` for persistent storage and retrieval across user sessions.
+  * **Workspace UI Ledger**: Added the "Workspace Research Memory & Hypotheses Ledger" to `WorkspacesView.jsx` with category filter tabs (`all`, `decision`, `hypothesis`, `constraint`, `finding`), a creation form, and status tags (`active`, `confirmed`, `refuted`).
+  * **Chat Reasoning Injection**: Wired workspace memories into `routes_chat.py` and `ChatView.jsx`. Active decisions, hardware constraints, and hypotheses are automatically injected into the LLM system prompt with a header badge (`{N} Memories Primed`) so the assistant preserves research context across multi-week sessions.
+
+
 
 

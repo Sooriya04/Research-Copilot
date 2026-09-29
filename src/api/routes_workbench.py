@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.database import get_db
-from src.core.models import ArtifactModel, ProjectModel, SessionModel, WorkspaceModel
+from src.core.models import ArtifactModel, ProjectModel, SessionModel, WorkspaceModel, WorkspaceMemoryModel
 
 router = APIRouter(prefix="/api/v1/workbench", tags=["Science Workbench"])
 
@@ -247,6 +247,147 @@ async def delete_workspace(workspace_id: str, db: AsyncSession = Depends(get_db)
     await db.delete(ws)
     await db.commit()
     return {"status": "deleted", "workspace_id": workspace_id}
+
+# ── Workspace Long-Term Research Memory & Hypotheses Ledger ─────────────────
+
+class WorkspaceMemoryCreate(BaseModel):
+    category: str  # decision, hypothesis, constraint, finding
+    title: str
+    content: str
+    status: Optional[str] = "active"
+    provenance_source: Optional[str] = None
+
+class WorkspaceMemoryUpdate(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+    status: Optional[str] = None
+    category: Optional[str] = None
+
+class WorkspaceMemoryOut(BaseModel):
+    id: str
+    workspace_id: str
+    category: str
+    title: str
+    content: str
+    status: str
+    provenance_source: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+@router.get("/workspaces/{workspace_id}/memories", response_model=List[WorkspaceMemoryOut])
+async def list_workspace_memories(
+    workspace_id: str,
+    category: Optional[str] = None,
+    status_filter: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """List categorized research memories (decisions, hypotheses, constraints, findings) for a workspace."""
+    stmt = select(WorkspaceMemoryModel).where(WorkspaceMemoryModel.workspace_id == workspace_id)
+    if category:
+        stmt = stmt.where(WorkspaceMemoryModel.category == category)
+    if status_filter:
+        stmt = stmt.where(WorkspaceMemoryModel.status == status_filter)
+    stmt = stmt.order_by(WorkspaceMemoryModel.created_at.desc())
+    
+    result = await db.execute(stmt)
+    memories = result.scalars().all()
+    return [
+        WorkspaceMemoryOut(
+            id=m.id,
+            workspace_id=m.workspace_id,
+            category=m.category,
+            title=m.title,
+            content=m.content,
+            status=m.status,
+            provenance_source=m.provenance_source,
+            created_at=m.created_at.isoformat() if m.created_at else None,
+            updated_at=m.updated_at.isoformat() if m.updated_at else None,
+        )
+        for m in memories
+    ]
+
+@router.post("/workspaces/{workspace_id}/memories", response_model=WorkspaceMemoryOut)
+async def create_workspace_memory(
+    workspace_id: str,
+    req: WorkspaceMemoryCreate,
+    db: AsyncSession = Depends(get_db),
+):
+    """Add a new research decision, hypothesis, constraint, or finding to workspace memory."""
+    ws = await db.get(WorkspaceModel, workspace_id)
+    if not ws:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Workspace '{workspace_id}' not found.")
+
+    mem_id = f"mem-{uuid.uuid4().hex[:8]}"
+    memory = WorkspaceMemoryModel(
+        id=mem_id,
+        workspace_id=workspace_id,
+        category=req.category.lower().strip(),
+        title=req.title.strip(),
+        content=req.content.strip(),
+        status=req.status or "active",
+        provenance_source=req.provenance_source,
+    )
+    db.add(memory)
+    await db.commit()
+    return WorkspaceMemoryOut(
+        id=memory.id,
+        workspace_id=memory.workspace_id,
+        category=memory.category,
+        title=memory.title,
+        content=memory.content,
+        status=memory.status,
+        provenance_source=memory.provenance_source,
+        created_at=memory.created_at.isoformat() if memory.created_at else None,
+        updated_at=memory.updated_at.isoformat() if memory.updated_at else None,
+    )
+
+@router.put("/workspaces/{workspace_id}/memories/{memory_id}", response_model=WorkspaceMemoryOut)
+async def update_workspace_memory(
+    workspace_id: str,
+    memory_id: str,
+    req: WorkspaceMemoryUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    """Update status, title, or content of a workspace memory."""
+    mem = await db.get(WorkspaceMemoryModel, memory_id)
+    if not mem or mem.workspace_id != workspace_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Memory '{memory_id}' not found.")
+
+    if req.title is not None:
+        mem.title = req.title.strip()
+    if req.content is not None:
+        mem.content = req.content.strip()
+    if req.status is not None:
+        mem.status = req.status.strip()
+    if req.category is not None:
+        mem.category = req.category.strip()
+
+    await db.commit()
+    return WorkspaceMemoryOut(
+        id=mem.id,
+        workspace_id=mem.workspace_id,
+        category=mem.category,
+        title=mem.title,
+        content=mem.content,
+        status=mem.status,
+        provenance_source=mem.provenance_source,
+        created_at=mem.created_at.isoformat() if mem.created_at else None,
+        updated_at=mem.updated_at.isoformat() if mem.updated_at else None,
+    )
+
+@router.delete("/workspaces/{workspace_id}/memories/{memory_id}")
+async def delete_workspace_memory(
+    workspace_id: str,
+    memory_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a memory record."""
+    mem = await db.get(WorkspaceMemoryModel, memory_id)
+    if not mem or mem.workspace_id != workspace_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Memory '{memory_id}' not found.")
+    await db.delete(mem)
+    await db.commit()
+    return {"status": "deleted", "memory_id": memory_id}
 
 CURATED_LIBRARY_PAPERS = [
     {

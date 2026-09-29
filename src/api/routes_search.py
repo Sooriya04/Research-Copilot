@@ -382,6 +382,16 @@ async def search_unified_endpoint(req: UnifiedSearchRequest, request: Request, d
                 before_filter, len(unique_papers), before_filter - len(unique_papers))
     # ── End relevance filter ─────────────────────────────────────────────────
 
+    # ── PaperRank 6-factor scoring ───────────────────────────────────────────
+    try:
+        from src.engines.paper_rank import PaperRankEngine
+        rank_engine = PaperRankEngine()
+        unique_papers = rank_engine.score_paper_list(unique_papers, req.query)
+        logger.info("[UNIFIED SEARCH] PaperRank scored %d papers successfully", len(unique_papers))
+    except Exception as score_err:
+        logger.warning("[UNIFIED SEARCH] PaperRank scoring notice: %s", score_err)
+    # ─────────────────────────────────────────────────────────────────────────
+
     duration_ms = (time.time() - start_time) * 1000.0
     logger.info("[UNIFIED SEARCH] Complete: %d raw -> %d unique papers in %.1f ms across sources: %s",
                 len(all_raw_papers), len(unique_papers), duration_ms, source_breakdown)
@@ -418,6 +428,9 @@ async def search_unified_endpoint(req: UnifiedSearchRequest, request: Request, d
             "primary_source": p.primary_source,
             "citation_count": p.citation_count or 0,
             "abstract": (p.abstract or "")[:350],
+            "score": p.score,
+            "score_breakdown": p.score_breakdown.model_dump() if (p.score_breakdown and hasattr(p.score_breakdown, "model_dump")) else (p.score_breakdown if isinstance(p.score_breakdown, dict) else None),
+            "checklist": p.checklist.model_dump() if (p.checklist and hasattr(p.checklist, "model_dump")) else (p.checklist if isinstance(p.checklist, dict) else None),
         })
 
     session_payload = {

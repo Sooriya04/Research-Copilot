@@ -15,6 +15,8 @@ class ResearchChatRequest(BaseModel):
     paper_abstract: Optional[str] = None
     paper_markdown: Optional[str] = None
     workspace_topic: Optional[str] = None
+    workspace_id: Optional[str] = None
+    workspace_memories: Optional[List[Dict[str, Any]]] = None
     model: Optional[str] = "gemini-2.0-flash-lite"
 
 
@@ -30,13 +32,14 @@ Your goal is to assist researchers throughout the research lifecycle: exploring 
 Guidelines:
 1. Prioritize factual correctness, mathematical precision, and grounded citations.
 2. Use GitHub Flavored Markdown, bullet points, and KaTeX mathematical notation (e.g. $W_q, W_k, W_v$ or $$\\mathcal{L}_{total}$$).
-3. Ground your explanations directly in the paper context provided below whenever available.
-4. Highlight empirical baselines, limitations, and reproducible implementation details."""
+3. Ground your explanations directly in the paper context and workspace research memory provided below.
+4. Highlight empirical baselines, limitations, and reproducible implementation details.
+5. Strictly respect recorded workspace constraints, architectural decisions, and active hypotheses."""
 
 
 @router.post("/message", response_model=ResearchChatResponse)
 async def chat_message_endpoint(req: ResearchChatRequest):
-    """Context-aware conversational research Q&A assistant."""
+    """Context-aware conversational research Q&A assistant with long-term workspace memory."""
     provider = get_llm_provider()
 
     augmented_messages: List[ChatMessage] = []
@@ -45,6 +48,15 @@ async def chat_message_endpoint(req: ResearchChatRequest):
     context_parts = [SYSTEM_RESEARCH_PROMPT]
     if req.workspace_topic:
         context_parts.append(f"\nActive Research Workspace Topic: '{req.workspace_topic}'")
+    if req.workspace_memories:
+        mem_lines = ["\nActive Workspace Research Memory (Decisions, Constraints & Hypotheses):"]
+        for mem in req.workspace_memories:
+            cat = str(mem.get("category", "note")).upper()
+            title = mem.get("title", "")
+            content = mem.get("content", "")
+            status = str(mem.get("status", "active")).upper()
+            mem_lines.append(f"- [{cat} | {status}] **{title}**: {content}")
+        context_parts.append("\n".join(mem_lines))
     if req.paper_title:
         context_parts.append(f"\nActive Paper Under Investigation: '{req.paper_title}'")
     if req.paper_abstract:

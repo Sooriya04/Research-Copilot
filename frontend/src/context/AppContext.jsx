@@ -131,6 +131,64 @@ export function AppProvider({ children }) {
     }
   });
 
+  // Long-Term Workspace Research Memory & Hypotheses Ledger
+  const [workspaceMemories, setWorkspaceMemories] = useState([]);
+
+  const fetchWorkspaceMemories = async (wsId) => {
+    if (!wsId) {
+      setWorkspaceMemories([]);
+      return [];
+    }
+    try {
+      const res = await fetch(`/api/v1/workbench/workspaces/${wsId}/memories`);
+      if (res.ok) {
+        const data = await res.json();
+        setWorkspaceMemories(data);
+        return data;
+      }
+    } catch (e) {
+      console.error('[AppContext] Failed to fetch workspace memories:', e);
+    }
+    return [];
+  };
+
+  const addWorkspaceMemory = async (wsId, memoryData) => {
+    if (!wsId) return null;
+    try {
+      const res = await fetch(`/api/v1/workbench/workspaces/${wsId}/memories`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(memoryData),
+      });
+      if (res.ok) {
+        const created = await res.json();
+        setWorkspaceMemories((prev) => [created, ...prev]);
+        return created;
+      }
+    } catch (e) {
+      console.error('[AppContext] Failed to add workspace memory:', e);
+    }
+    return null;
+  };
+
+  const deleteWorkspaceMemory = async (wsId, memId) => {
+    if (!wsId || !memId) return;
+    try {
+      await fetch(`/api/v1/workbench/workspaces/${wsId}/memories/${memId}`, { method: 'DELETE' });
+      setWorkspaceMemories((prev) => prev.filter((m) => m.id !== memId));
+    } catch (e) {
+      console.error('[AppContext] Failed to delete workspace memory:', e);
+    }
+  };
+
+  useEffect(() => {
+    if (activeWsId) {
+      fetchWorkspaceMemories(activeWsId);
+    } else {
+      setWorkspaceMemories([]);
+    }
+  }, [activeWsId]);
+
   // Fetch workspaces on initial mount
   const fetchWorkspaces = async () => {
     try {
@@ -564,6 +622,10 @@ export function AppProvider({ children }) {
         setLitGraphData,
         litGraphTarget,
         setLitGraphTarget,
+        workspaceMemories,
+        fetchWorkspaceMemories,
+        addWorkspaceMemory,
+        deleteWorkspaceMemory,
       }}
     >
       {children}

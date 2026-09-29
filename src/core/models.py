@@ -116,3 +116,17 @@ class UserSettingsModel(Base):
     base_url = Column(Text, nullable=True)                     # for ollama
     model = Column(String, nullable=True)                      # user-selected model
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+class WorkspaceMemoryModel(Base):
+    """Structured long-term research memory for workspaces (decisions, hypotheses, constraints, findings)."""
+    __tablename__ = "workspace_memories"
+    
+    id = Column(String, primary_key=True, index=True)
+    workspace_id = Column(String, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    category = Column(String, nullable=False)  # decision, hypothesis, constraint, finding
+    title = Column(String, nullable=False)
+    content = Column(Text, nullable=False)
+    status = Column(String, default="active")  # active, confirmed, refuted, archived
+    provenance_source = Column(String, nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)

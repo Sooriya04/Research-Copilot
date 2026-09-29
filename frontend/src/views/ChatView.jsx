@@ -19,6 +19,7 @@ import {
   FileText,
   Lightbulb,
   CheckCircle2,
+  Brain,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import MarkdownRenderer from '../components/common/MarkdownRenderer';
@@ -54,6 +55,7 @@ export default function ChatView() {
     setActiveReaderPaper,
     createWorkspace,
     openWorkspaceModal,
+    workspaceMemories,
   } = useApp();
 
   const [messages, setMessages] = useState(() => {
@@ -134,6 +136,8 @@ ${
           content: m.content,
         })),
         workspace_topic: activeWorkspace?.title || null,
+        workspace_id: activeWorkspace?.id || null,
+        workspace_memories: workspaceMemories || [],
         paper_title: activeReaderPaper?.title || null,
         paper_abstract: activeReaderPaper?.abstract || null,
         paper_markdown: activeReaderPaper?.markdown_content || activeReaderPaper?.markdown || null,
@@ -299,6 +303,12 @@ I am now grounded on this paper. Ask any methodological questions or review the 
                 <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'currentColor' }} />
                 <span>Agentic RAG Grounded</span>
               </span>
+              {workspaceMemories && workspaceMemories.length > 0 && (
+                <span className="badge badge-purple" style={{ fontSize: 10.5, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <Brain size={11} />
+                  <span>{workspaceMemories.length} Memories Primed</span>
+                </span>
+              )}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 3, fontSize: 12, color: 'var(--text-muted)' }}>
               <span>Workspace: <strong>{activeWorkspace?.title || 'Global'}</strong></span>

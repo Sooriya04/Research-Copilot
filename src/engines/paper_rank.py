@@ -78,65 +78,8 @@ class PaperRankEngine:
                     if sections:
                         p.sections = sections
 
-        # 4. Score each paper across 6 components
-        current_year = datetime.utcnow().year
-        query_tokens = self._tokenize(req.query)
-        weights = req.weights or self.DEFAULT_WEIGHTS
-
-        for p in papers:
-            # Component 1: Topical Relevance (BM25 / lexical overlap)
-            doc_tokens = self._tokenize((p.title or "") + " " + (p.abstract or ""))
-            relevance = self._compute_relevance(query_tokens, doc_tokens, p.title, req.query)
-
-            # Component 2: Citation Impact (Log-scaled)
-            cites = max(0, p.citation_count)
-            citation_impact = min(100.0, (math.log1p(cites) / math.log1p(10000)) * 100.0)
-
-            # Component 3: Graph Prestige (PageRank)
-            clean_id = p.id.split("/")[-1] if "/" in p.id else p.id
-            graph_prestige = prestige_scores.get(clean_id, 10.0)
-
-            # Component 4: Citation Velocity (Citations / Years since pub)
-            age_years = max(1, current_year - (p.year or current_year) + 1)
-            velocity = min(100.0, ((cites / age_years) / 50.0) * 100.0)
-
-            # Component 5 & 6: Rubric (Methodology & Reproducibility)
-            rubric = self.rubric_evaluator.evaluate(p)
-            p.checklist = rubric
-            
-            method_quality = 0.0
-            if rubric.has_empirical_eval: method_quality += 40.0
-            if rubric.has_ablation: method_quality += 30.0
-            if rubric.has_uncertainty_quant: method_quality += 30.0
-
-            reproducibility = 0.0
-            if rubric.has_code_repo: reproducibility += 50.0
-            if rubric.has_dataset_link: reproducibility += 30.0
-            if rubric.has_compute_budget: reproducibility += 20.0
-
-            # Weighted Total Score
-            total = (
-                relevance * weights.get("topical_relevance", 0.3) +
-                citation_impact * weights.get("citation_impact", 0.2) +
-                graph_prestige * weights.get("graph_prestige", 0.2) +
-                velocity * weights.get("citation_velocity", 0.1) +
-                method_quality * weights.get("methodology_quality", 0.1) +
-                reproducibility * weights.get("reproducibility", 0.1)
-            )
-
-            p.score = round(total, 2)
-            p.score_breakdown = ScoreBreakdown(
-                topical_relevance=round(relevance, 2),
-                citation_impact=round(citation_impact, 2),
-                graph_prestige=round(graph_prestige, 2),
-                citation_velocity=round(velocity, 2),
-                methodology_quality=round(method_quality, 2),
-                reproducibility=round(reproducibility, 2),
-                total_score=round(total, 2),
-            )
-
-        # 5. Sort by PaperRank total score descending
-        papers.sort(key=lambda x: x.score or 0.0, reverse=True)
+        # 4. Score each paper across 6 components using score_paper_list
+        papers = self.score_paper_list(papers, req.query, req.weights)
         ranked = papers[:min(req.limit, len(papers))]
 
         exec_ms = (time.time() - start_time) * 1000.0
@@ -150,6 +93,80 @@ class PaperRankEngine:
             graph_nodes=nodes_count,
             graph_edges=edges_count,
         )
+
+    def score_paper_list(self, papers: List[Paper], query: str, weights: Optional[Dict[str, float]] = None) -> List[Paper]:
+        """Score any list of papers (e.g. from unified search) using the 6-factor PaperRank algorithm."""
+        if not papers:
+            return []
+
+        # 1. Construct citation graph & calculate PageRank prestige across candidates
+        try:
+            citation_graph = self.graph_engine.build_graph(papers)
+            prestige_scores = self.graph_engine.calculate_prestige(citation_graph)
+        except Exception as e:
+            logger.debug("[PaperRank] Graph prestige calculation notice: %s", e)
+            prestige_scores = {}
+
+        current_year = datetime.utcnow().year
+        query_tokens = self._tokenize(query)
+        w = weights or self.DEFAULT_WEIGHTS
+
+        for p in papers:
+            # Component 1: Topical Relevance (BM25 / lexical overlap)
+            doc_tokens = self._tokenize((p.title or "") + " " + (p.abstract or ""))
+            relevance = self._compute_relevance(query_tokens, doc_tokens, p.title or "", query)
+
+            # Component 2: Citation Impact (Log-scaled)
+            cites = max(0, p.citation_count or 0)
+            citation_impact = min(100.0, (math.log1p(cites) / math.log1p(10000)) * 100.0)
+
+            # Component 3: Graph Prestige (PageRank)
+            clean_id = p.id.split("/")[-1] if "/" in p.id else p.id
+            graph_prestige = prestige_scores.get(clean_id, 10.0)
+
+            # Component 4: Citation Velocity (Citations / Years since pub)
+            pub_year = p.year or current_year
+            age_years = max(1, current_year - pub_year + 1)
+            velocity = min(100.0, ((cites / age_years) / 50.0) * 100.0)
+
+            # Component 5 & 6: Rubric (Methodology & Reproducibility)
+            rubric = self.rubric_evaluator.evaluate(p)
+            p.checklist = rubric
+
+            method_quality = 0.0
+            if rubric.has_empirical_eval: method_quality += 40.0
+            if rubric.has_ablation: method_quality += 30.0
+            if rubric.has_uncertainty_quant: method_quality += 30.0
+
+            reproducibility = 0.0
+            if rubric.has_code_repo: reproducibility += 50.0
+            if rubric.has_dataset_link: reproducibility += 30.0
+            if rubric.has_compute_budget: reproducibility += 20.0
+
+            # Weighted Total Score
+            total = (
+                relevance * w.get("topical_relevance", 0.3) +
+                citation_impact * w.get("citation_impact", 0.2) +
+                graph_prestige * w.get("graph_prestige", 0.2) +
+                velocity * w.get("citation_velocity", 0.1) +
+                method_quality * w.get("methodology_quality", 0.1) +
+                reproducibility * w.get("reproducibility", 0.1)
+            )
+
+            p.score = round(total, 1)
+            p.score_breakdown = ScoreBreakdown(
+                topical_relevance=round(relevance, 1),
+                citation_impact=round(citation_impact, 1),
+                graph_prestige=round(graph_prestige, 1),
+                citation_velocity=round(velocity, 1),
+                methodology_quality=round(method_quality, 1),
+                reproducibility=round(reproducibility, 1),
+                total_score=round(total, 1),
+            )
+
+        # Sort descending by PaperRank score
+        papers.sort(key=lambda x: x.score or 0.0, reverse=True)
+        return papers
 
     def _tokenize(self, text: str) -> List[str]:
         words = re.findall(r"\b[A-Za-z0-9_-]{2,}\b", text.lower())

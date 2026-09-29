@@ -14,6 +14,10 @@ import {
   X,
   SlidersHorizontal,
   Plus,
+  Code,
+  Database,
+  Layers,
+  Award,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
@@ -37,7 +41,7 @@ export default function LiteratureResultsView() {
   const [sourceFilter, setSourceFilter] = useState('all');
   const [onlyOpenAccess, setOnlyOpenAccess] = useState(false);
   const [onlyInGraph, setOnlyInGraph] = useState(false);
-  const [sortBy, setSortBy] = useState('relevance'); // 'relevance' | 'citations' | 'year'
+  const [sortBy, setSortBy] = useState('rank'); // 'rank' | 'relevance' | 'citations' | 'year'
   const [expandedAbstracts, setExpandedAbstracts] = useState({});
   const [copiedBibId, setCopiedBibId] = useState(null);
   const [ingestedMap, setIngestedMap] = useState({});
@@ -181,7 +185,9 @@ export default function LiteratureResultsView() {
       });
     }
 
-    if (sortBy === 'citations') {
+    if (sortBy === 'rank') {
+      list.sort((a, b) => (b.score || 0) - (a.score || 0));
+    } else if (sortBy === 'citations') {
       list.sort((a, b) => (b.citation_count || 0) - (a.citation_count || 0));
     } else if (sortBy === 'year') {
       list.sort((a, b) => (b.year || 0) - (a.year || 0));
@@ -322,9 +328,11 @@ export default function LiteratureResultsView() {
                   background: 'var(--bg-input)',
                   color: 'var(--text-primary)',
                   fontSize: 12.5,
+                  fontWeight: 600,
                 }}
               >
-                <option value="relevance">Relevance</option>
+                <option value="rank">PaperRank Score (Highest)</option>
+                <option value="relevance">Topical Relevance</option>
                 <option value="citations">Citations (High to Low)</option>
                 <option value="year">Publication Year (Newest)</option>
               </select>
@@ -530,10 +538,53 @@ export default function LiteratureResultsView() {
                         <span>In Knowledge Graph</span>
                       </span>
                     )}
+                    {paper.checklist?.has_code_repo && (
+                      <span className="badge badge-blue" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <Code size={11} />
+                        <span>Code</span>
+                      </span>
+                    )}
+                    {paper.checklist?.has_dataset_link && (
+                      <span className="badge badge-purple" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <Database size={11} />
+                        <span>Dataset</span>
+                      </span>
+                    )}
+                    {paper.checklist?.has_ablation && (
+                      <span className="badge badge-neutral" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <Layers size={11} />
+                        <span>Ablations</span>
+                      </span>
+                    )}
                   </div>
 
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                    {paper.citation_count ? `${paper.citation_count} Citations` : 'Citation tracked'}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {paper.score !== null && paper.score !== undefined && (
+                      <div
+                        className="paperrank-pill"
+                        onClick={() => openPaperModal(paper)}
+                        title={`PaperRank: ${paper.score}/100\n• Topical Relevance: ${paper.score_breakdown?.topical_relevance ?? 'N/A'}\n• Citation Impact: ${paper.score_breakdown?.citation_impact ?? 'N/A'}\n• Graph Prestige: ${paper.score_breakdown?.graph_prestige ?? 'N/A'}\n• Citation Velocity: ${paper.score_breakdown?.citation_velocity ?? 'N/A'}\n• Methodology: ${paper.score_breakdown?.methodology_quality ?? 'N/A'}\n• Reproducibility: ${paper.score_breakdown?.reproducibility ?? 'N/A'}\nClick to view full scientific breakdown.`}
+                        style={{
+                          fontSize: 11.5,
+                          fontWeight: 700,
+                          padding: '2px 8px',
+                          borderRadius: 6,
+                          background: paper.score >= 70 ? 'rgba(16, 185, 129, 0.12)' : (paper.score >= 45 ? 'rgba(99, 102, 241, 0.12)' : 'var(--bg-subtle)'),
+                          color: paper.score >= 70 ? '#059669' : (paper.score >= 45 ? 'var(--accent-primary)' : 'var(--text-muted)'),
+                          border: `1px solid ${paper.score >= 70 ? 'rgba(16, 185, 129, 0.3)' : (paper.score >= 45 ? 'rgba(99, 102, 241, 0.3)' : 'var(--border-subtle)')}`,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 4,
+                        }}
+                      >
+                        <Award size={11} />
+                        <span>PaperRank {paper.score}</span>
+                      </div>
+                    )}
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                      {paper.citation_count ? `${paper.citation_count} Citations` : 'Citation tracked'}
+                    </div>
                   </div>
                 </div>
 

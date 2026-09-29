@@ -181,3 +181,113 @@ async def import_paper_from_url_endpoint(req: ImportPaperUrlRequest):
         logger.error("[PaperImport] Import failed: %s", e)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Import error: {e}")
 
+
+@router.get("/artifacts/{identifier:path}")
+async def get_paper_artifacts_endpoint(identifier: str):
+    """Fetch linked benchmarks (Papers with Code), code repositories (GitHub/CatalyzeX), and ML models/datasets (Hugging Face)."""
+    clean_target = identifier.strip()
+    if not clean_target:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Identifier cannot be empty.")
+
+    clean_arxiv = extract_clean_arxiv_id(clean_target)
+    title = clean_target if not clean_arxiv else None
+
+    from src.engines.paperswithcode import PapersWithCodeClient
+    pwc_client = PapersWithCodeClient()
+
+    benchmarks_raw = await pwc_client.get_paper_benchmarks(arxiv_id=clean_arxiv, title=title)
+    repos_raw = await pwc_client.get_code_repositories(arxiv_id=clean_arxiv, title=title)
+
+    import httpx
+    hf_models = []
+    hf_datasets = []
+
+    hf_headers = {"User-Agent": "ResearchCopilot/2.0"}
+    async with httpx.AsyncClient(timeout=8.0, headers=hf_headers) as client:
+        # A. ArXiv direct mapping if arXiv ID is available
+        if clean_arxiv:
+            try:
+                hf_arxiv_url = f"https://huggingface.co/api/arxiv/{clean_arxiv}/repos"
+                r = await client.get(hf_arxiv_url)
+                if r.status_code == 200:
+                    d = r.json()
+                    for m in d.get("models", [])[:6]:
+                        hf_models.append({
+                            "id": m.get("id"),
+                            "name": m.get("id"),
+                            "pipeline_tag": m.get("pipeline_tag") or "Model",
+                            "downloads": m.get("downloads", 0),
+                            "likes": m.get("likes", 0),
+                            "url": f"https://huggingface.co/{m.get('id')}",
+                        })
+                    for ds in d.get("datasets", [])[:6]:
+                        hf_datasets.append({
+                            "id": ds.get("id"),
+                            "name": ds.get("id"),
+                            "downloads": ds.get("downloads", 0),
+                            "likes": ds.get("likes", 0),
+                            "url": f"https://huggingface.co/datasets/{ds.get('id')}",
+                        })
+            except Exception as e:
+                logger.debug("[HF] Direct arXiv lookup notice: %s", e)
+
+        # B. If no direct models/datasets found, search HF by title/keyword
+        if not hf_models and not hf_datasets:
+            search_query = clean_arxiv or (clean_target[:40] if len(clean_target) > 5 else None)
+            if search_query:
+                try:
+                    m_resp = await client.get("https://huggingface.co/api/models", params={"search": search_query, "limit": 4})
+                    if m_resp.status_code == 200:
+                        for m in m_resp.json():
+                            hf_models.append({
+                                "id": m.get("id"),
+                                "name": m.get("id"),
+                                "pipeline_tag": m.get("pipeline_tag") or "Model",
+                                "downloads": m.get("downloads", 0),
+                                "likes": m.get("likes", 0),
+                                "url": f"https://huggingface.co/{m.get('id')}",
+                            })
+                    d_resp = await client.get("https://huggingface.co/api/datasets", params={"search": search_query, "limit": 4})
+                    if d_resp.status_code == 200:
+                        for ds in d_resp.json():
+                            hf_datasets.append({
+                                "id": ds.get("id"),
+                                "name": ds.get("id"),
+                                "downloads": ds.get("downloads", 0),
+                                "likes": ds.get("likes", 0),
+                                "url": f"https://huggingface.co/datasets/{ds.get('id')}",
+                            })
+                except Exception as e:
+                    logger.debug("[HF] Search lookup notice: %s", e)
+
+    benchmarks_out = []
+    for b in benchmarks_raw:
+        benchmarks_out.append({
+            "task": b.task,
+            "dataset": b.dataset,
+            "metric": b.metric,
+            "value": b.value,
+            "model": b.model,
+            "source": b.source,
+            "repository_url": b.repository_url,
+        })
+
+    repos_out = []
+    for r in repos_raw:
+        repos_out.append({
+            "url": r.url,
+            "is_official": r.is_official,
+            "framework": r.framework or "PyTorch",
+            "stars": r.stars or 0,
+        })
+
+    return {
+        "identifier": clean_target,
+        "arxiv_id": clean_arxiv,
+        "benchmarks": benchmarks_out,
+        "code_repositories": repos_out,
+        "hf_models": hf_models,
+        "hf_datasets": hf_datasets,
+        "total_artifacts": len(benchmarks_out) + len(repos_out) + len(hf_models) + len(hf_datasets),
+    }
+
