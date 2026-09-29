@@ -351,17 +351,34 @@ function YearLegend({ minYear, maxYear }) {
 // ── Main LitGraph View ────────────────────────────────────────────────────────
 export default function LitGraphView() {
   const fgRef = useRef(null);
+  const containerRef = useRef(null);
+  const hasZoomedRef = useRef(false);
+  const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+
   const {
     activeWorkspace,
     searchResults,
-    sessionId,
     litGraphData,
     setLitGraphData,
     litGraphTarget,
     setLitGraphTarget,
   } = useApp();
 
-  const [graphData, setGraphData] = useState(() => litGraphData || null);
+  const [graphData, setGraphData] = useState(() => {
+    if (!litGraphData) return null;
+    return {
+      ...litGraphData,
+      nodes: (litGraphData.nodes || []).map((n) => ({
+        ...n,
+        radius: n.radius || citationRadius(n.citationCount),
+      })),
+      links: (litGraphData.links || []).map((l) => ({
+        ...l,
+        source: typeof l.source === 'object' && l.source !== null ? (l.source.id ?? l.source) : l.source,
+        target: typeof l.target === 'object' && l.target !== null ? (l.target.id ?? l.target) : l.target,
+      })),
+    };
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [selectedNode, setSelectedNode] = useState(null);
@@ -392,10 +409,48 @@ export default function LitGraphView() {
     return [1990, new Date().getFullYear()];
   });
 
+  // Track container dimensions via ResizeObserver
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const measure = () => {
+      if (el) {
+        const w = el.clientWidth;
+        const h = el.clientHeight;
+        if (w > 0 && h > 0) {
+          setDimensions({ width: w, height: h });
+        }
+      }
+    };
+
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+
+    return () => ro.disconnect();
+  }, [panelOpen]);
+
   // Hydrate when litGraphData updates in the background from parallel search
   useEffect(() => {
-    if (litGraphData && litGraphData !== graphData) {
-      setGraphData(litGraphData);
+    if (litGraphData) {
+      const cleanNodes = (litGraphData.nodes || []).map((n) => ({
+        ...n,
+        radius: n.radius || citationRadius(n.citationCount),
+      }));
+      const cleanLinks = (litGraphData.links || []).map((l) => ({
+        ...l,
+        source: typeof l.source === 'object' && l.source !== null ? (l.source.id ?? l.source) : l.source,
+        target: typeof l.target === 'object' && l.target !== null ? (l.target.id ?? l.target) : l.target,
+      }));
+      const cleanData = {
+        ...litGraphData,
+        nodes: cleanNodes,
+        links: cleanLinks,
+      };
+
+      setGraphData(cleanData);
+      hasZoomedRef.current = false;
       if (litGraphData.seed_title) setSeedTitle(litGraphData.seed_title);
       const years = litGraphData.nodes?.map((n) => n.year).filter(Boolean) || [];
       const mn = years.length ? Math.min(...years) : 1990;
@@ -412,12 +467,13 @@ export default function LitGraphView() {
     setHighlightNodes(new Set());
     setHighlightLinks(new Set());
     setSeedTitle(paperTitle);
+    hasZoomedRef.current = false;
 
     try {
-      const isIdOrDoi = paperId.startsWith('10.') || paperId.toUpperCase().startsWith('W') || paperId.startsWith('arxiv:') || paperId.startsWith('doi:') || paperId.startsWith('sess-');
+      const isIdOrDoi = paperId.startsWith('10.') || paperId.toUpperCase().startsWith('W') || paperId.startsWith('arxiv:') || paperId.startsWith('doi:');
       const url = isIdOrDoi
         ? `/api/v1/litgraph/graph/${encodeURIComponent(paperId)}`
-        : `/api/v1/litgraph/query?q=${encodeURIComponent(paperId)}&session_id=${encodeURIComponent(sessionId || '')}`;
+        : `/api/v1/litgraph/query?q=${encodeURIComponent(paperId)}`;
 
       const res = await fetch(url);
       if (!res.ok) {
@@ -437,24 +493,42 @@ export default function LitGraphView() {
       setYearBounds([mn, mx]);
       setMinYearFilter(mn);
 
-      // Annotate node radii
-      data.nodes = data.nodes.map((n) => ({
+      // Annotate node radii and sanitize link endpoints to pure string IDs
+      const cleanNodes = (data.nodes || []).map((n) => ({
         ...n,
         radius: citationRadius(n.citationCount),
       }));
+      const cleanLinks = (data.links || []).map((l) => ({
+        ...l,
+        source: typeof l.source === 'object' && l.source !== null ? (l.source.id ?? l.source) : l.source,
+        target: typeof l.target === 'object' && l.target !== null ? (l.target.id ?? l.target) : l.target,
+      }));
 
-      setGraphData(data);
-      if (setLitGraphData) setLitGraphData(data);
+      const cleanData = {
+        ...data,
+        nodes: cleanNodes,
+        links: cleanLinks,
+      };
+
+      setGraphData(cleanData);
+      if (setLitGraphData) setLitGraphData(cleanData);
       if (setLitGraphTarget) setLitGraphTarget(paperId);
     } catch (e) {
       setError(e.message);
     }
     setLoading(false);
-  }, [sessionId, setLitGraphData, setLitGraphTarget]);
+  }, [setLitGraphData, setLitGraphTarget]);
+
+  // Auto-load graph scoped to active workspace topic when opening LitGraph without pre-existing graph
+  useEffect(() => {
+    if (!graphData && !loading && activeWorkspace?.title) {
+      loadGraph(activeWorkspace.title, activeWorkspace.title);
+    }
+  }, [activeWorkspace?.id, activeWorkspace?.title, graphData, loading, loadGraph]);
 
   // Filtered graph (year + node count)
   const filteredGraph = useMemo(() => {
-    if (!graphData) return null;
+    if (!graphData?.nodes?.length) return null;
     const [minY, maxY] = yearBounds;
 
     let nodes = graphData.nodes.filter(
@@ -472,26 +546,55 @@ export default function LitGraphView() {
     }
 
     const nodeIds = new Set(nodes.map((n) => n.id));
-    const links = graphData.links.filter(
-      (l) => nodeIds.has(l.source?.id || l.source) && nodeIds.has(l.target?.id || l.target)
-    );
+
+    // Ensure links always use clean string IDs so D3 forceLink resolves them cleanly to current node instances
+    const links = (graphData.links || [])
+      .map((l) => ({
+        ...l,
+        source: typeof l.source === 'object' && l.source !== null ? (l.source.id ?? l.source) : l.source,
+        target: typeof l.target === 'object' && l.target !== null ? (l.target.id ?? l.target) : l.target,
+      }))
+      .filter((l) => nodeIds.has(l.source) && nodeIds.has(l.target));
 
     // Keep seed and only nodes that have at least 1 edge (prevent isolated dots in void space)
     const connectedIds = new Set();
     links.forEach((l) => {
-      connectedIds.add(l.source?.id || l.source);
-      connectedIds.add(l.target?.id || l.target);
+      connectedIds.add(l.source);
+      connectedIds.add(l.target);
     });
     const connectedNodes = nodes.filter((n) => n.isSeed || connectedIds.has(n.id));
 
-    // Color nodes
-    const coloredNodes = connectedNodes.map((n) => ({
-      ...n,
-      color: yearToColor(n.year, minY, maxY, n.isSeed),
-    }));
+    // Color nodes and strip lingering kinetic velocities from unmounted simulations
+    const coloredNodes = connectedNodes.map((n) => {
+      const clone = {
+        ...n,
+        color: yearToColor(n.year, minY, maxY, n.isSeed),
+      };
+      // Keep x, y if valid finite numbers for smooth position persistence,
+      // but wipe out transient velocities so nodes don't drift or explode
+      if (typeof clone.x !== 'number' || isNaN(clone.x)) delete clone.x;
+      if (typeof clone.y !== 'number' || isNaN(clone.y)) delete clone.y;
+      delete clone.vx;
+      delete clone.vy;
+      delete clone.index;
+      return clone;
+    });
 
     return { nodes: coloredNodes, links };
   }, [graphData, minYearFilter, maxNodes, yearBounds]);
+
+  // Automatic framing / zoom-to-fit on layout settle
+  useEffect(() => {
+    if (filteredGraph && fgRef.current) {
+      const timer = setTimeout(() => {
+        if (fgRef.current && !hasZoomedRef.current) {
+          fgRef.current.zoomToFit(400, 36);
+          hasZoomedRef.current = true;
+        }
+      }, 350);
+      return () => clearTimeout(timer);
+    }
+  }, [filteredGraph, dimensions.width, dimensions.height]);
 
   // Node click → highlight neighbourhood
   const handleNodeClick = useCallback(
@@ -711,10 +814,12 @@ export default function LitGraphView() {
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
 
         {/* Graph Canvas */}
-        <div style={{ flex: 1, position: 'relative', overflow: 'hidden', background: '#f8fafc' }}>
+        <div ref={containerRef} style={{ flex: 1, position: 'relative', overflow: 'hidden', background: '#f8fafc' }}>
           {filteredGraph && (
             <ForceGraph2D
               ref={fgRef}
+              width={dimensions.width > 0 ? dimensions.width : undefined}
+              height={dimensions.height > 0 ? dimensions.height : undefined}
               graphData={filteredGraph}
               nodeId="id"
               linkSource="source"
@@ -730,6 +835,12 @@ export default function LitGraphView() {
               d3VelocityDecay={0.35}
               warmupTicks={80}
               cooldownTicks={120}
+              onEngineStop={() => {
+                if (!hasZoomedRef.current && fgRef.current) {
+                  fgRef.current.zoomToFit(400, 36);
+                  hasZoomedRef.current = true;
+                }
+              }}
               onNodeClick={handleNodeClick}
               onBackgroundClick={handleBackgroundClick}
               onNodeHover={setHoverNode}
@@ -763,7 +874,7 @@ export default function LitGraphView() {
             <button className="btn btn-secondary btn-sm" onClick={() => fgRef.current?.zoom(0.7)} title="Zoom Out">
               <ZoomOut size={14} />
             </button>
-            <button className="btn btn-secondary btn-sm" onClick={() => fgRef.current?.zoomToFit(500)} title="Fit View">
+            <button className="btn btn-secondary btn-sm" onClick={() => fgRef.current?.zoomToFit(400, 36)} title="Fit View">
               <Maximize2 size={14} />
             </button>
           </div>

@@ -511,19 +511,9 @@ async def search_papers(q: str = Query(..., min_length=2, description="Paper tit
 @router.get("/query", response_model=LitGraphResponse)
 async def get_litgraph_by_query(
     q: str = Query(..., min_length=2, description="Research query or topic"),
-    session_id: Optional[str] = Query(None, description="Optional active session ID to resolve top paper"),
-    db: AsyncSession = Depends(get_db),
 ):
-    """
-    Build a bibliometric similarity graph based on a search bar query or active research session.
-    Automatically prioritizes the seed paper from the session if available.
-    """
+    """Build a bibliometric similarity graph directly from the requested paper title, DOI, or research topic."""
     target = q.strip()
-    if session_id:
-        sess = await db.get(SessionModel, session_id.strip())
-        if sess and sess.state_json and sess.state_json.get("seed_paper"):
-            sp = sess.state_json["seed_paper"]
-            target = sp.get("doi") or sp.get("arxiv_id") or sp.get("title") or target
     return await build_litgraph_pipeline(target)
 
 

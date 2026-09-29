@@ -115,7 +115,7 @@ export function AppProvider({ children }) {
   const [litGraphData, setLitGraphData] = useState(() => {
     try {
       const ws = JSON.parse(localStorage.getItem('rc_active_workspace') || 'null');
-      const saved = sessionStorage.getItem(getWsKey(ws?.id, 'litgraph_data'));
+      const saved = localStorage.getItem(getWsKey(ws?.id, 'litgraph_data'));
       return saved ? JSON.parse(saved) : null;
     } catch {
       return null;
@@ -125,7 +125,7 @@ export function AppProvider({ children }) {
   const [litGraphTarget, setLitGraphTarget] = useState(() => {
     try {
       const ws = JSON.parse(localStorage.getItem('rc_active_workspace') || 'null');
-      return sessionStorage.getItem(getWsKey(ws?.id, 'litgraph_target')) || '';
+      return localStorage.getItem(getWsKey(ws?.id, 'litgraph_target')) || '';
     } catch {
       return '';
     }
@@ -235,8 +235,8 @@ export function AppProvider({ children }) {
       const savedGraphs = localStorage.getItem(getWsKey(wsId, 'added_graph_papers'));
       const savedReader = localStorage.getItem(getWsKey(wsId, 'reader_paper'));
       const savedComparisons = localStorage.getItem(getWsKey(wsId, 'comparison_papers'));
-      const savedLitData = sessionStorage.getItem(getWsKey(wsId, 'litgraph_data'));
-      const savedLitTarget = sessionStorage.getItem(getWsKey(wsId, 'litgraph_target'));
+      const savedLitData = localStorage.getItem(getWsKey(wsId, 'litgraph_data'));
+      const savedLitTarget = localStorage.getItem(getWsKey(wsId, 'litgraph_target'));
 
       setSearchQuery(q);
       setSearchResults(savedResults ? JSON.parse(savedResults) : []);
@@ -265,25 +265,25 @@ export function AppProvider({ children }) {
         localStorage.removeItem(getWsKey(activeWsId, 'reader_paper'));
       }
       if (litGraphData) {
-        sessionStorage.setItem(getWsKey(activeWsId, 'litgraph_data'), JSON.stringify(litGraphData));
+        localStorage.setItem(getWsKey(activeWsId, 'litgraph_data'), JSON.stringify(litGraphData));
       } else {
-        sessionStorage.removeItem(getWsKey(activeWsId, 'litgraph_data'));
+        localStorage.removeItem(getWsKey(activeWsId, 'litgraph_data'));
       }
       if (litGraphTarget) {
-        sessionStorage.setItem(getWsKey(activeWsId, 'litgraph_target'), litGraphTarget);
+        localStorage.setItem(getWsKey(activeWsId, 'litgraph_target'), litGraphTarget);
       } else {
-        sessionStorage.removeItem(getWsKey(activeWsId, 'litgraph_target'));
+        localStorage.removeItem(getWsKey(activeWsId, 'litgraph_target'));
       }
     } else {
       if (litGraphData) {
-        sessionStorage.setItem(getWsKey(null, 'litgraph_data'), JSON.stringify(litGraphData));
+        localStorage.setItem(getWsKey(null, 'litgraph_data'), JSON.stringify(litGraphData));
       } else {
-        sessionStorage.removeItem(getWsKey(null, 'litgraph_data'));
+        localStorage.removeItem(getWsKey(null, 'litgraph_data'));
       }
       if (litGraphTarget) {
-        sessionStorage.setItem(getWsKey(null, 'litgraph_target'), litGraphTarget);
+        localStorage.setItem(getWsKey(null, 'litgraph_target'), litGraphTarget);
       } else {
-        sessionStorage.removeItem(getWsKey(null, 'litgraph_target'));
+        localStorage.removeItem(getWsKey(null, 'litgraph_target'));
       }
     }
   }, [activeWsId, searchQuery, searchResults, sourceCounts, addedToGraphPaperIds, comparisonPapers, activeReaderPaper, litGraphData, litGraphTarget]);
@@ -331,7 +331,7 @@ export function AppProvider({ children }) {
 
         // Pre-fetch LitGraph in parallel for the newly created workspace topic and store it
         if (initialQuery) {
-          fetch(`/api/v1/litgraph/query?q=${encodeURIComponent(initialQuery)}&session_id=${encodeURIComponent(newWs.id)}`)
+          fetch(`/api/v1/litgraph/query?q=${encodeURIComponent(initialQuery)}`)
             .then(async (lRes) => {
               if (lRes.ok) {
                 const lData = await lRes.json();
@@ -345,8 +345,8 @@ export function AppProvider({ children }) {
                 }
                 setLitGraphData(lData);
                 setLitGraphTarget(initialQuery);
-                sessionStorage.setItem(getWsKey(newWs.id, 'litgraph_data'), JSON.stringify(lData));
-                sessionStorage.setItem(getWsKey(newWs.id, 'litgraph_target'), initialQuery);
+                localStorage.setItem(getWsKey(newWs.id, 'litgraph_data'), JSON.stringify(lData));
+                localStorage.setItem(getWsKey(newWs.id, 'litgraph_target'), initialQuery);
               }
             })
             .catch(() => {});
@@ -504,10 +504,9 @@ export function AppProvider({ children }) {
     setSourceCounts({});
 
     const currentWsId = activeWorkspace?.id || null;
-    const currentSessionId = activeWorkspace ? activeWorkspace.id : sessionId;
 
     // Parallel search in LitGraph to pre-fetch and store information
-    fetch(`/api/v1/litgraph/query?q=${encodeURIComponent(q)}&session_id=${encodeURIComponent(currentSessionId || '')}`)
+    fetch(`/api/v1/litgraph/query?q=${encodeURIComponent(q)}`)
       .then(async (lRes) => {
         if (lRes.ok) {
           const lData = await lRes.json();
@@ -521,8 +520,8 @@ export function AppProvider({ children }) {
           }
           setLitGraphData(lData);
           setLitGraphTarget(q);
-          sessionStorage.setItem(getWsKey(currentWsId, 'litgraph_data'), JSON.stringify(lData));
-          sessionStorage.setItem(getWsKey(currentWsId, 'litgraph_target'), q);
+          localStorage.setItem(getWsKey(currentWsId, 'litgraph_data'), JSON.stringify(lData));
+          localStorage.setItem(getWsKey(currentWsId, 'litgraph_target'), q);
         }
       })
       .catch((err) => {
@@ -537,7 +536,7 @@ export function AppProvider({ children }) {
           query: q,
           sources: sourcesToUse || selectedSources,
           limit_per_source: Number(limitNum),
-          session_id: currentSessionId,
+          workspace_id: currentWsId,
         }),
       });
 
@@ -546,9 +545,6 @@ export function AppProvider({ children }) {
         const papers = data.papers || [];
         setSearchResults(papers);
         setSourceCounts(data.source_breakdown || {});
-        if (data.session_id) {
-          setSessionId(data.session_id);
-        }
         return papers;
       } else {
         const err = await res.text();

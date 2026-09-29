@@ -195,7 +195,7 @@ ${
         {
           id: 'init-fresh',
           role: 'assistant',
-          content: `### Research Session Cleared\nReady for new queries grounded on **${activeWorkspace?.title || 'Scientific Literature'}**.`,
+          content: `### Chat Cleared\nReady for new queries grounded on **${activeWorkspace?.title || 'Scientific Literature'}**.`,
           timestamp: new Date().toISOString(),
         },
       ]);

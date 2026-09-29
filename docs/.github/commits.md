@@ -908,3 +908,30 @@ bundle compilation (`npm run build`).
 
 
 
+
+<br />
+
+---
+
+## LitGraph D3 Reference Decoupling, Session Hijacking Removal & Dynamic Auto-Framing
+
+* **Root Cause of LitGraph Glitch on Navigation (`frontend/src/views/LitGraphView.jsx`)**:
+  * **D3 Object Mutation**: When `ForceGraph2D` simulated the bibliometric graph, D3's `forceLink` mutated `link.source` and `link.target` in-place from string IDs into full node object references.
+  * **Ghost Reference Decoupling**: Navigating away to Paper Reader (`/pdf-inspector`) unmounted `LitGraphView`. Upon returning, `filteredGraph` generated shallow clones for `coloredNodes` (`connectedNodes.map(n => ({ ...n, color }))`). However, `links` retained references pointing to the *previous* unmounted node instances.
+  * **Link Failure & Charge Explosion**: Because `typeof link.source === 'object'`, D3 skipped internal ID resolution (`find(nodeById, link.source)`). As a result, the link attraction forces operated on detached ghost objects, while the newly created nodes only received repulsive charge forces (`strength(-140)`). The nodes blasted outwards into deep space, while ghost link lines remained frozen in the center. The canvas camera zoomed out to ~0.05x to encompass the giant bounding box.
+
+* **Permanent Architecture & Rendering Fixes (`frontend/src/views/LitGraphView.jsx`)**:
+  * **Link Endpoint Sanitization**: Enforced strict ID normalization across `filteredGraph`, `loadGraph`, and background `litGraphData` hydration. All links strictly map `source` and `target` back to clean string IDs (`typeof l.source === 'object' ? l.source.id : l.source`), guaranteeing that `d3.forceLink` re-binds cleanly to current node instances on every mount and filter change.
+  * **Kinetic Velocity & Index Reset**: Stripped transient simulation properties (`vx`, `vy`, and `index`) from node clones in `filteredGraph`. Existing `x` and `y` coordinates are preserved for position stability, while eliminating residual momentum that launched nodes outward.
+  * **Dynamic ResizeObserver Canvas Sizing**: Attached a `ResizeObserver` to the graph container element (`containerRef`), dynamically providing precise pixel `width` and `height` to `ForceGraph2D` when navigating between routes or toggling the 320px Details Panel.
+  * **Automated `zoomToFit` on Simulation Settle**: Configured `onEngineStop` and a post-mount framing timer (`zoomToFit(400, 36)`) so that upon returning from Paper Reader or executing searches, the graph automatically centers and smoothly frames with clear margins.
+
+* **Complete Session Removal & Workspace Consolidation (`src/api/routes_litgraph.py`, `frontend/src/context/AppContext.jsx`, `frontend/src/views/LitGraphView.jsx`, `frontend/src/views/ChatView.jsx`)**:
+  * **Removed Session Hijacking from Backend**: Stripped `session_id` query lookup and seed paper override logic from `/api/v1/litgraph/query`. LitGraph queries now build directly on the requested search query/topic without being hijacked by stale session records.
+  * **Unified Storage in `localStorage`**: Migrated `litGraphData` and `litGraphTarget` from ephemeral `sessionStorage` into workspace-scoped `localStorage` (`getWsKey(wsId, 'litgraph_data')`), eliminating erratic state differences between full page refreshes and in-app navigation.
+  * **Purged `sessionId` from Frontend Calls**: Removed `session_id` query parameters and `paperId.startsWith('sess-')` checks from `LitGraphView.jsx` and `AppContext.jsx`.
+  * **Clean UI Copy**: Replaced "Research Session Cleared" with "Chat Cleared" in `ChatView.jsx`.
+  * **Workspace-Centric Search & Graph Anchoring (`src/api/routes_search.py`, `frontend/src/context/AppContext.jsx`, `frontend/src/views/LitGraphView.jsx`)**:
+    * **`workspace_id` in Unified Search**: Added `workspace_id` to `UnifiedSearchRequest` and `UnifiedSearchResponse`. When a search is initiated within an active workspace, search state, top papers, and metadata are directly synced into `WorkspaceModel.state_json` rather than relying on ephemeral session IDs.
+    * **Auto-Loading by Active Workspace**: In `LitGraphView`, when opening LitGraph without an existing graph, the view automatically resolves and loads the active workspace's topic (`activeWorkspace.title`), binding the graph lifecycle directly to the researcher's current workspace.
+    * **Purged Legacy Session State**: Eliminated `currentSessionId` fallback and `setSessionId` overrides from `AppContext.jsx`.

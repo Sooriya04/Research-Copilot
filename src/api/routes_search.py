@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.database import get_db
 from src.core.logger import logger
-from src.core.models import SessionModel
+from src.core.models import SessionModel, WorkspaceModel
 from src.core.schemas import Paper, PaperAccessResponse, PaperSection
 from src.engines.access_resolver import AccessResolver
 from src.engines.multi_provider_search import MultiProviderSearchEngine
@@ -123,10 +123,12 @@ class UnifiedSearchRequest(BaseModel):
     # because they return noisy / off-topic results for CS/ML queries.
     sources: Optional[List[str]] = ["openalex", "arxiv", "semanticscholar"]
     session_id: Optional[str] = None
+    workspace_id: Optional[str] = None
 
 
 class UnifiedSearchResponse(BaseModel):
     session_id: str
+    workspace_id: Optional[str] = None
     query: str
     total_unique_papers: int
     sources_searched: List[str]
@@ -464,6 +466,19 @@ async def search_unified_endpoint(req: UnifiedSearchRequest, request: Request, d
     except Exception as sess_err:
         logger.debug("Could not write to request.session: %s", sess_err)
 
+    # Persist directly into WorkspaceModel if workspace_id is provided
+    if req.workspace_id:
+        try:
+            ws = await db.get(WorkspaceModel, req.workspace_id)
+            if ws:
+                current_state = ws.state_json or {}
+                current_state.update(session_payload)
+                ws.state_json = current_state
+                await db.commit()
+                logger.info("[UNIFIED SEARCH] Successfully synced search state to Workspace: %s", req.workspace_id)
+        except Exception as ws_err:
+            logger.warning("[UNIFIED SEARCH] Could not update workspace state: %s", ws_err)
+
     # Persist or update session in SQLite (deduplicating by session_id or query)
     try:
         existing_sess = await db.get(SessionModel, session_id)
@@ -492,6 +507,7 @@ async def search_unified_endpoint(req: UnifiedSearchRequest, request: Request, d
 
     return UnifiedSearchResponse(
         session_id=session_id,
+        workspace_id=req.workspace_id,
         query=req.query,
         total_unique_papers=len(unique_papers),
         sources_searched=sources,
