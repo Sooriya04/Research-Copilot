@@ -15,6 +15,8 @@ class AccessResolver:
         self.headers = {
             "User-Agent": f"ResearchCopilot/{settings.app_version} (mailto:{settings.openalex_email})"
         }
+        if settings.openalex_api_key:
+            self.headers["Authorization"] = f"Bearer {settings.openalex_api_key}"
 
     @staticmethod
     def detect_identifier_type(identifier: str) -> Tuple[str, str]:

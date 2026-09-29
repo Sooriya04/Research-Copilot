@@ -9,7 +9,7 @@ from src.providers.base import BaseLLMProvider, ChatMessage
 class GeminiFlashLiteProvider(BaseLLMProvider):
     """Google Gemini Flash-Lite provider using Google Generative Language REST API."""
 
-    def __init__(self, api_key: Optional[str] = None, model: str = "gemini-2.0-flash-lite"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "gemini-3.5-flash-lite"):
         self.api_key = api_key or settings.gemini_api_key or os.getenv("GEMINI_API_KEY", "")
         self.model = model
         self.base_url = "https://generativelanguage.googleapis.com/v1beta"
@@ -22,16 +22,22 @@ class GeminiFlashLiteProvider(BaseLLMProvider):
             logger.info("[GeminiProvider] No API key detected. Using deterministic fallback analyzer.")
             return self._fallback_structured_response(messages)
 
-        url = f"{self.base_url}/models/{target_model}:generateContent?key={self.api_key}"
-        
-        # Convert ChatMessage list to Gemini contents format
+        # Separate system instructions from conversational contents for standard Gemini v1beta API
+        system_parts = []
         contents = []
         for m in messages:
-            role = "user" if m.role in ["user", "system"] else "model"
-            contents.append({
-                "role": role,
-                "parts": [{"text": m.content}]
-            })
+            if m.role == "system":
+                system_parts.append({"text": m.content})
+            else:
+                role = "user" if m.role == "user" else "model"
+                contents.append({
+                    "role": role,
+                    "parts": [{"text": m.content}]
+                })
+
+        if not contents and system_parts:
+            contents.append({"role": "user", "parts": system_parts})
+            system_parts = []
 
         payload = {
             "contents": contents,
@@ -40,16 +46,33 @@ class GeminiFlashLiteProvider(BaseLLMProvider):
                 "responseMimeType": "application/json"
             }
         }
+        if system_parts:
+            payload["system_instruction"] = {"parts": system_parts}
+
+        # Candidate models to try in order of efficiency
+        candidate_models = [target_model]
+        if "gemini-3.5-flash-lite" not in candidate_models:
+            candidate_models.append("gemini-3.5-flash-lite")
+        if "gemini-flash-lite-latest" not in candidate_models:
+            candidate_models.append("gemini-flash-lite-latest")
 
         try:
             async with httpx.AsyncClient(timeout=45.0) as client:
-                resp = await client.post(url, json=payload)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    candidates = data.get("candidates", [])
-                    if candidates:
-                        return candidates[0]["content"]["parts"][0]["text"]
-                logger.warning("[GeminiProvider] Request returned status %d: %s. Using fallback.", resp.status_code, resp.text[:200])
+                for candidate in candidate_models:
+                    url = f"{self.base_url}/models/{candidate}:generateContent?key={self.api_key}"
+                    resp = await client.post(url, json=payload)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        candidates = data.get("candidates", [])
+                        if candidates:
+                            return candidates[0]["content"]["parts"][0]["text"]
+                    elif resp.status_code == 404:
+                        logger.warning("[GeminiProvider] Model '%s' returned 404. Trying next candidate.", candidate)
+                        continue
+                    else:
+                        logger.warning("[GeminiProvider] Request returned status %d: %s.", resp.status_code, resp.text[:200])
+                        break
+
                 return self._fallback_structured_response(messages)
         except Exception as e:
             logger.error("[GeminiProvider] Exception during generation: %s", e)

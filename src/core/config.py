@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     
     # External API Keys & Endpoints
     openalex_email: Optional[str] = "researcher@example.com"
+    openalex_api_key: Optional[str] = None
     semantic_scholar_api_key: Optional[str] = None
     arxiv_base_url: str = "https://export.arxiv.org/api/query"
     openalex_base_url: str = "https://api.openalex.org"

@@ -935,3 +935,51 @@ bundle compilation (`npm run build`).
     * **`workspace_id` in Unified Search**: Added `workspace_id` to `UnifiedSearchRequest` and `UnifiedSearchResponse`. When a search is initiated within an active workspace, search state, top papers, and metadata are directly synced into `WorkspaceModel.state_json` rather than relying on ephemeral session IDs.
     * **Auto-Loading by Active Workspace**: In `LitGraphView`, when opening LitGraph without an existing graph, the view automatically resolves and loads the active workspace's topic (`activeWorkspace.title`), binding the graph lifecycle directly to the researcher's current workspace.
     * **Purged Legacy Session State**: Eliminated `currentSessionId` fallback and `setSessionId` overrides from `AppContext.jsx`.
+<br />
+
+---
+
+## Paper-to-Entity Knowledge Graph Ingestion Pipeline & Scoped Pruning Fix
+
+* **Title + Abstract Scientific Entity Extractor (`src/engines/abstract_entity_extractor.py`)**:
+  * **Strict Token Discipline**: Designed an extraction pipeline operating strictly on paper `title + abstract` (~400 tokens), explicitly forbidding PDF-level dumping to LLMs to prevent token exhaustion, latency bloat, and hallucinations.
+  * **Strict Structured JSON Schema**: Extracts `methods`, `datasets`, `tasks`, and `metrics` using `GeminiFlashLiteProvider` with strict system instructions prohibiting invented entities and ungrounded benchmarks.
+  * **In-Memory Caching**: Persists extraction results in memory keyed by canonical paper identifier / title hash to avoid redundant LLM invocations.
+  * **Resilient Heuristic Fallback**: Gracefully falls back to deterministic regex extraction if the LLM times out, errors, or if API keys are unset.
+
+* **ML Taxonomy Normalizer & Deterministic Heuristics (`src/graph/normalizer.py`)**:
+  * **Canonical ML Alias Resolution**: Implemented canonical alias mapping resolving variations (e.g., `Low-Rank Adaptation`, `low rank adaptation`, `LoRA` -> `LoRA`; `Mixture of Experts`, `moe` -> `Mixture of Experts (MoE)`; `transformers`, `transformer architecture` -> `Transformer`).
+  * **Stop Entity Filter**: Filters generic words (`computer science`, `machine learning`, `empirical method`, `framework`, `approach`) from polluting the knowledge graph.
+  * **Deterministic Heuristic Extractor**: Built zero-token regex taxonomy matching for major ML methods, benchmark datasets (`MMLU`, `GSM8K`, `HumanEval`, `GLUE`, `SuperGLUE`), and research tasks.
+
+* **Multi-Source Paper Intelligence Enricher (`src/engines/paper_enricher.py`)**:
+  * **Structured Multi-Source Ingestion Pipeline**: Orchestrates ingestion before reaching `GraphBuilder`:
+    1. *OpenAlex*: Deterministic retrieval of concepts (topics), publication year, author metadata, and referenced works for citation edge construction without LLM guessing.
+    2. *Papers With Code*: Deterministic retrieval of benchmark evaluation records, tested datasets, evaluation tasks, metrics, and official code repositories.
+    3. *Abstract Entity Extractor*: Title + abstract extraction complementing structured metadata.
+    4. *Canonical Normalization*: Normalizes entity names and deduplicates entries into clean lists: `methods`, `datasets`, `tasks`, `metrics`, `topics`, `repositories`, `benchmarks`, `referenced_works`.
+  * **Zero Full-PDF Dumping**: Ingests paper identifiers and raw search payloads cleanly without triggering heavy PDF downloads or unneeded RAG indexing.
+
+* **Decoupled Knowledge Graph Builder (`src/graph/builder.py`)**:
+  * **Separation of Responsibilities**: Decoupled `GraphBuilder` from external APIs and LLMs. `build_from_paper_intelligence` receives already-enriched paper intelligence.
+  * **Normalized Entity Node Construction**: Constructs `PaperNode`, `MethodNode` (`USES_METHOD`), `DatasetNode` (`EVALUATES_ON`), and task nodes with canonicalized IDs and display names.
+  * **Deterministic Citation Mapping**: Generates typed `CITES` relational edges based on OpenAlex `referenced_works` and DOI/arXiv matching without model hallucinations.
+
+* **Scope-Aware Graph Pruning Fix (`src/api/routes_graph.py`)**:
+  * **Fixed Single-Paper Pruning Glitch**: Fixed the pruning rule in `/api/v1/graph/elements` where non-topic nodes were filtered unless connected to `>= 2` papers (`len(connected_papers) >= 2`), which previously erased all methods and datasets in single-paper and newly created workspace graphs.
+  * **Scope-Aware Node Filtering**: In scoped mode (`scoped=true`, `workspace_id`, `topic`, or `paper_id`) or when single papers exist, entities connected to `>= 1` paper are preserved. Global unscoped multi-paper graphs retain `>= 2` filtering to prune global orphan singletons.
+  * **Direct Endpoint Enrichment**: Integrated `PaperEnricher` into `/api/v1/graph/ingest-paper`, automatically enriching search result payloads before persistence.
+
+* **Comprehensive Verification Suite (`tests/test_knowledge_graph_ingestion.py`)**:
+  * Added 7 dedicated unit tests covering all required test cases:
+    * *Case 1*: Paper with PWC metadata (`methods != []`, `datasets != []`).
+    * *Case 2*: Paper without PWC metadata (abstract entity extraction populates entities).
+    * *Case 3*: LLM unavailable / network error (deterministic heuristic fallback executes without crash).
+    * *Case 4*: Single paper graph (methods and datasets remain visible).
+    * *Case 5*: Multiple papers (global multi-paper pruning retains `>= 2` connections).
+    * *Case 6*: No abstract (ingestion succeeds cleanly with metadata).
+    * *Case 7*: Duplicate entities (`Low-Rank Adaptation` and `LoRA` resolve to one canonical node).
+* **OpenAlex & Gemini Provider Upgrades (`src/core/config.py`, `src/providers/gemini.py`)**:
+  * **OpenAlex API Key Support**: Added `openalex_api_key` configuration to `Settings` loaded directly from `.env`, passing `Authorization: Bearer <key>` to OpenAlex endpoints across `access_resolver.py`, `paper_enricher.py`, and `routes_litgraph.py` for 100,000+ daily quota and 50 req/s.
+  * **Gemini Provider Update (`gemini-3.5-flash-lite`)**: Upgraded default model from retired `gemini-2.0-flash-lite` (which triggered 404s) to Google's current `gemini-3.5-flash-lite` with automatic alias fallback (`gemini-flash-lite-latest`).
+  * **REST Payload Compliance**: Updated payload structure to use `system_instruction: {"parts": [{"text": ...}]}` separating system instructions from conversation turns. Live extraction verified producing valid structured JSON in <5s.

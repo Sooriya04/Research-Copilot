@@ -16,6 +16,7 @@ from src.graph.schema import (
     TopicNode,
     slugify_id,
 )
+from src.graph.normalizer import normalize_entity
 from src.graph.store import ResearchGraphStore
 
 logger = logging.getLogger(__name__)
@@ -138,29 +139,42 @@ class GraphBuilder:
 
         methods = getattr(paper_intel, "methods", []) if not isinstance(paper_intel, dict) else paper_intel.get("methods", [])
         datasets = getattr(paper_intel, "datasets", []) if not isinstance(paper_intel, dict) else paper_intel.get("datasets", [])
+        tasks = getattr(paper_intel, "tasks", []) if not isinstance(paper_intel, dict) else paper_intel.get("tasks", [])
         benchmarks = getattr(paper_intel, "benchmarks", []) if not isinstance(paper_intel, dict) else paper_intel.get("benchmarks", [])
 
         derived_methods: list = []
         for m in methods:
             m_str = m.get("name", "") if isinstance(m, dict) else str(m)
-            if m_str and m_str.lower() not in STOP_WORDS and len(m_str) >= 3:
-                derived_methods.append(m_str)
+            norm = normalize_entity(m_str)
+            if norm and norm.lower() not in STOP_WORDS and len(norm) >= 2:
+                derived_methods.append(norm)
 
         derived_datasets: list = []
         for d in datasets:
             d_str = d.get("name", "") if isinstance(d, dict) else str(d)
-            if d_str and d_str.lower() not in STOP_WORDS and len(d_str) >= 3:
-                derived_datasets.append(d_str)
+            norm = normalize_entity(d_str)
+            if norm and norm.lower() not in STOP_WORDS and len(norm) >= 2:
+                derived_datasets.append(norm)
 
         # Incorporate verified benchmarks from PapersWithCode if present
         for b in benchmarks:
             if isinstance(b, dict):
                 d_name = b.get("dataset")
                 t_name = b.get("task")
-                if d_name and str(d_name).strip().lower() not in STOP_WORDS:
-                    derived_datasets.append(str(d_name).strip())
-                if t_name and str(t_name).strip().lower() not in STOP_WORDS:
-                    derived_methods.append(str(t_name).strip())
+                if d_name:
+                    d_norm = normalize_entity(str(d_name))
+                    if d_norm and d_norm.lower() not in STOP_WORDS and len(d_norm) >= 2:
+                        derived_datasets.append(d_norm)
+                if t_name:
+                    t_norm = normalize_entity(str(t_name))
+                    if t_norm and t_norm.lower() not in STOP_WORDS and len(t_norm) >= 2:
+                        derived_methods.append(t_norm)
+
+        for t in tasks:
+            t_str = t.get("name", "") if isinstance(t, dict) else str(t)
+            t_norm = normalize_entity(t_str)
+            if t_norm and t_norm.lower() not in STOP_WORDS and len(t_norm) >= 2:
+                derived_methods.append(t_norm)
 
         nodes_to_add: list = []
         edges_to_add: list = []

@@ -8,6 +8,7 @@ from src.core.canonical_models import PaperSummarizeRequest
 from src.core.database import get_db
 from src.core.models import GraphRunModel, SessionModel
 from src.core.schemas import GraphRunRequest, GraphRunResponse, PaperIntelligence, ResearchGraphState
+from src.engines.paper_enricher import PaperEnricher
 from src.engines.paper_intelligence_engine import PaperIntelligenceEngine
 from src.graph.builder import GraphBuilder
 from src.graph.gap_engine import GapDetectionEngine
@@ -22,6 +23,7 @@ router = APIRouter(prefix="/api/v1/graph", tags=["Research Loop & Graph Engine"]
 graph_store = ResearchGraphStore()
 gap_detection_engine = GapDetectionEngine(store=graph_store)
 intel_engine = PaperIntelligenceEngine()
+paper_enricher = PaperEnricher()
 
 
 class GraphNodeVisual(BaseModel):
@@ -170,21 +172,13 @@ async def ingest_paper_into_graph(req: IngestPaperRequest, db: AsyncSession = De
     builder = GraphBuilder(store=graph_store)
 
     if req.paper_data:
-        paper_intel = req.paper_data
-        if isinstance(paper_intel, dict):
-            paper_id = paper_intel.get("id") or paper_intel.get("canonical_id") or "paper-unknown"
-            title = paper_intel.get("title", "Untitled Paper")
-        else:
-            paper_id = getattr(paper_intel, "id", None) or getattr(paper_intel, "canonical_id", "paper-unknown")
-            title = getattr(paper_intel, "title", "Untitled Paper")
+        paper_intel = await paper_enricher.enrich(req.paper_data)
+        paper_id = paper_intel.get("id") or "paper-unknown"
+        title = paper_intel.get("title", "Untitled Paper")
     elif req.identifier:
-        # Live multi-source intelligence extraction
-        sum_resp = await intel_engine.summarize_paper(
-            PaperSummarizeRequest(identifier=req.identifier), db
-        )
-        paper_intel = sum_resp.canonical_paper
-        paper_id = paper_intel.canonical_id
-        title = paper_intel.title
+        paper_intel = await paper_enricher.enrich_by_identifier(req.identifier)
+        paper_id = paper_intel.get("id") or req.identifier
+        title = paper_intel.get("title", "Untitled Paper")
     else:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Must provide either 'identifier' or 'paper_data'.")
 
@@ -277,6 +271,7 @@ async def get_graph_nodes(node_type: Optional[str] = Query(None, description="pa
 async def get_graph_elements(
     topic: Optional[str] = Query(None, description="Optional topic to link or filter by"),
     workspace_id: Optional[str] = Query(None, description="Optional workspace ID to isolate graph"),
+    paper_id: Optional[str] = Query(None, description="Optional paper ID to isolate graph"),
     scoped: bool = Query(False, description="If true, return strictly nodes connected to topic or workspace")
 ):
     """Return complete graph elements (nodes + typed labeled edges) for visual network canvas."""
@@ -296,16 +291,22 @@ async def get_graph_elements(
         ws_clean = workspace_id.strip()
         target_ws_id = ws_clean if ws_clean.startswith("ws-") else f"ws-{ws_clean}"
 
+    target_paper_id = None
+    if paper_id and paper_id.strip():
+        target_paper_id = paper_id.strip()
+
     # Identify anchor nodes for graph scoping
     anchor_ids = set()
     if target_topic_id and target_topic_id in graph_store.graph:
         anchor_ids.add(target_topic_id)
     if target_ws_id and target_ws_id in graph_store.graph:
         anchor_ids.add(target_ws_id)
+    if target_paper_id and target_paper_id in graph_store.graph:
+        anchor_ids.add(target_paper_id)
 
-    # Scoping logic: if scoped flag is set or topic/workspace_id is provided, strictly isolate the graph
+    # Scoping logic: if scoped flag is set or topic/workspace_id/paper_id is provided, strictly isolate the graph
     allowed_node_ids = None
-    if scoped or topic or workspace_id:
+    if scoped or topic or workspace_id or paper_id:
         allowed_node_ids = set(anchor_ids)
         for a_id in anchor_ids:
             if a_id in graph_store.graph:
@@ -337,7 +338,11 @@ async def get_graph_elements(
         edges_raw = await graph_store.get_all_edges()
 
     # Rule: non-topic, non-paper nodes are CONNECTION nodes between papers.
-    # Only include them if they connect >= 2 papers in scope (avoids orphan singletons).
+    # In scoped or single-paper mode, allow nodes connected to >= 1 paper.
+    # In global unscoped multi-paper mode, only include if connected to >= 2 papers (avoids orphan singletons).
+    is_scoped = (allowed_node_ids is not None) or (len(paper_ids) <= 1)
+    min_papers = 1 if is_scoped else 2
+
     valid_connection_node_ids = set()
     for nid in graph_store.graph.nodes:
         if allowed_node_ids is not None and nid not in allowed_node_ids:
@@ -355,7 +360,7 @@ async def get_graph_elements(
                     connected_papers.add(e.target_id)
                 elif e.target_id == nid and e.source_id in paper_ids:
                     connected_papers.add(e.source_id)
-            if len(connected_papers) >= 2:
+            if len(connected_papers) >= min_papers:
                 valid_connection_node_ids.add(nid)
 
     nodes = []

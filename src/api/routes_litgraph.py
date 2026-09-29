@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from src.core.config import settings
 from src.core.database import get_db, get_db_session
 from src.core.models import SessionModel
 
@@ -123,7 +124,9 @@ def jaccard(set_a: Set[str], set_b: Set[str]) -> float:
 
 # ── OpenAlex Provider ────────────────────────────────────────────────────────
 OPENALEX_BASE = "https://api.openalex.org"
-HEADERS = {"User-Agent": "ResearchCopilot/2.0 (mailto:team@researchcopilot.ai)"}
+HEADERS = {"User-Agent": f"ResearchCopilot/2.0 (mailto:{settings.openalex_email})"}
+if settings.openalex_api_key:
+    HEADERS["Authorization"] = f"Bearer {settings.openalex_api_key}"
 
 
 def parse_openalex_work(work: Dict[str, Any], is_seed: bool = False) -> Dict[str, Any]:
