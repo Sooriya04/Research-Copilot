@@ -202,8 +202,31 @@ class GraphSynthesizer:
                     clean_ws_id,
                     len(canonical_pids),
                 )
-                # Verify or ensure the graph elements are loaded
                 elements = await self._get_scoped_elements(ws_node_id, canonical_pids)
+                # If store was cleared or reset (e.g. process restart / test run), hydrate store
+                if not elements.get("nodes") or len(elements.get("nodes", [])) < len(valid_papers):
+                    existing_ws_node = await self.store.get_node(ws_node_id)
+                    if not existing_ws_node:
+                        ws_node = TopicNode(id=ws_node_id, name=f"Workspace: {topic_clean}", query=topic_clean)
+                        await self.store.add_node(ws_node)
+
+                    id_map = {}
+                    for paper_data in valid_papers:
+                        try:
+                            paper_node = await self.enricher.enrich_and_ingest(
+                                paper_data,
+                                workspace_node_id=ws_node_id,
+                                extract_entities=True,
+                            )
+                            orig_id = paper_data.get("id") or paper_node.id
+                            id_map[orig_id] = paper_node.id
+                            id_map[paper_node.id] = paper_node.id
+                        except Exception as ing_err:
+                            logger.warning("[GraphSynthesizer] Ingest error on cache hydration: %s", ing_err)
+
+                    await self._apply_synthesis_to_store(cached_res, id_map, ws_node_id)
+                    elements = await self._get_scoped_elements(ws_node_id, canonical_pids)
+
                 return {
                     "status": "cached",
                     "workspace_id": clean_ws_id,

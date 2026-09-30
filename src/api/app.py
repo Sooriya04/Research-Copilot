@@ -78,8 +78,39 @@ def create_app() -> FastAPI:
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
     dump_dir = os.path.join(project_root, "dump_extract")
     os.makedirs(dump_dir, exist_ok=True)
-    os.makedirs(os.path.join(dump_dir, "images"), exist_ok=True)
+    images_dir = os.path.join(dump_dir, "images")
+    os.makedirs(images_dir, exist_ok=True)
     os.makedirs(os.path.join(dump_dir, "markdown"), exist_ok=True)
+
+    @app.get("/dump_extract/images/{image_name:path}", tags=["Images"])
+    async def get_extracted_image_endpoint(image_name: str):
+        """Serve extracted images with intelligent filename-matching fallback."""
+        direct_path = os.path.join(images_dir, image_name)
+        if os.path.isfile(direct_path):
+            return FileResponse(direct_path)
+
+        clean_target = os.path.basename(image_name)
+        all_files = os.listdir(images_dir) if os.path.exists(images_dir) else []
+        for fn in all_files:
+            if fn.lower() == clean_target.lower():
+                return FileResponse(os.path.join(images_dir, fn))
+
+        import re
+        suffix_m = re.search(r"(\d{4}-\d{2}\.[a-zA-Z]+|p\d+-\d+\.[a-zA-Z]+)$", clean_target)
+        if suffix_m:
+            suffix = suffix_m.group(1)
+            for fn in all_files:
+                if fn.endswith(suffix):
+                    return FileResponse(os.path.join(images_dir, fn))
+
+        if clean_target.startswith("-"):
+            for fn in all_files:
+                if fn.endswith(clean_target):
+                    return FileResponse(os.path.join(images_dir, fn))
+
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Image not found")
+
     app.mount("/dump_extract", StaticFiles(directory=dump_dir), name="dump_extract")
 
     # Static Assets & React SPA Frontend Serving

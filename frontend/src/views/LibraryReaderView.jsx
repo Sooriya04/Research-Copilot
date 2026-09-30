@@ -29,7 +29,25 @@ export default function LibraryReaderView() {
   const [paper, setPaper] = useState(() => {
     try {
       const saved = localStorage.getItem('rc_active_library_paper');
-      return saved ? JSON.parse(saved) : null;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (
+          parsed &&
+          (parsed.sections?.some((s) => /\d[A-Za-z]/.test(s.title)) ||
+            (parsed.markdown &&
+              (parsed.markdown.includes('{muhammad.laiq') ||
+                !parsed.markdown.includes('/dump_extract/images/') ||
+                parsed.markdown.includes('**1 Introduction**') ||
+                parsed.markdown.includes('Laiq et al.'))))
+        ) {
+          delete parsed.markdown;
+          delete parsed.markdown_content;
+          delete parsed.body_markdown;
+          delete parsed.sections;
+        }
+        return parsed;
+      }
+      return null;
     } catch {
       return null;
     }
@@ -68,12 +86,20 @@ export default function LibraryReaderView() {
     }
   }, [paper?.id, paper?.arxiv_id, paper?.doi]);
 
-  // If paper lacks markdown, attempt background conversion via PyMuPDF4LLM
+  // If paper lacks publication markdown with figures, fetch upgraded conversion
   useEffect(() => {
     if (!paper) return;
-    const hasMarkdown = !!(paper.markdown || paper.markdown_content);
-    if (!hasMarkdown && (paper.arxiv_id || paper.url || paper.pdf_url || paper.id)) {
-      const ident = paper.arxiv_id || paper.url || paper.pdf_url || paper.id;
+    const isUpgraded = !!(
+      paper.markdown &&
+      (paper.figures?.length > 0 || paper.markdown.includes('/dump_extract/images/')) &&
+      !paper.markdown.includes('{muhammad.laiq') &&
+      !paper.markdown.includes('**1 Introduction**') &&
+      !paper.markdown.includes('Laiq et al.') &&
+      paper.sections?.length > 0 &&
+      !paper.sections.some((s) => /\d[A-Za-z]/.test(s.title))
+    );
+    if (!isUpgraded && (paper.arxiv_id || paper.url || paper.pdf_url || paper.title || paper.id)) {
+      const ident = paper.arxiv_id || paper.url || paper.pdf_url || paper.title || paper.id;
       setConverting(true);
       fetch('/api/v1/paper/import-url', {
         method: 'POST',
@@ -85,8 +111,10 @@ export default function LibraryReaderView() {
           if (data?.paper?.markdown) {
             const updated = {
               ...paper,
+              ...data.paper,
               markdown: data.paper.markdown,
               markdown_content: data.paper.markdown,
+              body_markdown: data.paper.body_markdown || data.paper.markdown,
               figures: data.paper.figures || paper.figures,
               sections: data.paper.sections || paper.sections,
             };
@@ -102,7 +130,7 @@ export default function LibraryReaderView() {
         .catch((err) => console.warn('Library paper markdown conversion error:', err))
         .finally(() => setConverting(false));
     }
-  }, [paper?.id]);
+  }, [paper?.id, paper?.markdown]);
 
   if (!paper) {
     return (

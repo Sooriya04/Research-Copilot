@@ -730,7 +730,7 @@ bundle compilation (`npm run build`).
 
 ---
 
-## Implement LitGraph ConnectedPapers-Style Bibliometric Similarity Engine and Anara-Style Reader Interface
+## Implement LitGraph ConnectedPapers-Style Bibliometric Similarity Engine and Academic Reader Interface
 
 * **LitGraph Bibliometric Similarity Engine (`src/api/routes_litgraph.py`, `src/api/app.py`)**:
   * Built a high-performance similarity graph engine backed by the Semantic Scholar Academic Graph API.
@@ -748,8 +748,8 @@ bundle compilation (`npm run build`).
   * **Interactive Neighborhood Highlighting & Inspector**: Clicking any node highlights its 1-hop neighborhood while dimming unrelated nodes to 15% opacity, and populates the sidebar with metadata, abstract, and a single-click "Build Graph from This Paper" seed re-centering button.
   * Added metric controls (publication year range slider, max nodes slider, zoom/fit controls).
 
-* **Anara-Style Academic Reader (`frontend/src/components/reader/AnaraPaperReader.jsx`, `frontend/src/views/LibraryReaderView.jsx`, `frontend/src/views/PaperReaderView.jsx`)**:
-  * Built `AnaraPaperReader` component featuring a dual-panel layout: native browser-rendered PDF on the left and a 3-tab collapsible right sidebar (**Ask AI**, **Annotations**, **Details**).
+* **Interactive Academic Reader (`frontend/src/components/reader/`, `frontend/src/views/LibraryReaderView.jsx`, `frontend/src/views/PaperReaderView.jsx`)**:
+  * Built `PaperReader` component featuring a dual-panel layout: native browser-rendered PDF on the left and a 3-tab collapsible right sidebar (**Ask AI**, **Annotations**, **Details**).
   * Implemented floating text-selection toolbar with **Highlight**, **Comment**, and **Ask AI** triggers.
   * Integrated full PyMuPDF4LLM Markdown fallback toggle with inline figures, tables, and KaTeX math.
 
@@ -850,7 +850,7 @@ bundle compilation (`npm run build`).
   * **Fixed `title.trim is not a function`**: Added defensive string casting (`String(title || '').trim()`) across form validation and workspace creation handlers in `CreateWorkspaceModal.jsx`.
   * **Prevented Auto-Closing on Navigation**: Fixed navigation handlers to preserve active workspace state and prevent the workspace from auto-closing when switching to LitGraph, Knowledge Graph, or Reader views.
 
-* **Responsive PDF Loading State (`frontend/src/components/reader/AnaraPaperReader.jsx`, `frontend/src/views/PaperReaderView.jsx`, `frontend/src/views/LibraryReaderView.jsx`)**:
+* **Responsive PDF Loading State (`frontend/src/components/reader/`, `frontend/src/views/PaperReaderView.jsx`, `frontend/src/views/LibraryReaderView.jsx`)**:
   * Added animated, responsive `loadingPdf` and iframe load listener states to replace premature "PDF not available" alerts while academic PDFs are being fetched and rendered.
 
 <br />
@@ -1031,3 +1031,54 @@ bundle compilation (`npm run build`).
 * **Comprehensive Verification**:
   * Added unit test suite in `tests/test_workspace_graph_synthesis.py` verifying cache miss -> Gemini extraction -> SQLite persistence, and subsequent cache hit with 0 LLM calls.
   * All 14 tests passed in `pytest`. Frontend built cleanly with 0 errors via `npm run build`.
+
+<br />
+
+## PDF-to-Markdown Engine, Reader Styling Repairs & Heuristic Ingestion
+
+* **Layout-Aware PDF-to-Markdown Engine (`src/engines/pdf_markdown_engine.py`, `src/api/routes_paper_intelligence.py`)**:
+  * **Spatial & Font-Size Metadata Extraction**: Implemented Page 1 block inspection using PyMuPDF dict blocks (`page.get_text("dict")["blocks"]`) to extract clean title (largest font size block near the top), formatted authors list, institutional affiliations, publication year, and abstract text, while filtering out vertical running watermarks (e.g. arXiv margin banners).
+  * **Two-Column Paragraph Flow & Table Repair**: Fixed mid-sentence table/figure interruptions (e.g., words broken like `comTable 1 ... pletion` into proper separate blocks), de-hyphenated split words across lines and columns, stripped isolated page number paragraphs, and demoted improperly promoted author byline lines to text paragraphs.
+  * **Clean Body Markdown Slicing**: Slices `body_markdown` starting directly at Section 1 (`## 1 Introduction`), preventing duplicate titles, author bylines, and abstract blocks from cluttering the article body.
+  * **Structured Table of Contents Hierarchy**: Extracts structured sections (`id`, `title`, `level`, `content`) with clean slugified anchor IDs for smooth scrolling navigation.
+  * **LaTeX KaTeX Formula Formatting**: Preserves and wraps mathematical formulas in KaTeX-compatible `$formula$` and `$$formula$$` delimiters.
+  * **Updated Endpoints**: Updated `POST /api/v1/paper/upload` and `POST /api/v1/paper/import-url` to return `affiliations`, `body_markdown`, and structured `sections`.
+  * **Fast Local Fallback Resolution**: Added local fallback checking for extracted markdown files in `dump_extract/markdown/` and candidate local PDFs to ensure instant response times without re-downloading existing documents.
+
+* **PDF Reader Bug Fixes & Markdown Styling Repairs (`frontend/src/styles/styles.css`, `frontend/src/components/common/MarkdownRenderer.jsx`)**:
+  * **Dynamic Image Fallback Routing (`src/api/app.py`)**: Created `/dump_extract/images/{image_name:path}` FastAPI endpoint with intelligent suffix and filename-matching fallback. Corrects mismatched relative path prefixes and case discrepancies, guaranteeing extracted scientific figures serve `HTTP 200 OK`.
+  * **Sentence-Splitting Italic Font Fix**: Removed destructive `.markdown-body em { display: block; font-size: 12.5px; }` CSS rule that was breaking sentences into disjointed vertical lines whenever italics/emphasis occurred. Restored natural inline font rendering (`display: inline; font-style: italic; font-size: inherit;`).
+  * **White Paper Sheet Viewport Un-Clipping ("Floating Text" Bug)**: Fixed flex-stretch height clamping in the paper viewport by enforcing `align-items: flex-start;` and `height: auto;` on the paper sheet container. Previously, default flex stretch pinned the sheet to 100% viewport height (~700px), causing body paragraphs beyond line 20 to spill outside the sheet onto the grey viewport.
+  * **GFM Table Parsing & Row Breakdown Repair**: Collapsed spurious blank lines (`\n\n` -> `\n`) between markdown table rows across `MarkdownRenderer.jsx` and `pdf_markdown_engine.py`. This ensures GitHub Flavored Markdown (GFM) parses table lines into native HTML `<table>` elements with styled headers and borders rather than plain-text pipe lines.
+  * **Raw Asterisk Heading Sanitization**: Stripped raw PyMuPDF font markdown asterisks (`**` and `*`) from headings in `MarkdownRenderer.jsx` so `## **1 Introduction**` renders cleanly as `1 Introduction`.
+  * **TOC Outline Spacing Normalizer (`MarkdownRenderer.jsx`, reader outline)**: Applied regex normalization (`(\d+(?:\.\d+)*)\s*([A-Za-z]) -> $1 $2`) to fix missing inter-span whitespace between section numbers and titles (`1Introduction` -> `1 Introduction`, `3.1Phase 1` -> `3.1 Phase 1`).
+  * **Stale Storage Cache Invalidation (`LibraryReaderView.jsx`)**: Added proactive cache inspection in `LibraryReaderView` to detect legacy, unformatted, or incomplete markdown cached in `localStorage` and trigger background conversion to fetch fresh publication-grade markdown with figures.
+
+* **Publication Academic Reader Interface (`frontend/src/components/reader/`, `frontend/src/components/common/MarkdownRenderer.jsx`, `frontend/src/styles/styles.css`)**:
+  * **Publication Paper Sheet Layout**: Centered academic paper sheet with elevation shadow (`box-shadow: 0 4px 28px rgba(0,0,0,0.08)`), responsive single-column mode and classic two-column academic journal layout toggle (`2 Col / 1 Col`), serif/sans typography toggle, and publication header block:
+    * Centered bold paper title.
+    * Formatted author bylines and institutional affiliation subtitles.
+    * Metadata pills (Year, arXiv ID, Citations count, Open Access).
+    * Distinct styled Abstract card with academic margin insets.
+  * **Collapsible Table of Contents (TOC) Navigator**: Clean left outline drawer listing all document sections with hierarchical indentation and active section indicator, enabling one-click smooth scrolling to any section.
+  * **Floating Selection Toolbar**: Text selection activates a floating pill popup (`[ 🖉 Highlight ]`, `[ 💬 Comment ]`, `[ 💬 Chat ]`) directly above selected text:
+    * `Highlight`: Records highlighted quote into the Annotations tab.
+    * `Comment`: Opens note popover and saves annotation with user notes.
+    * `Chat`: Quotes passage and focuses the Ask AI research assistant tab.
+  * **Figure Lightbox Modal**: Clicking any architecture diagram or figure opens a full-screen lightbox with zoom in (`+`), zoom out (`-`), reset zoom (`↺`), caption display, and image download.
+  * **In-Paper Search Bar**: Quick search pill supporting keyword search within the paper with match counts and previous/next navigation.
+  * **Top Bar Controls**: Back button, Outline toggle, View mode toggle (`[ PDF ]` / `[ Reader ]`), Layout toggle (`[ 1 Col ]` / `[ 2 Col ]`), Typography toggle (`[ Serif ]` / `[ Sans ]`), Search, Bookmark, Download (Markdown/PDF), Print (`window.print()`), and Sidebar toggle.
+  * **Right Sidebar**:
+    * `Ask`: Conversational AI chat with styled speech bubbles (user purple bubble, assistant card bubble), prompt suggestion chips, and circular send button with upward arrow `↑`.
+    * `Annotations`: List of highlights and comments with jump-to links and deletion.
+    * `Details`: Metadata rows, BibTeX with one-click copy, DOI and arXiv links.
+    * `Benchmarks`: Papers With Code tasks, metrics, evaluation values, and linked GitHub repositories with star counts.
+  * **Academic Booktabs Table & KaTeX Math Styling**: Custom renderer for headings with IDs, booktabs tables with clean rules, and display/inline math rendering.
+
+* **Performance, Efficiency & Heuristic Tradeoffs**:
+  * Current PDF-to-Markdown processing operates via fast, zero-GPU PyMuPDF heuristics and regex cleanup. While lightweight, highly responsive, and sufficient for current paper reading, layout parsing has known efficiency and fidelity limitations on complex multi-column academic formats, wrapped mathematical equations, and non-standard figure layouts.
+  * Serves as an operational foundation for the research library; deep document vision parsing (Docling, Marker, or vLLM OCR pipelines) can be swapped in modularly without modifying reader UI components.
+
+* **Automated Verification**:
+  * Created unit tests in `tests/test_pdf_markdown_reader.py` testing metadata extraction, author list sanitization, abstract extraction, body markdown slicing, and section TOC hierarchy on real academic preprints.
+  * Verified 100% test pass rate across PDF markdown, intelligence, and workspace graph synthesis test suites. Frontend built cleanly via `npm run build` in 6.93s.
