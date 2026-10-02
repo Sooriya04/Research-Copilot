@@ -1082,3 +1082,24 @@ bundle compilation (`npm run build`).
 * **Automated Verification**:
   * Created unit tests in `tests/test_pdf_markdown_reader.py` testing metadata extraction, author list sanitization, abstract extraction, body markdown slicing, and section TOC hierarchy on real academic preprints.
   * Verified 100% test pass rate across PDF markdown, intelligence, and workspace graph synthesis test suites. Frontend built cleanly via `npm run build` in 6.93s.
+
+<br />
+
+## Knowledge Graph Topology Unification, Dandelion Starburst Pruning & Node Readability Fixes
+
+* **Unified Topic Anchor & Disconnection Elimination (`frontend/src/views/KnowledgeGraphView.jsx`, `src/api/routes_graph.py`)**:
+  * Identified and fixed the root cause of detached Topic pill nodes and floating isolated paper capsules: synthetic frontend topic IDs previously failed to match backend workspace topic IDs, causing edges to drop and leaving nodes adrift.
+  * Enforced primary topic anchoring across both backend (`get_graph_elements`) and frontend (`filteredData`), linking every staged/scoped paper to the central Topic Head Node via directed `Explores` (`covers`) edges.
+  * Completely eliminated orphaned floating boxes; every node is part of a unified, coherent research constellation.
+
+* **Pruned Leaf Single-Paper Entities & Starburst Elimination**:
+  * Enforced multi-paper bridge rule (`connectedPapers.size >= 2`) when $\ge 2$ papers exist.
+  * Pruned single-paper leaf methods and datasets that previously formed 14-circle dandelion spoke wheels around individual papers.
+  * Preserved all combinatorial research gap nodes (`HAS_GAP` diamonds) and genuine cross-paper bridges (`large-language-models`, shared benchmarks).
+
+* **Node Readability, Card Width Constraints & Contrast Repair**:
+  * Applied explicit `widthConstraint: { minimum: 150, maximum: 220 }` and vertical padding to paper cards, preventing flattened, squashed 3px capsules.
+  * Styled the central Topic Head Node with rich indigo background and bold pure white text (`#ffffff`) across both light and dark themes, eliminating pitch-black unreadable blocks.
+  * Formatted raw monolithic paper hashes (e.g. `s2:29e11383...`) into structured cards (`Cited Paper [29e11383…]`) with clean multi-line wrapping.
+  * Stabilized Vis.js physics (`gravitationalConstant: -90`, `centralGravity: 0.02`, `springLength: 140`) and added smooth auto-fit framing upon stabilization completion.
+

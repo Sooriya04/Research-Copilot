@@ -268,23 +268,30 @@ class PaperEnricher:
         if settings.openalex_api_key:
             req_headers["Authorization"] = f"Bearer {settings.openalex_api_key}"
 
+        oa_params: Dict[str, Any] = {}
+        if settings.openalex_api_key:
+            oa_params["api_key"] = settings.openalex_api_key
+        if settings.openalex_email:
+            oa_params["mailto"] = settings.openalex_email
+
         async with httpx.AsyncClient(headers=req_headers, timeout=self.timeout) as client:
             if openalex_id:
                 clean_id = openalex_id.split("/")[-1].upper()
-                resp = await client.get(f"{OPENALEX_BASE}/works/{clean_id}")
+                resp = await client.get(f"{OPENALEX_BASE}/works/{clean_id}", params=oa_params)
                 if resp.status_code == 200:
                     return resp.json()
 
             if doi:
-                resp = await client.get(f"{OPENALEX_BASE}/works/https://doi.org/{doi}")
+                resp = await client.get(f"{OPENALEX_BASE}/works/https://doi.org/{doi}", params=oa_params)
                 if resp.status_code == 200:
                     return resp.json()
 
             if title and len(title.strip()) >= 5:
                 clean_title = re.sub(r"[^\w\s-]", " ", title).strip()
+                search_params = {**oa_params, "search": clean_title, "per_page": 1}
                 resp = await client.get(
                     f"{OPENALEX_BASE}/works",
-                    params={"search": clean_title, "per_page": 1},
+                    params=search_params,
                 )
                 if resp.status_code == 200:
                     results = resp.json().get("results", [])

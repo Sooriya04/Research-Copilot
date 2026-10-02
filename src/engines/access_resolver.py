@@ -56,6 +56,8 @@ class AccessResolver:
             "per_page": min(limit, settings.max_rank_limit),
             "mailto": settings.openalex_email,
         }
+        if settings.openalex_api_key:
+            params["api_key"] = settings.openalex_api_key
         papers: List[Paper] = []
         try:
             async with httpx.AsyncClient(timeout=self.timeout, headers=self.headers) as client:
@@ -169,15 +171,19 @@ class AccessResolver:
         candidates: List[PaperAccessCandidate] = []
         paper: Optional[Paper] = None
         
+        oa_params = {"mailto": settings.openalex_email}
+        if settings.openalex_api_key:
+            oa_params["api_key"] = settings.openalex_api_key
+
         async with httpx.AsyncClient(timeout=self.timeout, headers=self.headers) as client:
             if id_type == "openalex":
                 url = f"{settings.openalex_base_url}/works/{clean_id}"
-                resp = await client.get(url, params={"mailto": settings.openalex_email})
+                resp = await client.get(url, params=oa_params)
                 if resp.status_code == 200:
                     paper = self._parse_openalex_item(resp.json())
             elif id_type == "doi":
                 url = f"{settings.openalex_base_url}/works/https://doi.org/{clean_id}"
-                resp = await client.get(url, params={"mailto": settings.openalex_email})
+                resp = await client.get(url, params=oa_params)
                 if resp.status_code == 200:
                     paper = self._parse_openalex_item(resp.json())
             elif id_type == "arxiv":

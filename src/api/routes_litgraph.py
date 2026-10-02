@@ -129,6 +129,18 @@ if settings.openalex_api_key:
     HEADERS["Authorization"] = f"Bearer {settings.openalex_api_key}"
 
 
+def get_openalex_params(extra_params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Build query parameters for OpenAlex ensuring API key authentication."""
+    params: Dict[str, Any] = {}
+    if settings.openalex_api_key:
+        params["api_key"] = settings.openalex_api_key
+    if settings.openalex_email:
+        params["mailto"] = settings.openalex_email
+    if extra_params:
+        params.update(extra_params)
+    return params
+
+
 def parse_openalex_work(work: Dict[str, Any], is_seed: bool = False) -> Dict[str, Any]:
     pid = clean_id(work.get("id"))
     authors = [
@@ -174,7 +186,7 @@ async def search_openalex(client: httpx.AsyncClient, query: str, limit: int = 8)
             # 1. Try high-precision title search filter
             resp = await client.get(
                 f"{OPENALEX_BASE}/works",
-                params={"filter": f"title.search:{clean_q}", "per-page": max(limit, 10)},
+                params=get_openalex_params({"filter": f"title.search:{clean_q}", "per-page": max(limit, 10)}),
                 headers=HEADERS,
                 timeout=8.0,
             )
@@ -185,7 +197,7 @@ async def search_openalex(client: httpx.AsyncClient, query: str, limit: int = 8)
         if not data:
             resp = await client.get(
                 f"{OPENALEX_BASE}/works",
-                params={"search": query, "per-page": max(limit, 10)},
+                params=get_openalex_params({"search": query, "per-page": max(limit, 10)}),
                 headers=HEADERS,
                 timeout=8.0,
             )
@@ -259,7 +271,7 @@ async def fetch_openalex_work(client: httpx.AsyncClient, paper_id: str) -> Optio
                     return top_candidate
             url = f"{OPENALEX_BASE}/works?search={clean_pid}&per-page=1"
 
-        resp = await client.get(url, headers=HEADERS, timeout=8.0)
+        resp = await client.get(url, params=get_openalex_params(), headers=HEADERS, timeout=8.0)
         if resp.status_code == 200:
             data = resp.json()
             work = data["results"][0] if "results" in data and data["results"] else data
@@ -286,7 +298,7 @@ async def fetch_openalex_batch(client: httpx.AsyncClient, paper_ids: List[str]) 
         try:
             resp = await client.get(
                 f"{OPENALEX_BASE}/works",
-                params={"filter": f"openalex:{pipe_ids}", "per-page": 25},
+                params=get_openalex_params({"filter": f"openalex:{pipe_ids}", "per-page": 25}),
                 headers=HEADERS,
                 timeout=10.0,
             )
@@ -436,7 +448,8 @@ async def build_litgraph_pipeline(paper_id: str) -> LitGraphResponse:
         try:
             cites_resp = await client.get(
                 f"{OPENALEX_BASE}/works",
-                params={"filter": f"cites:{seed['id']}", "per-page": 20},
+                params=get_openalex_params({"filter": f"cites:{seed['id']}", "per-page": 20}),
+                headers=HEADERS,
                 timeout=8.0,
             )
             if cites_resp.status_code == 200:
@@ -454,7 +467,8 @@ async def build_litgraph_pipeline(paper_id: str) -> LitGraphResponse:
             try:
                 topic_resp = await client.get(
                     f"{OPENALEX_BASE}/works",
-                    params={"search": clean_title_query, "per-page": 40},
+                    params=get_openalex_params({"search": clean_title_query, "per-page": 40}),
+                    headers=HEADERS,
                     timeout=8.0,
                 )
                 if topic_resp.status_code == 200:
@@ -504,7 +518,7 @@ async def search_papers(q: str = Query(..., min_length=2, description="Paper tit
     if cached is not None:
         return cached
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(headers=HEADERS) as client:
         results = await search_openalex(client, q, limit=8)
 
     _cache_set(cache_key, results)

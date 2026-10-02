@@ -417,10 +417,33 @@ async def get_graph_elements(
         edges_raw = await graph_store.get_all_edges()
 
     # Rule: non-topic, non-paper nodes are CONNECTION nodes between papers.
-    # In scoped or single-paper mode, allow nodes connected to >= 1 paper.
-    # In global unscoped multi-paper mode, only include if connected to >= 2 papers (avoids orphan singletons).
-    is_scoped = (allowed_node_ids is not None) or (len(paper_ids) <= 1)
-    min_papers = 1 if is_scoped else 2
+    # If multiple papers exist (>= 2), only include nodes that connect to >= 2 papers (avoids leaf dandelion starbursts).
+    # Gaps are always preserved as research opportunities.
+    min_papers = 2 if len(paper_ids) >= 2 else 1
+
+    # Ensure every scoped paper connects to the primary topic/workspace anchor so none float detached
+    primary_anchor = None
+    if target_topic_id and target_topic_id in graph_store.graph:
+        primary_anchor = target_topic_id
+    elif target_ws_id and target_ws_id in graph_store.graph:
+        primary_anchor = target_ws_id
+    elif anchor_ids:
+        primary_anchor = next(iter(anchor_ids))
+
+    if primary_anchor:
+        existing_anchor_pairs = {
+            (e.source_id, e.target_id) for e in edges_raw
+        } | {
+            (e.target_id, e.source_id) for e in edges_raw
+        }
+        for pid in paper_ids:
+            if (primary_anchor, pid) not in existing_anchor_pairs:
+                edges_raw.append(ResearchEdge(
+                    source_id=primary_anchor,
+                    target_id=pid,
+                    relation=Relation.COVERS,
+                    weight=2.0
+                ))
 
     valid_connection_node_ids = set()
     for nid in graph_store.graph.nodes:
@@ -430,7 +453,7 @@ async def get_graph_elements(
         if not n:
             continue
         ntype = n.node_type.value if hasattr(n.node_type, "value") else str(n.node_type)
-        if ntype in ["topic", "paper"]:
+        if ntype in ["topic", "paper", "gap"]:
             valid_connection_node_ids.add(nid)
         else:
             connected_papers = set()
