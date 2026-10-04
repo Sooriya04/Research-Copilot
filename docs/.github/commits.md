@@ -1179,3 +1179,23 @@ bundle compilation (`npm run build`).
   * `POST /api/v1/novelty/synthesize`: Main multi-provider synthesis endpoint returning proposals and telemetry.
   * `POST /api/v1/novelty/add-to-graph`: Direct candidate node injection into knowledge graph store.
   * Added test suite `test_novelty_routes.py`; 100% pass rate across all 5 novelty tests in 8.82s. Frontend built cleanly in 7.08s.
+
+<br />
+
+## Commit 32 (dev and main) : Activate Ollama Daemon with phi4-mini GPU Acceleration, Model Filtering, and Proposal Normalization
+
+* **Ollama Service Activation & phi4-mini Integration**:
+  * Launched local Ollama daemon service on `localhost:11434` with NVIDIA GPU acceleration (RTX 3050 CUDA 13.2).
+  * Automatically detected locally installed `phi4-mini:latest` (~3.8B parameters, 2.5 GB) resident in 3046 MiB VRAM.
+  * Configured `phi4-mini` as the default generation model across `LocalOllamaProvider`, `Settings` (`src/core/config.py`), and `GraphNoveltyEngine`.
+* **Generative Model Filtering & Dynamic UI Dropdown**:
+  * Filtered out embedding-only models (e.g. `nomic-embed-text`) from provider status and dropdown lists to prevent non-generative inference errors.
+  * Dynamically populates installed Ollama models in `NoveltyStudioView.jsx` with `phi4-mini` highlighted as active.
+  * Displays live model name and round-trip ping latency directly on the Ollama provider card in the studio.
+* **Robust Schema Normalization for Local LLMs**:
+  * Enhanced `GraphNoveltyEngine` JSON extraction with permissive key mapping (`novelty_ideas`, `ideas`, `novelties`, `proposals`) and fallback field filling.
+  * Verified end-to-end synthesis with `phi4-mini` generating grounded scientific hypotheses with mathematical formulations and testable hypotheses.
+* **Synchronized & Verified**:
+  * Unit test suite `tests/test_novelty_routes.py` and `tests/test_graph_novelty_engine.py` 100% passing (5/5).
+  * Production frontend build verified in 6.70s.
+
