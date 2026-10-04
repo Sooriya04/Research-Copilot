@@ -1199,3 +1199,26 @@ bundle compilation (`npm run build`).
   * Unit test suite `tests/test_novelty_routes.py` and `tests/test_graph_novelty_engine.py` 100% passing (5/5).
   * Production frontend build verified in 6.70s.
 
+<br />
+
+## Commit 33 (dev and main) : Persistent SQLite API Key Storage, Dynamic Groq Model Discovery & In-App Key Management Drawer
+
+* **Persistent SQLite Provider Settings (`src/core/provider_settings.py`, `user_settings` table)**:
+  * Implemented hierarchical credential resolver prioritizing: Request payload > SQLite Database (`research_copilot.db / user_settings`) > Environment variables (`.env`).
+  * Created `save_provider_config`, `get_saved_provider_config`, and `delete_provider_config` helpers.
+  * Added `POST /api/v1/novelty/save-provider-key` and `DELETE /api/v1/novelty/remove-provider-key/{provider}` endpoints.
+  * Masks sensitive API keys for safe UI feedback (`gsk_p5...rEAY`).
+* **Groq LPU Dynamic Model Discovery & OTPM Token Management (`src/providers/groq.py`)**:
+  * Added dynamic `list_models()` probing available models for the active key via Groq's `/models` REST API.
+  * Added fallback token-bounding (`max_tokens: 950`) to comply with Groq free/on-demand OTPM limits.
+  * Verified live connection and synthesis on `qwen/qwen3.8-27b` and `openai/gpt-oss-120b`.
+* **Novelty Studio Drawer & Provider Cards Redesign (`frontend/src/views/NoveltyStudioView.jsx`)**:
+  * Added dedicated SQLite storage cards for Groq LPU, Google Gemini, and Local Ollama inside the configuration drawer.
+  * Added one-click **[ 💾 Save to SQLite DB ]** button with immediate backend verification and toast notification.
+  * Added **[ 🗑️ Clear Key ]** button for stored credentials.
+  * Updated top Provider Cards to reflect real-time storage status (`● SQLite Active`, `● .env Active`, `○ Needs Key`).
+* **Synchronized & Verified**:
+  * Full test suite `tests/test_novelty_routes.py` (6/6 passing including new SQLite persistence tests).
+  * Production frontend bundle rebuilt in 6.72s.
+
+
