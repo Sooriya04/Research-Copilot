@@ -80,13 +80,13 @@ def test_settings_test_connection_gemini(client):
         assert data["latency_ms"] == 95.2
 
 
-def test_settings_save_and_delete_openrouter(client):
-    """Verify saving OpenRouter config to SQLite and retrieving it."""
+def test_settings_save_and_delete_provider(client):
+    """Verify saving custom provider config to SQLite and retrieving/deleting it without touching real providers."""
     save_resp = client.post(
         "/api/v1/settings/providers",
         json={
-            "provider_id": "openrouter",
-            "api_key": "sk-or-v1-unit-test-key-xyz",
+            "provider_id": "test_mock_provider",
+            "api_key": "sk-test-unit-test-key-xyz",
             "model": "deepseek/deepseek-r1",
         },
     )
@@ -94,11 +94,11 @@ def test_settings_save_and_delete_openrouter(client):
     assert save_resp.json()["ok"] is True
 
     # Check key endpoint
-    key_resp = client.get("/api/v1/settings/providers/openrouter/key")
+    key_resp = client.get("/api/v1/settings/providers/test_mock_provider/key")
     assert key_resp.status_code == 200
-    assert key_resp.json()["api_key"] == "sk-or-v1-unit-test-key-xyz"
+    assert key_resp.json()["api_key"] == "sk-test-unit-test-key-xyz"
     assert key_resp.json()["model"] == "deepseek/deepseek-r1"
 
     # Cleanup
-    del_resp = client.delete("/api/v1/settings/providers/openrouter")
+    del_resp = client.delete("/api/v1/settings/providers/test_mock_provider")
     assert del_resp.status_code == 200

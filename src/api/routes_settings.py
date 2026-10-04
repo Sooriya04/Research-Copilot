@@ -13,7 +13,11 @@ from sqlalchemy import select, delete
 from src.core.database import get_db
 from src.core.models import UserSettingsModel
 from src.core.logger import logger
-from src.core.provider_settings import resolve_provider_credentials, mask_api_key
+from src.core.provider_settings import (
+    resolve_provider_credentials,
+    mask_api_key,
+    DEFAULT_PROVIDER_MODELS,
+)
 from src.providers.gemini import GeminiFlashLiteProvider
 from src.providers.groq import GroqProvider
 from src.providers.llm import LocalOllamaProvider
@@ -52,29 +56,22 @@ async def get_providers(db: AsyncSession = Depends(get_db)):
     for p_id in KNOWN_PROVIDERS:
         seen.add(p_id)
         row = sqlite_map.get(p_id)
-        if row and (row.api_key or row.base_url or row.model):
-            out.append({
-                "provider_id": p_id,
-                "api_key_masked": mask_api_key(row.api_key),
-                "base_url": row.base_url,
-                "model": row.model,
-                "has_key": bool(row.api_key or row.base_url),
-                "stored_in_db": True,
-                "key_source": "sqlite",
-            })
-        else:
-            # Check env fallback
-            creds = await resolve_provider_credentials(p_id)
-            has_env = creds["key_source"] == "env" or (p_id == "ollama" and bool(creds.get("base_url")))
-            out.append({
-                "provider_id": p_id,
-                "api_key_masked": creds["api_key_masked"] if has_env else None,
-                "base_url": creds.get("base_url"),
-                "model": creds.get("model"),
-                "has_key": bool(creds.get("has_key") or (p_id == "ollama" and bool(creds.get("base_url")))),
-                "stored_in_db": False,
-                "key_source": creds["key_source"],
-            })
+        creds = await resolve_provider_credentials(p_id)
+        default_model = DEFAULT_PROVIDER_MODELS.get(p_id)
+        effective_model = (row.model if row and row.model else None) or creds.get("model") or default_model
+        effective_base_url = (row.base_url if row and row.base_url else None) or creds.get("base_url")
+        is_stored = bool(row and (row.api_key or row.base_url or row.model))
+        has_key = bool((row and row.api_key) or creds.get("has_key") or (p_id == "ollama" and effective_base_url))
+
+        out.append({
+            "provider_id": p_id,
+            "api_key_masked": mask_api_key(row.api_key) if (row and row.api_key) else creds.get("api_key_masked"),
+            "base_url": effective_base_url,
+            "model": effective_model,
+            "has_key": has_key,
+            "stored_in_db": is_stored,
+            "key_source": "sqlite" if (row and row.api_key) else creds.get("key_source", "none"),
+        })
 
     # 2. Append any custom user-added providers
     for row in rows:
@@ -102,25 +99,30 @@ async def save_provider(config: ProviderConfig, db: AsyncSession = Depends(get_d
         )
     )
     row = result.scalar_one_or_none()
+    default_model = DEFAULT_PROVIDER_MODELS.get(p_id)
+    clean_model = config.model.strip() if (config.model and config.model.strip()) else None
+
     if row:
         if config.api_key is not None:
-            row.api_key = config.api_key
+            row.api_key = config.api_key.strip() if config.api_key else None
         if config.base_url is not None:
-            row.base_url = config.base_url
-        if config.model is not None:
-            row.model = config.model
+            row.base_url = config.base_url.strip() if config.base_url else None
+        if clean_model is not None:
+            row.model = clean_model
+        elif not row.model and default_model:
+            row.model = default_model
     else:
         row = UserSettingsModel(
             id="default",
             provider_id=p_id,
-            api_key=config.api_key,
-            base_url=config.base_url,
-            model=config.model,
+            api_key=config.api_key.strip() if config.api_key else None,
+            base_url=config.base_url.strip() if config.base_url else None,
+            model=clean_model or default_model,
         )
         db.add(row)
     await db.commit()
-    logger.info("Saved settings for provider: %s", p_id)
-    return {"ok": True, "provider_id": p_id}
+    logger.info("Saved settings for provider: %s (model: %s)", p_id, row.model)
+    return {"ok": True, "provider_id": p_id, "model": row.model}
 
 
 @router.delete("/providers/{provider_id}")
@@ -282,7 +284,6 @@ async def test_provider_connection_endpoint(req: TestConnectionRequest):
     elif p_id == "openai":
         res = await _test_openai(api_key=api_key, base_url=base_url, model=model)
     elif p_id == "nvidia":
-        res = await _test_nvidia(api_key=api_key, base_url=base_url, model=model)
         res = await _test_nvidia(api_key=api_key, base_url=base_url, model=model)
     else:
         res = {

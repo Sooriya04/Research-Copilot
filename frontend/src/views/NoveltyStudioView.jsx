@@ -47,10 +47,11 @@ export default function NoveltyStudioView() {
 
   // Providers & Models state
   const [providersStatus, setProvidersStatus] = useState(null);
-  const [selectedProvider, setSelectedProvider] = useState('gemini'); // 'gemini' | 'groq' | 'ollama' | 'all'
+  const [selectedProvider, setSelectedProvider] = useState('gemini'); // 'gemini' | 'groq' | 'ollama' | 'openrouter' | 'all'
   const [selectedModel, setSelectedModel] = useState('');
   const [groqKeyOverride, setGroqKeyOverride] = useState(() => localStorage.getItem('rc_groq_key') || '');
   const [geminiKeyOverride, setGeminiKeyOverride] = useState(() => localStorage.getItem('rc_gemini_key') || '');
+  const [openrouterKeyOverride, setOpenrouterKeyOverride] = useState(() => localStorage.getItem('rc_openrouter_key') || '');
   const [ollamaUrlOverride, setOllamaUrlOverride] = useState(() => localStorage.getItem('rc_ollama_url') || 'http://localhost:11434');
   const [showConfigDrawer, setShowConfigDrawer] = useState(false);
   const [savingKey, setSavingKey] = useState(false);
@@ -124,6 +125,9 @@ export default function NoveltyStudioView() {
       if (res.ok && data.success) {
         setToastMsg(`✅ ${provider.toUpperCase()} credentials permanently saved to SQLite database!`);
         addTelemetryLog(`SQLite DB updated for ${provider}: Masked ${data.api_key_masked || 'OK'}`);
+        if (provider === 'groq') localStorage.setItem('rc_groq_key', apiKey || '');
+        if (provider === 'gemini') localStorage.setItem('rc_gemini_key', apiKey || '');
+        if (provider === 'openrouter') localStorage.setItem('rc_openrouter_key', apiKey || '');
         await fetchProvidersStatus();
       } else {
         setErrorMsg(data.detail || `Failed to save ${provider} credentials in SQLite`);
@@ -146,8 +150,9 @@ export default function NoveltyStudioView() {
       if (res.ok) {
         setToastMsg(`🗑️ ${provider.toUpperCase()} credentials removed from SQLite database.`);
         addTelemetryLog(`Removed ${provider} credentials from SQLite DB.`);
-        if (provider === 'groq') setGroqKeyOverride('');
-        if (provider === 'gemini') setGeminiKeyOverride('');
+        if (provider === 'groq') { setGroqKeyOverride(''); localStorage.removeItem('rc_groq_key'); }
+        if (provider === 'gemini') { setGeminiKeyOverride(''); localStorage.removeItem('rc_gemini_key'); }
+        if (provider === 'openrouter') { setOpenrouterKeyOverride(''); localStorage.removeItem('rc_openrouter_key'); }
         await fetchProvidersStatus();
       }
     } catch (err) {
@@ -186,6 +191,8 @@ export default function NoveltyStudioView() {
             ? groqKeyOverride
             : selectedProvider === 'gemini'
             ? geminiKeyOverride
+            : selectedProvider === 'openrouter'
+            ? openrouterKeyOverride
             : undefined,
         base_url: selectedProvider === 'ollama' ? ollamaUrlOverride : undefined,
         model: selectedModel || undefined,
@@ -243,6 +250,8 @@ export default function NoveltyStudioView() {
             ? groqKeyOverride || undefined
             : selectedProvider === 'gemini'
             ? geminiKeyOverride || undefined
+            : selectedProvider === 'openrouter'
+            ? openrouterKeyOverride || undefined
             : undefined,
         base_url: selectedProvider === 'ollama' ? ollamaUrlOverride || undefined : undefined,
         force_refresh: forceRefresh,
@@ -337,7 +346,7 @@ ${nov.mathematical_formulation || 'N/A'}
 
   // Grouped for side-by-side comparison mode
   const comparisonByEngine = useMemo(() => {
-    const groups = { gemini: [], groq: [], ollama: [], heuristic: [] };
+    const groups = { gemini: [], groq: [], ollama: [], openrouter: [], heuristic: [] };
     noveltyResults.forEach((n) => {
       const eng = (n.engine || 'gemini').toLowerCase();
       if (groups[eng]) groups[eng].push(n);
@@ -568,6 +577,36 @@ ${nov.mathematical_formulation || 'N/A'}
             <span>Model: {providersStatus?.ollama?.default_model || 'phi4-mini'}</span>
             <span style={{ color: providersStatus?.ollama?.online ? '#10b981' : 'var(--text-muted)' }}>
               {providersStatus?.ollama?.online ? `● Online (${providersStatus?.ollama?.latency_ms ? `${Math.round(providersStatus.ollama.latency_ms)}ms` : 'ready'})` : '○ Offline'}
+            </span>
+          </div>
+        </div>
+
+        {/* OpenRouter Provider Card */}
+        <div
+          onClick={() => setSelectedProvider('openrouter')}
+          className="card"
+          style={{
+            padding: 16,
+            cursor: 'pointer',
+            border: selectedProvider === 'openrouter' ? '2px solid #8b5cf6' : '1px solid var(--border-subtle)',
+            background: selectedProvider === 'openrouter' ? (isDark ? '#2e106522' : '#f5f3ff') : 'var(--bg-card)',
+            transition: 'border-color 0.15s, transform 0.15s',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Layers size={16} style={{ color: '#8b5cf6' }} />
+              <strong style={{ fontSize: 13.5, color: 'var(--text-primary)' }}>OpenRouter</strong>
+            </div>
+            <span className="badge badge-purple" style={{ fontSize: 10 }}>Universal Frontier</span>
+          </div>
+          <p style={{ fontSize: 11.5, color: 'var(--text-secondary)', margin: '0 0 8px', lineHeight: 1.35 }}>
+            Access Claude 3.5, DeepSeek-R1, Llama 3.3, and Gemma with unified routing.
+          </p>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 10.5, color: 'var(--text-muted)' }}>
+            <span>Model: {providersStatus?.openrouter?.default_model || 'anthropic/claude-3.5-sonnet'}</span>
+            <span style={{ color: providersStatus?.openrouter?.has_key ? '#10b981' : '#8b5cf6', fontWeight: 600 }}>
+              {providersStatus?.openrouter?.stored_in_db ? '● SQLite Active' : (providersStatus?.openrouter?.has_key ? '● .env Active' : '○ Needs Key')}
             </span>
           </div>
         </div>
@@ -872,6 +911,119 @@ ${nov.mathematical_formulation || 'N/A'}
                   <Save size={12} />
                   <span>{savingKey ? 'Saving...' : 'Save to SQLite DB'}</span>
                 </button>
+              </div>
+            </div>
+
+            {/* 4. OpenRouter Card */}
+            <div
+              style={{
+                padding: '14px 16px',
+                borderRadius: 'var(--radius-sm)',
+                border: '1px solid var(--border-subtle)',
+                background: isDark ? '#1e293b' : '#ffffff',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Layers size={14} style={{ color: '#8b5cf6' }} />
+                  <strong style={{ fontSize: 13 }}>OpenRouter</strong>
+                </div>
+                {providersStatus?.openrouter?.stored_in_db ? (
+                  <span className="badge badge-emerald" style={{ fontSize: 10, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <Database size={10} /> SQLite Saved
+                  </span>
+                ) : providersStatus?.openrouter?.has_key ? (
+                  <span className="badge badge-purple" style={{ fontSize: 10, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <Key size={10} /> .env Active
+                  </span>
+                ) : (
+                  <span className="badge badge-gray" style={{ fontSize: 10 }}>○ Needs Key</span>
+                )}
+              </div>
+
+              <div style={{ marginBottom: 10 }}>
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>
+                  API Key: {providersStatus?.openrouter?.api_key_masked && <span style={{ color: 'var(--text-muted)', fontWeight: 'normal' }}>({providersStatus.openrouter.api_key_masked})</span>}
+                </label>
+                <input
+                  type={showKeyPassword ? 'text' : 'password'}
+                  className="input"
+                  placeholder={providersStatus?.openrouter?.api_key_masked || 'Paste OpenRouter key (sk-or-v1-...)'}
+                  value={openrouterKeyOverride}
+                  onChange={(e) => setOpenrouterKeyOverride(e.target.value)}
+                  style={{ fontSize: 12, width: '100%', padding: '6px 10px' }}
+                />
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>
+                  Target Model:
+                </label>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder={providersStatus?.openrouter?.default_model || 'anthropic/claude-3.5-sonnet'}
+                  value={selectedProvider === 'openrouter' ? selectedModel : ''}
+                  onChange={(e) => {
+                    setSelectedProvider('openrouter');
+                    setSelectedModel(e.target.value);
+                  }}
+                  list="openrouter-models-datalist"
+                  style={{ fontSize: 12, width: '100%', padding: '6px 10px', marginBottom: 4 }}
+                />
+                <datalist id="openrouter-models-datalist">
+                  <option value="anthropic/claude-3.5-sonnet" />
+                  <option value="deepseek/deepseek-r1" />
+                  <option value="meta-llama/llama-3.3-70b-instruct" />
+                  <option value="google/gemini-2.0-flash-001" />
+                  <option value="openai/gpt-4o-mini" />
+                  <option value="google/gemma-4-31b-it:free" />
+                </datalist>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+                  {['anthropic/claude-3.5-sonnet', 'deepseek/deepseek-r1', 'google/gemma-4-31b-it:free'].map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => {
+                        setSelectedProvider('openrouter');
+                        setSelectedModel(m);
+                      }}
+                      style={{
+                        fontSize: 10,
+                        padding: '1px 6px',
+                        borderRadius: 3,
+                        border: '1px solid var(--border-subtle)',
+                        background: 'var(--bg-subtle)',
+                        color: 'var(--text-muted)',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {m.split('/')[1] || m}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={() => handleSaveKeyToDb('openrouter', openrouterKeyOverride, selectedModel)}
+                  disabled={savingKey || !openrouterKeyOverride}
+                  style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6, flex: 1, justifyContent: 'center' }}
+                >
+                  <Save size={12} />
+                  <span>{savingKey ? 'Saving...' : 'Save to SQLite DB'}</span>
+                </button>
+                {providersStatus?.openrouter?.stored_in_db && (
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => handleRemoveKeyFromDb('openrouter')}
+                    style={{ fontSize: 11, color: '#ef4444', display: 'flex', alignItems: 'center', gap: 4 }}
+                    title="Remove key from SQLite DB"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                )}
               </div>
             </div>
           </div>

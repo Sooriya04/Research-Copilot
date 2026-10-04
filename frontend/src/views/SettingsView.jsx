@@ -84,6 +84,7 @@ const PROVIDERS = [
       'google/gemini-2.0-flash-001',
       'openai/gpt-4o-mini',
       'mistralai/mistral-large-2407',
+      'google/gemma-4-31b-it:free',
     ],
     docUrl: 'https://openrouter.ai/keys',
     docLabel: 'openrouter.ai',
@@ -156,7 +157,9 @@ function ProviderRow({ provider, saved, onSave, onDelete }) {
   }, [key, model, url]);
 
   const isActive = !!saved?.has_key;
-  const canSave = provider.isLocal ? Boolean(url.trim() || model.trim()) : Boolean(key.trim() || model.trim());
+  const canSave = provider.isLocal
+    ? Boolean(url.trim() || model.trim())
+    : Boolean(key.trim() || model.trim() || isActive);
   const canTest = Boolean(isActive || key.trim() || (provider.isLocal && url.trim()));
 
   const handleTest = async () => {
@@ -197,13 +200,14 @@ function ProviderRow({ provider, saved, onSave, onDelete }) {
     }
   };
 
-  const handleSave = async () => {
+  const handleSave = async (overrideParams = null) => {
     setStatus('saving');
+    const targetModel = (model.trim() || saved?.model || provider.modelPlaceholder || '').trim();
     try {
-      await onSave(provider.id, {
-        api_key: provider.isLocal ? null : (key || undefined),
-        base_url: provider.isLocal ? (url || undefined) : undefined,
-        model: model || undefined,
+      await onSave(provider.id, overrideParams || {
+        api_key: provider.isLocal ? null : (key.trim() || undefined),
+        base_url: provider.isLocal ? (url.trim() || undefined) : undefined,
+        model: targetModel,
       });
       setKey('');
       setStatus('ok');
@@ -511,19 +515,40 @@ function ProviderRow({ provider, saved, onSave, onDelete }) {
                   : testResult?.error || 'Connection failed'}
               </span>
             </div>
-            {testStatus === 'success' && typeof testResult?.latency_ms === 'number' && (
-              <span
-                style={{
-                  fontFamily: 'var(--font-code)',
-                  fontWeight: 700,
-                  fontSize: 11,
-                  flexShrink: 0,
-                  marginLeft: 8,
-                }}
-              >
-                {testResult.latency_ms} ms
-              </span>
-            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, marginLeft: 8 }}>
+              {testStatus === 'success' && typeof testResult?.latency_ms === 'number' && (
+                <span
+                  style={{
+                    fontFamily: 'var(--font-code)',
+                    fontWeight: 700,
+                    fontSize: 11,
+                  }}
+                >
+                  {testResult.latency_ms} ms
+                </span>
+              )}
+              {testStatus === 'success' && Boolean(key.trim() || model.trim()) && (
+                <button
+                  type="button"
+                  onClick={() => handleSave()}
+                  disabled={status === 'saving'}
+                  className="btn btn-primary btn-xs"
+                  style={{
+                    padding: '2px 8px',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    borderRadius: 4,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}
+                  title="Save verified credentials to SQLite database"
+                >
+                  <Save size={11} />
+                  <span>{status === 'saving' ? 'Saving...' : 'Save to DB'}</span>
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>

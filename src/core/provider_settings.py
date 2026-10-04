@@ -45,6 +45,16 @@ async def get_saved_provider_config(provider_id: str) -> Optional[Dict[str, Any]
     return None
 
 
+DEFAULT_PROVIDER_MODELS = {
+    "gemini": "gemini-3.5-flash-lite",
+    "groq": "qwen/qwen3.8-27b",
+    "ollama": "phi4-mini",
+    "openrouter": "anthropic/claude-3.5-sonnet",
+    "openai": "gpt-4o",
+    "nvidia": "meta/llama-3.3-70b-instruct",
+}
+
+
 async def save_provider_config(
     provider_id: str,
     api_key: Optional[str] = None,
@@ -53,6 +63,9 @@ async def save_provider_config(
 ) -> Dict[str, Any]:
     """Save or update API key, base_url, or model in SQLite user_settings table."""
     p_id = (provider_id or "").lower().strip()
+    default_model = DEFAULT_PROVIDER_MODELS.get(p_id)
+    clean_model = model.strip() if (model and model.strip()) else None
+
     try:
         async with get_db_session() as session:
             stmt = select(UserSettingsModel).where(
@@ -66,23 +79,25 @@ async def save_provider_config(
                     row.api_key = api_key.strip() if api_key else None
                 if base_url is not None:
                     row.base_url = base_url.strip() if base_url else None
-                if model is not None:
-                    row.model = model.strip() if model else None
+                if clean_model is not None:
+                    row.model = clean_model
+                elif not row.model and default_model:
+                    row.model = default_model
             else:
                 row = UserSettingsModel(
                     id="default",
                     provider_id=p_id,
                     api_key=api_key.strip() if api_key else None,
                     base_url=base_url.strip() if base_url else None,
-                    model=model.strip() if model else None,
+                    model=clean_model or default_model,
                 )
                 session.add(row)
             await session.commit()
-            logger.info("✅ [ProviderSettings] Successfully saved settings for '%s' to SQLite DB", p_id)
+            logger.info("✅ [ProviderSettings] Successfully saved settings for '%s' to SQLite DB (model: %s)", p_id, row.model)
             return {
                 "success": True,
                 "provider_id": p_id,
-                "has_key": bool(row.api_key),
+                "has_key": bool(row.api_key or (p_id == "ollama" and row.base_url)),
                 "api_key_masked": mask_api_key(row.api_key),
                 "base_url": row.base_url,
                 "model": row.model,
@@ -186,9 +201,9 @@ async def resolve_provider_credentials(
         "provider_id": p_id,
         "api_key": resolved_key,
         "key_source": key_source if resolved_key else "none",
-        "has_key": bool(resolved_key),
+        "has_key": bool(resolved_key or (p_id == "ollama" and resolved_base_url)),
         "api_key_masked": mask_api_key(resolved_key),
         "base_url": resolved_base_url,
-        "model": resolved_model,
-        "stored_in_db": bool(db_config.get("api_key") or db_config.get("base_url")),
+        "model": resolved_model or DEFAULT_PROVIDER_MODELS.get(p_id),
+        "stored_in_db": bool(db_config.get("api_key") or db_config.get("base_url") or db_config.get("model")),
     }

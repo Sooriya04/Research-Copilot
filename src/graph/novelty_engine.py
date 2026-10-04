@@ -22,6 +22,7 @@ from src.providers.base import BaseLLMProvider, ChatMessage
 from src.providers.gemini import GeminiFlashLiteProvider
 from src.providers.groq import GroqProvider
 from src.providers.llm import LocalOllamaProvider
+from src.providers.openrouter import OpenRouterProvider
 from src.core.provider_settings import resolve_provider_credentials
 from src.core.config import settings
 
@@ -192,6 +193,9 @@ class GraphNoveltyEngine:
         elif p_name == "ollama":
             mdl = resolved_model or getattr(settings, "ollama_model", "phi4-mini")
             return LocalOllamaProvider(base_url=resolved_base_url, model=mdl), "ollama", mdl
+        elif p_name == "openrouter":
+            mdl = resolved_model or "anthropic/claude-3.5-sonnet"
+            return OpenRouterProvider(api_key=resolved_key, model=mdl, base_url=resolved_base_url), "openrouter", mdl
         else:
             if not api_key and not model and self.provider:
                 return self.provider, "gemini", getattr(self.provider, "model", "gemini-3.5-flash-lite")
@@ -215,14 +219,17 @@ class GraphNoveltyEngine:
         # Handle 'all' multi-model concurrent firing
         if (provider_name or "").lower() == "all":
             import asyncio
+            openrouter_creds = await resolve_provider_credentials("openrouter")
             providers_to_run = ["gemini", "groq", "ollama"]
+            if openrouter_creds.get("has_key") or api_key:
+                providers_to_run.append("openrouter")
             coros = [
                 self.synthesize_novelties(
                     workspace_id=workspace_id,
                     topic=topic,
                     paper_ids=paper_ids,
                     provider_name=p,
-                    api_key=api_key if p in ("gemini", "groq") else None,
+                    api_key=api_key if p in ("gemini", "groq", "openrouter") else None,
                     base_url=base_url if p == "ollama" else None,
                     force_refresh=force_refresh,
                 )
