@@ -503,9 +503,9 @@ ${nov.mathematical_formulation || 'N/A'}
             Zero-cloud, air-gapped local model inference on localhost:11434.
           </p>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 10.5, color: 'var(--text-muted)' }}>
-            <span>Host: localhost:11434</span>
+            <span>Model: {providersStatus?.ollama?.default_model || 'phi4-mini'}</span>
             <span style={{ color: providersStatus?.ollama?.online ? '#10b981' : 'var(--text-muted)' }}>
-              {providersStatus?.ollama?.online ? '● Online' : '○ Offline'}
+              {providersStatus?.ollama?.online ? `● Online (${providersStatus?.ollama?.latency_ms ? `${Math.round(providersStatus.ollama.latency_ms)}ms` : 'ready'})` : '○ Offline'}
             </span>
           </div>
         </div>
@@ -623,6 +623,11 @@ ${nov.mathematical_formulation || 'N/A'}
                 )}
                 {selectedProvider === 'ollama' && (
                   <>
+                    <option value="phi4-mini">phi4-mini (Local Active)</option>
+                    <option value="phi4-mini:latest">phi4-mini:latest</option>
+                    {providersStatus?.ollama?.supported_models?.filter(m => !m.includes('phi4-mini')).map((m) => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
                     <option value="llama3">llama3</option>
                     <option value="mistral">mistral</option>
                     <option value="qwen2.5">qwen2.5</option>

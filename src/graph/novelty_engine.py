@@ -178,8 +178,8 @@ class GraphNoveltyEngine:
             mdl = model or "llama-3.3-70b-versatile"
             return GroqProvider(api_key=api_key, model=mdl), "groq", mdl
         elif p_name == "ollama":
-            mdl = model or "llama3"
-            return LocalOllamaProvider(base_url=base_url), "ollama", mdl
+            mdl = model or getattr(settings, "ollama_model", "phi4-mini")
+            return LocalOllamaProvider(base_url=base_url, model=mdl), "ollama", mdl
         else:
             if not api_key and not model and self.provider:
                 return self.provider, "gemini", getattr(self.provider, "model", "gemini-3.5-flash-lite")
@@ -397,7 +397,7 @@ Return JSON with this EXACT structure:
                     ChatMessage(role="system", content=system_prompt),
                     ChatMessage(role="user", content=user_prompt),
                 ]
-                raw_reply = await active_provider.complete(messages, temperature=0.35)
+                raw_reply = await active_provider.complete(messages, model=model_str, temperature=0.35)
                 llm_called = True
 
                 cleaned = raw_reply.strip()
@@ -409,8 +409,45 @@ Return JSON with this EXACT structure:
                     cleaned = cleaned[:-3]
 
                 parsed_json = json.loads(cleaned.strip())
-                proposals = parsed_json.get("proposals", [])
+                if isinstance(parsed_json, list):
+                    proposals = parsed_json
+                elif isinstance(parsed_json, dict):
+                    proposals = (
+                        parsed_json.get("proposals")
+                        or parsed_json.get("novelties")
+                        or parsed_json.get("novelty_ideas")
+                        or parsed_json.get("novelities")
+                        or parsed_json.get("ideas")
+                        or parsed_json.get("items")
+                        or []
+                    )
+                else:
+                    proposals = []
+
                 for prop in proposals:
+                    if not isinstance(prop, dict):
+                        continue
+                    # Normalize fields for robustness with local models like phi4-mini
+                    if "title" not in prop and "concept_name" in prop:
+                        prop["title"] = prop["concept_name"]
+                    if not prop.get("title"):
+                        prop["title"] = f"Novel Method for {topic or 'Literature'}"
+                    if "id" not in prop or not prop["id"]:
+                        prop["id"] = f"novelty-{slugify_id(prop['title'])[:32]}"
+                    if "pitch" not in prop and "description" in prop:
+                        prop["pitch"] = prop["description"]
+                    if not prop.get("pitch"):
+                        prop["pitch"] = "Novel mechanism synthesized from graph nodes."
+                    if "mechanism" not in prop or not prop["mechanism"]:
+                        prop["mechanism"] = "recombination"
+                    if "novelty_statement" not in prop or not prop["novelty_statement"]:
+                        prop["novelty_statement"] = prop.get("pitch", "Grounded synthesis from literature.")
+                    if "grounded_paper_ids" not in prop or not prop["grounded_paper_ids"]:
+                        prop["grounded_paper_ids"] = target_pids[:2]
+                    if "grounded_paper_titles" not in prop or not prop["grounded_paper_titles"]:
+                        prop["grounded_paper_titles"] = [p["title"] for p in paper_records[:2]]
+                    if "confidence_score" not in prop:
+                        prop["confidence_score"] = 0.85
                     prop["engine"] = eng_name
                     prop["model_name"] = model_str
                     novelties_dicts.append(NoveltyItem(**prop).model_dump())

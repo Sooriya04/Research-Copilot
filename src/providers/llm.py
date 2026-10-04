@@ -75,10 +75,10 @@ class OpenRouterProvider(BaseLLMProvider):
 class LocalOllamaProvider(BaseLLMProvider):
     """Local Ollama instance runner."""
 
-    def __init__(self, base_url: Optional[str] = None):
+    def __init__(self, base_url: Optional[str] = None, model: Optional[str] = None, default_model: Optional[str] = None):
         raw_url = base_url or settings.ollama_base_url or "http://localhost:11434"
         self.base_url = raw_url.rstrip("/")
-        self.default_model = "llama3"
+        self.default_model = model or default_model or getattr(settings, "ollama_model", "phi4-mini")
 
     async def test_connection(self) -> dict:
         """Probe local Ollama daemon for connectivity and installed models."""
@@ -89,12 +89,14 @@ class LocalOllamaProvider(BaseLLMProvider):
                 resp = await client.get(f"{self.base_url}/api/tags")
                 latency = round((time.perf_counter() - start) * 1000, 2)
                 if resp.status_code == 200:
-                    models = [m.get("name") for m in resp.json().get("models", [])]
+                    raw_models = [m.get("name") for m in resp.json().get("models", []) if m.get("name")]
+                    # Prioritize generative LLMs and filter out pure embedding models
+                    models = [m for m in raw_models if "embed" not in m.lower()] or raw_models
                     return {
                         "success": True,
                         "latency_ms": latency,
                         "models": models,
-                        "message": f"Ollama online ({len(models)} models available)",
+                        "message": f"Ollama online ({len(models)} generative models available)",
                     }
                 return {
                     "success": False,
@@ -110,15 +112,17 @@ class LocalOllamaProvider(BaseLLMProvider):
             }
 
     async def list_models(self) -> list:
-        """Return list of locally installed model names."""
+        """Return list of locally installed generative model names."""
         try:
             async with httpx.AsyncClient(timeout=3.0) as client:
                 resp = await client.get(f"{self.base_url}/api/tags")
                 if resp.status_code == 200:
-                    return [m.get("name") for m in resp.json().get("models", []) if m.get("name")]
+                    raw = [m.get("name") for m in resp.json().get("models", []) if m.get("name")]
+                    gen = [m for m in raw if "embed" not in m.lower()]
+                    return gen or raw
         except Exception:
             pass
-        return ["llama3", "mistral", "qwen2.5", "deepseek-r1"]
+        return ["phi4-mini", "llama3", "mistral", "qwen2.5", "deepseek-r1"]
 
     async def complete(
         self,

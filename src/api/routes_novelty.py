@@ -47,12 +47,21 @@ class AddNoveltyToGraphRequest(BaseModel):
 async def get_providers_status():
     """Returns live connection and configuration status for Gemini, Groq, and Ollama."""
     gemini_key = settings.gemini_api_key or os.getenv("GEMINI_API_KEY", "")
-    groq_key = settings.groq_api_key or os.getenv("GROQ_API_KEY", "")
+    groq_key = (
+        settings.groq_api_key
+        or os.getenv("GROQ_API_KEY", "")
+        or os.getenv("grok_API", "")
+        or os.getenv("GROK_API", "")
+    )
 
     # Probe Ollama locally
     ollama_provider = LocalOllamaProvider(base_url=settings.ollama_base_url)
     ollama_check = await ollama_provider.test_connection()
     ollama_models = ollama_check.get("models", []) if ollama_check.get("success") else []
+    
+    # Prioritize phi4-mini if available locally or default to phi4-mini
+    phi_match = next((m for m in ollama_models if "phi4" in m.lower()), None)
+    default_ollama = phi_match or (ollama_models[0] if ollama_models else "phi4-mini")
 
     return {
         "providers": {
@@ -87,8 +96,8 @@ async def get_providers_status():
                 "configured": ollama_check.get("success", False),
                 "online": ollama_check.get("success", False),
                 "base_url": settings.ollama_base_url,
-                "default_model": ollama_models[0] if ollama_models else "llama3",
-                "supported_models": ollama_models if ollama_models else ["llama3", "mistral", "qwen2.5", "deepseek-r1"],
+                "default_model": default_ollama,
+                "supported_models": ollama_models if ollama_models else ["phi4-mini", "llama3", "mistral", "qwen2.5"],
                 "latency_ms": ollama_check.get("latency_ms"),
                 "badge": "Local & Private",
             },

@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     gemini_api_key: Optional[str] = None
     groq_api_key: Optional[str] = None
     ollama_base_url: str = "http://localhost:11434"
+    ollama_model: str = "phi4-mini"
     
     # Graph & Loop Execution limits
     max_loop_iterations: int = 10
