@@ -18,8 +18,10 @@ from src.graph.schema import (
     slugify_id,
 )
 from src.graph.store import ResearchGraphStore
-from src.providers.base import ChatMessage
+from src.providers.base import BaseLLMProvider, ChatMessage
 from src.providers.gemini import GeminiFlashLiteProvider
+from src.providers.groq import GroqProvider
+from src.providers.llm import LocalOllamaProvider
 
 
 class NoveltyItem(BaseModel):
@@ -29,6 +31,8 @@ class NoveltyItem(BaseModel):
         ...,
         description="One of: recombination, contradiction_resolution, limitation_inversion, gap_realization",
     )
+    engine: str = "gemini"
+    model_name: Optional[str] = None
     pitch: str
     novelty_statement: str
     grounded_paper_ids: List[str] = []
@@ -93,20 +97,22 @@ class GraphNoveltyEngine:
                 logger.warning("[GraphNoveltyEngine] Failed initializing SQLite cache table: %s", e)
 
     @staticmethod
-    def compute_paper_hash(paper_ids: List[str]) -> str:
-        """Compute a deterministic hash from a sorted list of paper IDs."""
+    def compute_paper_hash(paper_ids: List[str], provider: str = "gemini", model: str = "") -> str:
+        """Compute a deterministic hash from a sorted list of paper IDs + provider + model."""
         sorted_ids = sorted(str(pid).strip().lower() for pid in paper_ids if pid)
         raw_key = "|".join(sorted_ids)
+        if provider != "gemini" or model:
+            raw_key += f"::{provider.lower()}::{model.lower()}"
         return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
 
     async def get_cached_novelties(
-        self, workspace_id: str, paper_ids: List[str]
+        self, workspace_id: str, paper_ids: List[str], provider: str = "gemini", model: str = ""
     ) -> Optional[List[Dict[str, Any]]]:
         """Retrieve cached novelty synthesis from SQLite if available."""
         if not workspace_id or not paper_ids:
             return None
         await self._ensure_cache_table()
-        paper_hash = self.compute_paper_hash(paper_ids)
+        paper_hash = self.compute_paper_hash(paper_ids, provider=provider, model=model)
         try:
             async with aiosqlite.connect(self.db_path) as db:
                 async with db.execute(
@@ -123,13 +129,18 @@ class GraphNoveltyEngine:
         return None
 
     async def save_cached_novelties(
-        self, workspace_id: str, paper_ids: List[str], novelties: List[Dict[str, Any]]
+        self,
+        workspace_id: str,
+        paper_ids: List[str],
+        novelties: List[Dict[str, Any]],
+        provider: str = "gemini",
+        model: str = "",
     ) -> None:
         """Persist generated novelty synthesis into SQLite cache."""
         if not workspace_id or not paper_ids or not novelties:
             return
         await self._ensure_cache_table()
-        paper_hash = self.compute_paper_hash(paper_ids)
+        paper_hash = self.compute_paper_hash(paper_ids, provider=provider, model=model)
         try:
             async with aiosqlite.connect(self.db_path) as db:
                 await db.execute(
@@ -154,15 +165,80 @@ class GraphNoveltyEngine:
         except Exception as e:
             logger.warning("[GraphNoveltyEngine] Cache write error: %s", e)
 
+    def resolve_provider(
+        self,
+        provider_name: str = "gemini",
+        api_key: Optional[str] = None,
+        model: Optional[str] = None,
+        base_url: Optional[str] = None,
+    ) -> tuple[BaseLLMProvider, str, str]:
+        """Resolves (provider_instance, normalized_name, model_name)."""
+        p_name = (provider_name or "gemini").lower().strip()
+        if p_name == "groq":
+            mdl = model or "llama-3.3-70b-versatile"
+            return GroqProvider(api_key=api_key, model=mdl), "groq", mdl
+        elif p_name == "ollama":
+            mdl = model or "llama3"
+            return LocalOllamaProvider(base_url=base_url), "ollama", mdl
+        else:
+            if not api_key and not model and self.provider:
+                return self.provider, "gemini", getattr(self.provider, "model", "gemini-3.5-flash-lite")
+            mdl = model or "gemini-3.5-flash-lite"
+            return GeminiFlashLiteProvider(api_key=api_key, model=mdl), "gemini", mdl
+
     async def synthesize_novelties(
         self,
         workspace_id: Optional[str] = None,
         topic: Optional[str] = None,
         paper_ids: Optional[List[str]] = None,
+        provider_name: str = "gemini",
+        model: Optional[str] = None,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
         force_refresh: bool = False,
     ) -> Dict[str, Any]:
         """Synthesize grounded novel research hypotheses and architectures from the active knowledge graph."""
         await self.store._ensure_initialized()
+
+        # Handle 'all' multi-model concurrent firing
+        if (provider_name or "").lower() == "all":
+            import asyncio
+            providers_to_run = ["gemini", "groq", "ollama"]
+            coros = [
+                self.synthesize_novelties(
+                    workspace_id=workspace_id,
+                    topic=topic,
+                    paper_ids=paper_ids,
+                    provider_name=p,
+                    api_key=api_key if p in ("gemini", "groq") else None,
+                    base_url=base_url if p == "ollama" else None,
+                    force_refresh=force_refresh,
+                )
+                for p in providers_to_run
+            ]
+            results = await asyncio.gather(*coros, return_exceptions=True)
+            merged = []
+            successful_providers = []
+            for p, r in zip(providers_to_run, results):
+                if isinstance(r, dict) and r.get("novelties"):
+                    merged.extend(r["novelties"])
+                    successful_providers.append(p)
+                elif isinstance(r, Exception):
+                    logger.warning("[GraphNoveltyEngine] Provider '%s' error during 'all' run: %s", p, r)
+
+            ws_key = workspace_id or (f"topic-{slugify_id(topic)}" if topic else "global")
+            return {
+                "status": "multi_synthesized",
+                "workspace_id": ws_key,
+                "topic": topic or "Literature Synthesis",
+                "cached": False,
+                "llm_called": True,
+                "provider": "all",
+                "providers_run": successful_providers,
+                "papers_count": len(paper_ids or []),
+                "gaps_count": len(merged),
+                "novelties": merged,
+            }
 
         # 1. Resolve paper IDs in scope
         target_pids = list(paper_ids) if paper_ids else []
@@ -174,20 +250,31 @@ class GraphNoveltyEngine:
 
         ws_key = workspace_id or (f"topic-{slugify_id(topic)}" if topic else "global")
 
+        # Resolve provider
+        active_provider, eng_name, model_str = self.resolve_provider(
+            provider_name=provider_name,
+            api_key=api_key,
+            model=model,
+            base_url=base_url,
+        )
+
         # 2. Check SQLite cache
         if not force_refresh and ws_key and target_pids:
-            cached_data = await self.get_cached_novelties(ws_key, target_pids)
+            cached_data = await self.get_cached_novelties(ws_key, target_pids, provider=eng_name, model=model_str)
             if cached_data:
                 logger.info(
-                    "[GraphNoveltyEngine] SQLite Cache Hit for workspace '%s' (%d papers) -> 0 LLM calls",
+                    "[GraphNoveltyEngine] SQLite Cache Hit for workspace '%s' (%s/%s) -> 0 LLM calls",
                     ws_key,
-                    len(target_pids),
+                    eng_name,
+                    model_str,
                 )
                 parsed_items = [NoveltyItem(**item) for item in cached_data]
                 return {
                     "status": "cached",
                     "workspace_id": ws_key,
                     "topic": topic or "Literature Synthesis",
+                    "provider": eng_name,
+                    "model": model_str,
                     "cached": True,
                     "llm_called": False,
                     "papers_count": len(target_pids),
@@ -305,12 +392,12 @@ Return JSON with this EXACT structure:
   ]
 }}
 """
-                logger.info("[GraphNoveltyEngine] Calling Gemini Flash-Lite to synthesize novelty across %d papers...", len(paper_records))
+                logger.info("[GraphNoveltyEngine] Calling provider '%s' (%s) to synthesize novelty across %d papers...", eng_name, model_str, len(paper_records))
                 messages = [
                     ChatMessage(role="system", content=system_prompt),
                     ChatMessage(role="user", content=user_prompt),
                 ]
-                raw_reply = await self.provider.complete(messages, temperature=0.35)
+                raw_reply = await active_provider.complete(messages, temperature=0.35)
                 llm_called = True
 
                 cleaned = raw_reply.strip()
@@ -324,10 +411,12 @@ Return JSON with this EXACT structure:
                 parsed_json = json.loads(cleaned.strip())
                 proposals = parsed_json.get("proposals", [])
                 for prop in proposals:
+                    prop["engine"] = eng_name
+                    prop["model_name"] = model_str
                     novelties_dicts.append(NoveltyItem(**prop).model_dump())
 
             except Exception as llm_err:
-                logger.warning("[GraphNoveltyEngine] LLM Novelty synthesis error: %s. Using heuristic fallback.", llm_err)
+                logger.warning("[GraphNoveltyEngine] Provider '%s' Novelty synthesis error: %s. Using heuristic fallback.", eng_name, llm_err)
 
         # 5. Deterministic Heuristic Fallback (if LLM returned empty or failed)
         if not novelties_dicts and paper_records:
@@ -336,12 +425,14 @@ Return JSON with this EXACT structure:
 
         # 6. Save to SQLite Cache
         if ws_key and target_pids and novelties_dicts:
-            await self.save_cached_novelties(ws_key, target_pids, novelties_dicts)
+            await self.save_cached_novelties(ws_key, target_pids, novelties_dicts, provider=eng_name, model=model_str)
 
         return {
             "status": "synthesized",
             "workspace_id": ws_key,
             "topic": topic or "Literature Synthesis",
+            "provider": eng_name,
+            "model": model_str,
             "cached": False,
             "llm_called": llm_called,
             "papers_count": len(target_pids),
@@ -375,6 +466,8 @@ Return JSON with this EXACT structure:
             "baselines_to_beat": p_titles,
             "expected_metrics": ["MSE", "MAE", "Parameter Efficiency"],
             "confidence_score": 0.82,
+            "engine": "heuristic",
+            "model_name": "graph-topology-analyzer",
         })
 
         # Proposal 2: Gap Realization / Robustness
@@ -395,6 +488,8 @@ Return JSON with this EXACT structure:
             "baselines_to_beat": [p_titles[0]] if p_titles else ["State-of-the-art Baselines"],
             "expected_metrics": ["Robustness Ratio", "Worst-case Loss"],
             "confidence_score": 0.85,
+            "engine": "heuristic",
+            "model_name": "graph-topology-analyzer",
         })
 
         return proposals

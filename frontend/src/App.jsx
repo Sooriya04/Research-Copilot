@@ -21,6 +21,7 @@ import ManuscriptView from './views/ManuscriptView';
 import ResearchGapView from './views/ResearchGapView';
 import WorkspacesView from './views/WorkspacesView';
 import SettingsView from './views/SettingsView';
+import NoveltyStudioView from './views/NoveltyStudioView';
 
 export default function App() {
   const navigate = useNavigate();
@@ -55,6 +56,8 @@ export default function App() {
             <Route path="/search" element={<LiteratureSearchView />} />
             <Route path="/search-results" element={<LiteratureResultsView />} />
             <Route path="/knowledge-graph" element={<KnowledgeGraphView />} />
+            <Route path="/novelty" element={<NoveltyStudioView />} />
+            <Route path="/novelty-studio" element={<NoveltyStudioView />} />
             <Route path="/litgraph" element={<LitGraphView />} />
             <Route path="/pdf-inspector" element={<PaperReaderView />} />
             <Route path="/experiment-studio" element={<BenchmarksView />} />

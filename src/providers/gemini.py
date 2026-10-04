@@ -14,6 +14,41 @@ class GeminiFlashLiteProvider(BaseLLMProvider):
         self.model = model
         self.base_url = "https://generativelanguage.googleapis.com/v1beta"
 
+    async def test_connection(self) -> dict:
+        """Verify Gemini API key validity and probe endpoint latency."""
+        import time
+        if not self.api_key:
+            return {
+                "success": False,
+                "latency_ms": 0,
+                "error": "No GEMINI_API_KEY configured in environment or request.",
+            }
+        start = time.perf_counter()
+        url = f"{self.base_url}/models?key={self.api_key}"
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                resp = await client.get(url)
+                latency = round((time.perf_counter() - start) * 1000, 2)
+                if resp.status_code == 200:
+                    return {
+                        "success": True,
+                        "latency_ms": latency,
+                        "model": self.model,
+                        "message": "Connected to Google Gemini successfully",
+                    }
+                return {
+                    "success": False,
+                    "latency_ms": latency,
+                    "error": f"Gemini HTTP {resp.status_code}: {resp.text[:150]}",
+                }
+        except Exception as e:
+            latency = round((time.perf_counter() - start) * 1000, 2)
+            return {
+                "success": False,
+                "latency_ms": latency,
+                "error": f"Gemini connection failed: {str(e)}",
+            }
+
     async def complete(self, messages: List[ChatMessage], model: Optional[str] = None, temperature: float = 0.2) -> str:
         """Generate structured text/JSON completion."""
         target_model = model or self.model

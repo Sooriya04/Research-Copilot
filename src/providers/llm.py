@@ -76,16 +76,65 @@ class LocalOllamaProvider(BaseLLMProvider):
     """Local Ollama instance runner."""
 
     def __init__(self, base_url: Optional[str] = None):
-        self.base_url = base_url or settings.ollama_base_url
+        raw_url = base_url or settings.ollama_base_url or "http://localhost:11434"
+        self.base_url = raw_url.rstrip("/")
         self.default_model = "llama3"
 
-    async def complete(self, messages: List[ChatMessage], model: Optional[str] = None, temperature: float = 0.7) -> str:
+    async def test_connection(self) -> dict:
+        """Probe local Ollama daemon for connectivity and installed models."""
+        import time
+        start = time.perf_counter()
+        try:
+            async with httpx.AsyncClient(timeout=4.0) as client:
+                resp = await client.get(f"{self.base_url}/api/tags")
+                latency = round((time.perf_counter() - start) * 1000, 2)
+                if resp.status_code == 200:
+                    models = [m.get("name") for m in resp.json().get("models", [])]
+                    return {
+                        "success": True,
+                        "latency_ms": latency,
+                        "models": models,
+                        "message": f"Ollama online ({len(models)} models available)",
+                    }
+                return {
+                    "success": False,
+                    "latency_ms": latency,
+                    "error": f"Ollama HTTP {resp.status_code}: {resp.text[:120]}",
+                }
+        except Exception as e:
+            latency = round((time.perf_counter() - start) * 1000, 2)
+            return {
+                "success": False,
+                "latency_ms": latency,
+                "error": f"Ollama daemon unreachable at {self.base_url}: {str(e)}",
+            }
+
+    async def list_models(self) -> list:
+        """Return list of locally installed model names."""
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                resp = await client.get(f"{self.base_url}/api/tags")
+                if resp.status_code == 200:
+                    return [m.get("name") for m in resp.json().get("models", []) if m.get("name")]
+        except Exception:
+            pass
+        return ["llama3", "mistral", "qwen2.5", "deepseek-r1"]
+
+    async def complete(
+        self,
+        messages: List[ChatMessage],
+        model: Optional[str] = None,
+        temperature: float = 0.7,
+        json_mode: bool = True,
+    ) -> str:
         payload = {
             "model": model or self.default_model,
             "messages": [m.dict() for m in messages],
             "stream": False,
             "options": {"temperature": temperature},
         }
+        if json_mode:
+            payload["format"] = "json"
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
                 resp = await client.post(f"{self.base_url}/api/chat", json=payload)

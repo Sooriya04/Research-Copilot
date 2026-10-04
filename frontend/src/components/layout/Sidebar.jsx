@@ -15,6 +15,7 @@ import {
   Library,
   Workflow,
   Settings,
+  Lightbulb,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 
@@ -71,7 +72,7 @@ export default function Sidebar() {
             className={({ isActive }) =>
               `nav-item ${
                 isActive ||
-                ['/workspaces', '/search', '/search-results', '/knowledge-graph', '/litgraph', '/pdf-inspector'].some(
+                ['/workspaces', '/search', '/search-results', '/knowledge-graph', '/novelty', '/novelty-studio', '/litgraph', '/pdf-inspector'].some(
                   (p) => location.pathname === p || location.pathname.startsWith(p + '/')
                 )
                   ? 'active'
@@ -86,7 +87,7 @@ export default function Sidebar() {
           </NavLink>
 
           {/* Sub-tree: Rendered when user is on workspaces or inside any workspace tool */}
-          {['/workspaces', '/search', '/search-results', '/knowledge-graph', '/litgraph', '/pdf-inspector'].some(
+          {['/workspaces', '/search', '/search-results', '/knowledge-graph', '/novelty', '/novelty-studio', '/litgraph', '/pdf-inspector'].some(
             (p) => location.pathname === p || location.pathname.startsWith(p + '/')
           ) && (
             <div style={{ paddingLeft: 10, borderLeft: '1.5px solid var(--border-subtle)', marginLeft: 16, marginTop: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -120,6 +121,17 @@ export default function Sidebar() {
                 <div className="nav-item-left">
                   <Network size={14} />
                   <span>Knowledge Graph</span>
+                </div>
+              </NavLink>
+
+              <NavLink
+                to="/novelty"
+                className={({ isActive }) => `nav-item ${isActive || location.pathname === '/novelty-studio' ? 'active' : ''}`}
+                style={{ fontSize: 12.5, padding: '6px 10px' }}
+              >
+                <div className="nav-item-left">
+                  <Lightbulb size={14} style={{ color: '#10b981' }} />
+                  <span>Novelty Studio</span>
                 </div>
               </NavLink>
 

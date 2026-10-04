@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     openai_api_key: Optional[str] = None
     anthropic_api_key: Optional[str] = None
     gemini_api_key: Optional[str] = None
+    groq_api_key: Optional[str] = None
     ollama_base_url: str = "http://localhost:11434"
     
     # Graph & Loop Execution limits

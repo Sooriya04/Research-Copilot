@@ -1144,3 +1144,38 @@ bundle compilation (`npm run build`).
   * Created unit and integration test suite in `tests/test_graph_novelty_engine.py` (cache miss -> Gemini call -> SQLite persistence, cache hit -> 0 LLM calls, candidate node injection, FastAPI HTTP endpoints). 100% passed in 8.65s.
   * Frontend built cleanly via `npm --prefix frontend run build` in 6.96s with 0 errors.
   * Live server end-to-end verified with curl on real time-series forecasting papers (`s2:afeeb8f5...` iTransformer and `s2:dad15404...` PatchTST), demonstrating live LLM synthesis, subsequent instant cache hit, and candidate node injection into `/api/v1/graph/elements`.
+<br />
+
+## Multi-LLM Research Novelty Studio: Gemini, Groq LPU, Local Ollama & Live API Telemetry
+
+* **Dedicated Novelty Studio View (`frontend/src/views/NoveltyStudioView.jsx`, `/novelty`, `/novelty-studio`)**:
+  * Built a standalone, single-page command center for scientific novelty generation, testing, and multi-model comparison.
+  * Added direct navigation link in sidebar (`Sidebar.jsx`) under the Workspace sub-tree with active route tracking.
+  * Added multi-model selector cards:
+    * 🌟 **Google Gemini**: Cloud fast structured inference with Flash-Lite & Pro model variants.
+    * ⚡ **Groq LPU**: Ultra-fast token processing on Llama-3.3-70B, DeepSeek-R1-distill, and Mixtral.
+    * 🦙 **Local Ollama**: 100% private, self-hosted local model runner on `localhost:11434`.
+    * 🔥 **Multi-Model Tournament ("Fire All")**: Fires Gemini, Groq, and Ollama concurrently and aggregates proposals into a unified deck or side-by-side model comparison matrix.
+  * Added runtime engine configuration drawer with model selection, API key overrides, custom base URL overrides, and live connectivity testing.
+  * Interactive Staged Literature checklist to customize exactly which papers feed into topological synthesis.
+
+* **Multi-Provider Engine & Groq Provider (`src/providers/groq.py`, `src/providers/llm.py`, `src/graph/novelty_engine.py`)**:
+  * Implemented `GroqProvider` leveraging Groq's high-speed REST API with `response_format={"type": "json_object"}`.
+  * Enhanced `LocalOllamaProvider` with `format: "json"`, `list_models()`, and connection probing.
+  * Added `test_connection()` across Gemini, Groq, and Ollama to report live round-trip latency (ms) and diagnostic messages.
+  * Upgraded `GraphNoveltyEngine` to support dynamic provider resolution, per-engine cache isolation, and concurrent multi-engine synthesis.
+
+* **Live API Telemetry & Verification HUD**:
+  * Built a dedicated real-time telemetry HUD answering *"is the backend receiving the API from frontend"*:
+    * Live backend status indicator (`🟢 200 OK - Backend Active`).
+    * Round-trip latency display (`XX ms`).
+    * Cache vs Live LLM source attribution.
+    * Real-time terminal log stream capturing requests, status codes, and model timing events.
+
+* **Backend Endpoints & Automated Testing (`src/api/routes_novelty.py`, `tests/test_novelty_routes.py`)**:
+  * `GET /api/v1/novelty/providers-status`: Live probing of Gemini, Groq, and Ollama availability and installed models.
+  * `POST /api/v1/novelty/test-connection`: Ping endpoint measuring provider-specific round-trip latency.
+  * `GET /api/v1/novelty/workspace-papers`: Fetches staged literature papers.
+  * `POST /api/v1/novelty/synthesize`: Main multi-provider synthesis endpoint returning proposals and telemetry.
+  * `POST /api/v1/novelty/add-to-graph`: Direct candidate node injection into knowledge graph store.
+  * Added test suite `test_novelty_routes.py`; 100% pass rate across all 5 novelty tests in 8.82s. Frontend built cleanly in 7.08s.
