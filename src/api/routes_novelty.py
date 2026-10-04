@@ -14,6 +14,13 @@ from src.providers.gemini import GeminiFlashLiteProvider
 from src.providers.groq import GroqProvider
 from src.providers.llm import LocalOllamaProvider
 
+from src.core.provider_settings import (
+    resolve_provider_credentials,
+    save_provider_config,
+    delete_provider_config,
+    get_saved_provider_config,
+)
+
 router = APIRouter(prefix="/api/v1/novelty", tags=["Novelty Studio"])
 
 _novelty_engine = GraphNoveltyEngine()
@@ -37,6 +44,13 @@ class ProviderTestRequest(BaseModel):
     base_url: Optional[str] = None
 
 
+class SaveProviderKeyRequest(BaseModel):
+    provider: str
+    api_key: Optional[str] = None
+    model: Optional[str] = None
+    base_url: Optional[str] = None
+
+
 class AddNoveltyToGraphRequest(BaseModel):
     workspace_id: Optional[str] = None
     topic: Optional[str] = "Literature Synthesis"
@@ -45,31 +59,40 @@ class AddNoveltyToGraphRequest(BaseModel):
 
 @router.get("/providers-status")
 async def get_providers_status():
-    """Returns live connection and configuration status for Gemini, Groq, and Ollama."""
-    gemini_key = settings.gemini_api_key or os.getenv("GEMINI_API_KEY", "")
-    groq_key = (
-        settings.groq_api_key
-        or os.getenv("GROQ_API_KEY", "")
-        or os.getenv("grok_API", "")
-        or os.getenv("GROK_API", "")
-    )
+    """Returns live connection and configuration status for Gemini, Groq, and Ollama with SQLite DB persistence indicators."""
+    gemini_creds = await resolve_provider_credentials("gemini")
+    groq_creds = await resolve_provider_credentials("groq")
+    ollama_creds = await resolve_provider_credentials("ollama")
+
+    # Probe Groq dynamic models if key is present
+    groq_models = ["qwen/qwen3.8-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama-3.3-70b-versatile"]
+    if groq_creds.get("has_key"):
+        try:
+            gp = GroqProvider(api_key=groq_creds["api_key"])
+            live_models = await gp.list_models()
+            if live_models:
+                groq_models = live_models
+        except Exception:
+            pass
 
     # Probe Ollama locally
-    ollama_provider = LocalOllamaProvider(base_url=settings.ollama_base_url)
+    ollama_url = ollama_creds.get("base_url") or settings.ollama_base_url
+    ollama_provider = LocalOllamaProvider(base_url=ollama_url)
     ollama_check = await ollama_provider.test_connection()
     ollama_models = ollama_check.get("models", []) if ollama_check.get("success") else []
-    
-    # Prioritize phi4-mini if available locally or default to phi4-mini
     phi_match = next((m for m in ollama_models if "phi4" in m.lower()), None)
-    default_ollama = phi_match or (ollama_models[0] if ollama_models else "phi4-mini")
+    default_ollama = ollama_creds.get("model") or phi_match or (ollama_models[0] if ollama_models else "phi4-mini")
 
     return {
         "providers": {
             "gemini": {
                 "name": "Google Gemini",
-                "configured": bool(gemini_key),
-                "has_key": bool(gemini_key),
-                "default_model": "gemini-3.5-flash-lite",
+                "configured": gemini_creds["has_key"],
+                "has_key": gemini_creds["has_key"],
+                "stored_in_db": gemini_creds["stored_in_db"],
+                "key_source": gemini_creds["key_source"],
+                "api_key_masked": gemini_creds["api_key_masked"],
+                "default_model": gemini_creds.get("model") or "gemini-3.5-flash-lite",
                 "supported_models": [
                     "gemini-3.5-flash-lite",
                     "gemini-2.5-flash-lite",
@@ -80,22 +103,21 @@ async def get_providers_status():
             },
             "groq": {
                 "name": "Groq LPU",
-                "configured": bool(groq_key),
-                "has_key": bool(groq_key),
-                "default_model": "llama-3.3-70b-versatile",
-                "supported_models": [
-                    "llama-3.3-70b-versatile",
-                    "llama-3.1-8b-instant",
-                    "deepseek-r1-distill-llama-70b",
-                    "mixtral-8x7b-32768",
-                ],
+                "configured": groq_creds["has_key"],
+                "has_key": groq_creds["has_key"],
+                "stored_in_db": groq_creds["stored_in_db"],
+                "key_source": groq_creds["key_source"],
+                "api_key_masked": groq_creds["api_key_masked"],
+                "default_model": groq_creds.get("model") or (groq_models[0] if groq_models else "qwen/qwen3.8-27b"),
+                "supported_models": groq_models,
                 "badge": "Ultra Speed",
             },
             "ollama": {
                 "name": "Local Ollama",
                 "configured": ollama_check.get("success", False),
                 "online": ollama_check.get("success", False),
-                "base_url": settings.ollama_base_url,
+                "stored_in_db": ollama_creds["stored_in_db"],
+                "base_url": ollama_url,
                 "default_model": default_ollama,
                 "supported_models": ollama_models if ollama_models else ["phi4-mini", "llama3", "mistral", "qwen2.5"],
                 "latency_ms": ollama_check.get("latency_ms"),
@@ -106,26 +128,97 @@ async def get_providers_status():
     }
 
 
+@router.post("/save-provider-key")
+async def save_provider_key_endpoint(req: SaveProviderKeyRequest):
+    """Save provider API key, base URL, and/or model into SQLite user_settings table."""
+    p_name = req.provider.lower().strip()
+    logger.info("💾 [NoveltyAPI] Storing credentials in SQLite DB for provider '%s'...", p_name)
+    save_res = await save_provider_config(
+        provider_id=p_name,
+        api_key=req.api_key,
+        base_url=req.base_url,
+        model=req.model,
+    )
+    if not save_res.get("success"):
+        raise HTTPException(status_code=500, detail=f"Failed saving key for {p_name}: {save_res.get('error')}")
+
+    # Immediately probe connection to give instant feedback
+    latency_ms = None
+    online = False
+    try:
+        if p_name == "groq":
+            prov = GroqProvider(api_key=req.api_key, model=req.model)
+            t_res = await prov.test_connection()
+            online = t_res.get("success", False)
+            latency_ms = t_res.get("latency_ms")
+        elif p_name == "gemini":
+            prov = GeminiFlashLiteProvider(api_key=req.api_key, model=req.model or "gemini-3.5-flash-lite")
+            t_res = await prov.test_connection()
+            online = t_res.get("success", False)
+            latency_ms = t_res.get("latency_ms")
+        elif p_name == "ollama":
+            prov = LocalOllamaProvider(base_url=req.base_url, model=req.model)
+            t_res = await prov.test_connection()
+            online = t_res.get("success", False)
+            latency_ms = t_res.get("latency_ms")
+    except Exception as e:
+        logger.warning("[NoveltyAPI] Post-save probe error for '%s': %s", p_name, e)
+
+    return {
+        "success": True,
+        "provider": p_name,
+        "stored_in_db": True,
+        "has_key": save_res.get("has_key", False),
+        "api_key_masked": save_res.get("api_key_masked"),
+        "model": save_res.get("model"),
+        "base_url": save_res.get("base_url"),
+        "online": online,
+        "latency_ms": latency_ms,
+        "message": f"Successfully stored credentials for {p_name.upper()} in SQLite database.",
+    }
+
+
+@router.delete("/remove-provider-key/{provider}")
+async def remove_provider_key_endpoint(provider: str):
+    """Remove provider settings from SQLite database."""
+    p_name = provider.lower().strip()
+    logger.info("🗑️ [NoveltyAPI] Removing SQLite credentials for provider '%s'...", p_name)
+    ok = await delete_provider_config(p_name)
+    return {"success": ok, "provider": p_name, "message": f"Removed {p_name} settings from SQLite database."}
+
+
 @router.post("/test-connection")
 async def test_provider_connection(req: ProviderTestRequest):
     """Test connectivity to a selected LLM provider and measure latency."""
     p_name = req.provider.lower().strip()
     logger.info("📡 [NoveltyAPI] Testing connection to provider '%s'...", p_name)
 
+    creds = await resolve_provider_credentials(
+        provider_id=p_name,
+        explicit_key=req.api_key,
+        explicit_model=req.model,
+        explicit_base_url=req.base_url,
+    )
+
     if p_name == "groq":
-        provider = GroqProvider(api_key=req.api_key, model=req.model or "llama-3.3-70b-versatile")
+        provider = GroqProvider(api_key=creds["api_key"], model=creds["model"] or "qwen/qwen3.8-27b")
         res = await provider.test_connection()
         res["provider"] = "groq"
+        res["key_source"] = creds["key_source"]
+        res["stored_in_db"] = creds["stored_in_db"]
         return res
     elif p_name == "ollama":
-        provider = LocalOllamaProvider(base_url=req.base_url)
+        provider = LocalOllamaProvider(base_url=creds["base_url"], model=creds["model"])
         res = await provider.test_connection()
         res["provider"] = "ollama"
+        res["stored_in_db"] = creds["stored_in_db"]
         return res
     else:
-        provider = GeminiFlashLiteProvider(api_key=req.api_key, model=req.model or "gemini-3.5-flash-lite")
+        provider = GeminiFlashLiteProvider(api_key=creds["api_key"], model=creds["model"] or "gemini-3.5-flash-lite")
         res = await provider.test_connection()
         res["provider"] = "gemini"
+        res["key_source"] = creds["key_source"]
+        res["stored_in_db"] = creds["stored_in_db"]
         return res
 
 

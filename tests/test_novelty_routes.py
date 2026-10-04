@@ -99,3 +99,33 @@ def test_novelty_synthesize_endpoint_with_telemetry(client):
         assert data["telemetry"]["provider_used"] == "gemini"
         assert "duration_ms" in data["telemetry"]
         assert data["telemetry"]["papers_processed"] == 2
+
+
+def test_save_and_remove_provider_key_sqlite(client):
+    """Verify storing, checking, and deleting provider credentials in SQLite DB."""
+    # 1. Save test key into SQLite
+    save_resp = client.post(
+        "/api/v1/novelty/save-provider-key",
+        json={
+            "provider": "groq",
+            "api_key": "gsk_test1234567890abcdef",
+            "model": "qwen/qwen3.8-27b",
+        },
+    )
+    assert save_resp.status_code == 200
+    save_data = save_resp.json()
+    assert save_data["success"] is True
+    assert save_data["stored_in_db"] is True
+    assert "gsk_te...cdef" == save_data["api_key_masked"]
+
+    # 2. Check providers-status reflects SQLite persistence
+    status_resp = client.get("/api/v1/novelty/providers-status")
+    assert status_resp.status_code == 200
+    st_data = status_resp.json()
+    assert st_data["providers"]["groq"]["stored_in_db"] is True
+    assert st_data["providers"]["groq"]["key_source"] == "sqlite"
+
+    # 3. Clean up by deleting key from SQLite
+    del_resp = client.delete("/api/v1/novelty/remove-provider-key/groq")
+    assert del_resp.status_code == 200
+    assert del_resp.json()["success"] is True

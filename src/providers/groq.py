@@ -14,11 +14,37 @@ class GroqProvider(BaseLLMProvider):
     def __init__(
         self,
         api_key: Optional[str] = None,
-        model: str = "llama-3.3-70b-versatile",
+        model: Optional[str] = None,
     ):
-        self.api_key = api_key or settings.groq_api_key or os.getenv("GROQ_API_KEY", "")
-        self.default_model = model
+        self.api_key = (
+            api_key
+            or settings.groq_api_key
+            or os.getenv("GROQ_API_KEY", "")
+            or os.getenv("grok_API", "")
+            or os.getenv("GROK_API", "")
+        )
+        self.default_model = model or "qwen/qwen3.8-27b"
         self.base_url = "https://api.groq.com/openai/v1"
+
+    async def list_models(self) -> list:
+        """Fetch list of available models for this Groq API key."""
+        if not self.api_key:
+            return ["qwen/qwen3.8-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama-3.3-70b-versatile"]
+        try:
+            headers = {"Authorization": f"Bearer {self.api_key}"}
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(f"{self.base_url}/models", headers=headers)
+                if resp.status_code == 200:
+                    data = resp.json().get("data", [])
+                    raw_models = [m.get("id") for m in data if m.get("id")]
+                    chat_models = [
+                        m for m in raw_models
+                        if not any(bad in m.lower() for bad in ["whisper", "guard", "audio", "orpheus"])
+                    ]
+                    return chat_models or raw_models
+        except Exception:
+            pass
+        return ["qwen/qwen3.8-27b", "openai/gpt-oss-120b", "llama-3.3-70b-versatile"]
 
     async def test_connection(self) -> Dict[str, Any]:
         """Verify API key validity and probe endpoint latency."""
@@ -26,7 +52,7 @@ class GroqProvider(BaseLLMProvider):
             return {
                 "success": False,
                 "latency_ms": 0,
-                "error": "No GROQ_API_KEY configured in environment or request.",
+                "error": "No GROQ_API_KEY configured in environment, request, or SQLite DB.",
             }
 
         start_time = time.perf_counter()
@@ -34,40 +60,47 @@ class GroqProvider(BaseLLMProvider):
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
-        payload = {
-            "model": self.default_model,
-            "messages": [{"role": "user", "content": "ping"}],
-            "max_tokens": 5,
-        }
+        
+        # Test with configured model; fallback to qwen/qwen3.8-27b if model not found
+        models_to_try = [self.default_model]
+        if "qwen" not in self.default_model:
+            models_to_try.append("qwen/qwen3.8-27b")
+        if "gpt-oss" not in self.default_model:
+            models_to_try.append("openai/gpt-oss-120b")
 
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.post(
-                    f"{self.base_url}/chat/completions",
-                    headers=headers,
-                    json=payload,
-                )
-                latency = round((time.perf_counter() - start_time) * 1000, 2)
-                if resp.status_code == 200:
-                    return {
-                        "success": True,
-                        "latency_ms": latency,
-                        "model": self.default_model,
-                        "message": "Connected to Groq successfully",
-                    }
-                else:
-                    return {
-                        "success": False,
-                        "latency_ms": latency,
-                        "error": f"Groq HTTP {resp.status_code}: {resp.text[:200]}",
-                    }
-        except Exception as e:
-            latency = round((time.perf_counter() - start_time) * 1000, 2)
-            return {
-                "success": False,
-                "latency_ms": latency,
-                "error": f"Groq connection failed: {str(e)}",
+        last_error = ""
+        for target_mdl in models_to_try:
+            payload = {
+                "model": target_mdl,
+                "messages": [{"role": "user", "content": "ping"}],
+                "max_tokens": 5,
             }
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.post(
+                        f"{self.base_url}/chat/completions",
+                        headers=headers,
+                        json=payload,
+                    )
+                    latency = round((time.perf_counter() - start_time) * 1000, 2)
+                    if resp.status_code == 200:
+                        self.default_model = target_mdl
+                        return {
+                            "success": True,
+                            "latency_ms": latency,
+                            "model": target_mdl,
+                            "message": f"Connected to Groq successfully ({target_mdl})",
+                        }
+                    last_error = f"Groq HTTP {resp.status_code}: {resp.text[:150]}"
+            except Exception as e:
+                last_error = str(e)
+
+        latency = round((time.perf_counter() - start_time) * 1000, 2)
+        return {
+            "success": False,
+            "latency_ms": latency,
+            "error": f"Groq connection failed: {last_error}",
+        }
 
     async def complete(
         self,
@@ -98,6 +131,7 @@ class GroqProvider(BaseLLMProvider):
             "model": target_model,
             "messages": formatted_messages,
             "temperature": temperature,
+            "max_tokens": 950,
         }
 
         if json_mode:

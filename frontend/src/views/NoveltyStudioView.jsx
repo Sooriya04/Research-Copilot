@@ -25,6 +25,12 @@ import {
   FileText,
   Activity,
   Code2,
+  Database,
+  Save,
+  Trash2,
+  Eye,
+  EyeOff,
+  Key,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
@@ -47,6 +53,8 @@ export default function NoveltyStudioView() {
   const [geminiKeyOverride, setGeminiKeyOverride] = useState(() => localStorage.getItem('rc_gemini_key') || '');
   const [ollamaUrlOverride, setOllamaUrlOverride] = useState(() => localStorage.getItem('rc_ollama_url') || 'http://localhost:11434');
   const [showConfigDrawer, setShowConfigDrawer] = useState(false);
+  const [savingKey, setSavingKey] = useState(false);
+  const [showKeyPassword, setShowKeyPassword] = useState(false);
 
   // Connection testing state
   const [testingConnection, setTestingConnection] = useState(false);
@@ -94,6 +102,56 @@ export default function NoveltyStudioView() {
     } catch (err) {
       console.error('Failed fetching provider status:', err);
       addTelemetryLog(`Failed fetching provider status: ${err.message}`);
+    }
+  };
+
+  const handleSaveKeyToDb = async (provider, apiKey, model, baseUrl) => {
+    setSavingKey(true);
+    setErrorMsg(null);
+    addTelemetryLog(`Saving ${provider.toUpperCase()} credentials into SQLite database...`);
+    try {
+      const res = await fetch('/api/v1/novelty/save-provider-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider,
+          api_key: apiKey || null,
+          model: model || null,
+          base_url: baseUrl || null,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setToastMsg(`✅ ${provider.toUpperCase()} credentials permanently saved to SQLite database!`);
+        addTelemetryLog(`SQLite DB updated for ${provider}: Masked ${data.api_key_masked || 'OK'}`);
+        await fetchProvidersStatus();
+      } else {
+        setErrorMsg(data.detail || `Failed to save ${provider} credentials in SQLite`);
+        addTelemetryLog(`Error saving to SQLite: ${data.detail || 'Failed'}`);
+      }
+    } catch (err) {
+      setErrorMsg(`Failed saving key: ${err.message}`);
+      addTelemetryLog(`Network error saving key to SQLite: ${err.message}`);
+    } finally {
+      setSavingKey(false);
+    }
+  };
+
+  const handleRemoveKeyFromDb = async (provider) => {
+    addTelemetryLog(`Removing ${provider.toUpperCase()} credentials from SQLite DB...`);
+    try {
+      const res = await fetch(`/api/v1/novelty/remove-provider-key/${provider}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        setToastMsg(`🗑️ ${provider.toUpperCase()} credentials removed from SQLite database.`);
+        addTelemetryLog(`Removed ${provider} credentials from SQLite DB.`);
+        if (provider === 'groq') setGroqKeyOverride('');
+        if (provider === 'gemini') setGeminiKeyOverride('');
+        await fetchProvidersStatus();
+      }
+    } catch (err) {
+      setErrorMsg(`Error removing key: ${err.message}`);
     }
   };
 
@@ -448,7 +506,9 @@ ${nov.mathematical_formulation || 'N/A'}
           </p>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 10.5, color: 'var(--text-muted)' }}>
             <span>Model: {providersStatus?.gemini?.default_model || 'gemini-3.5-flash-lite'}</span>
-            <span style={{ color: '#10b981', fontWeight: 600 }}>● Ready</span>
+            <span style={{ color: '#10b981', fontWeight: 600 }}>
+              {providersStatus?.gemini?.stored_in_db ? '● SQLite Active' : (providersStatus?.gemini?.has_key ? '● .env Active' : '○ Needs Key')}
+            </span>
           </div>
         </div>
 
@@ -472,11 +532,13 @@ ${nov.mathematical_formulation || 'N/A'}
             <span className="badge badge-amber" style={{ fontSize: 10 }}>Ultra Speed</span>
           </div>
           <p style={{ fontSize: 11.5, color: 'var(--text-secondary)', margin: '0 0 8px', lineHeight: 1.35 }}>
-            Lightning-fast token generation on Llama-3.3-70B and DeepSeek-R1.
+            Lightning-fast token generation on Qwen-3.8, GPT-OSS, and Llama.
           </p>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 10.5, color: 'var(--text-muted)' }}>
-            <span>Model: llama-3.3-70b</span>
-            <span>{providersStatus?.groq?.configured || groqKeyOverride ? '● Key Set' : '○ Needs Key'}</span>
+            <span>Model: {providersStatus?.groq?.default_model || 'qwen/qwen3.8-27b'}</span>
+            <span style={{ color: providersStatus?.groq?.has_key ? '#10b981' : '#f59e0b', fontWeight: 600 }}>
+              {providersStatus?.groq?.stored_in_db ? '● SQLite Active' : (providersStatus?.groq?.has_key ? '● .env Active' : '○ Needs Key')}
+            </span>
           </div>
         </div>
 
@@ -544,101 +606,278 @@ ${nov.mathematical_formulation || 'N/A'}
         <div
           className="card"
           style={{
-            padding: '16px 20px',
-            marginBottom: 16,
-            background: 'var(--bg-secondary)',
+            padding: '20px',
+            marginBottom: 20,
+            background: isDark ? '#0f172a' : '#f8fafc',
             border: '1px solid var(--border-subtle)',
             borderRadius: 'var(--radius-md)',
+            boxShadow: '0 4px 16px rgba(0, 0, 0, 0.08)',
           }}
         >
-          <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <SlidersHorizontal size={14} style={{ color: 'var(--accent-primary)' }} />
-            <span>LLM Provider Keys & Diagnostics</span>
-          </h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+            <h3 style={{ fontSize: 14.5, fontWeight: 600, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Database size={16} style={{ color: '#10b981' }} />
+              <span>LLM Provider Keys & SQLite Database Storage</span>
+            </h3>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+              Keys saved here are stored in SQLite (<code>research_copilot.db</code>) and used automatically.
+            </span>
+          </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16, marginBottom: 14 }}>
-            {/* Groq API Key */}
-            <div>
-              <label style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>
-                Groq API Key (Optional override):
-              </label>
-              <input
-                type="password"
-                className="input"
-                placeholder="gsk_..."
-                value={groqKeyOverride}
-                onChange={(e) => {
-                  setGroqKeyOverride(e.target.value);
-                  localStorage.setItem('rc_groq_key', e.target.value);
-                }}
-                style={{ fontSize: 12, width: '100%', padding: '6px 10px' }}
-              />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(310px, 1fr))', gap: 16, marginBottom: 16 }}>
+            {/* 1. Groq LPU Card */}
+            <div
+              style={{
+                padding: '14px 16px',
+                borderRadius: 'var(--radius-sm)',
+                border: '1px solid var(--border-subtle)',
+                background: isDark ? '#1e293b' : '#ffffff',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Zap size={14} style={{ color: '#f59e0b' }} />
+                  <strong style={{ fontSize: 13 }}>Groq LPU Engine</strong>
+                </div>
+                {providersStatus?.groq?.stored_in_db ? (
+                  <span className="badge badge-emerald" style={{ fontSize: 10, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <Database size={10} /> SQLite Saved
+                  </span>
+                ) : providersStatus?.groq?.has_key ? (
+                  <span className="badge badge-amber" style={{ fontSize: 10, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <Key size={10} /> .env Active
+                  </span>
+                ) : (
+                  <span className="badge badge-red" style={{ fontSize: 10 }}>Key Missing</span>
+                )}
+              </div>
+
+              <div style={{ marginBottom: 10 }}>
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>
+                  API Key: {providersStatus?.groq?.api_key_masked && <span style={{ color: 'var(--text-muted)', fontWeight: 'normal' }}>({providersStatus.groq.api_key_masked})</span>}
+                </label>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type={showKeyPassword ? 'text' : 'password'}
+                    className="input"
+                    placeholder={providersStatus?.groq?.api_key_masked || 'Paste Groq key (gsk_...)'}
+                    value={groqKeyOverride}
+                    onChange={(e) => setGroqKeyOverride(e.target.value)}
+                    style={{ fontSize: 12, width: '100%', padding: '6px 30px 6px 10px' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowKeyPassword((prev) => !prev)}
+                    style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
+                  >
+                    {showKeyPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>
+                  Target Model:
+                </label>
+                <select
+                  className="input"
+                  value={selectedProvider === 'groq' ? selectedModel : ''}
+                  onChange={(e) => {
+                    setSelectedProvider('groq');
+                    setSelectedModel(e.target.value);
+                  }}
+                  style={{ fontSize: 12, width: '100%', padding: '6px 10px' }}
+                >
+                  <option value="">Default ({providersStatus?.groq?.default_model || 'qwen/qwen3.8-27b'})</option>
+                  {providersStatus?.groq?.supported_models?.map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                  <option value="qwen/qwen3.8-27b">qwen/qwen3.8-27b (Fast)</option>
+                  <option value="openai/gpt-oss-120b">openai/gpt-oss-120b</option>
+                  <option value="openai/gpt-oss-20b">openai/gpt-oss-20b</option>
+                  <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile</option>
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={() => handleSaveKeyToDb('groq', groqKeyOverride, selectedModel)}
+                  disabled={savingKey || !groqKeyOverride}
+                  style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6, flex: 1, justifyContent: 'center' }}
+                >
+                  <Save size={12} />
+                  <span>{savingKey ? 'Saving...' : 'Save to SQLite DB'}</span>
+                </button>
+                {providersStatus?.groq?.stored_in_db && (
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => handleRemoveKeyFromDb('groq')}
+                    style={{ fontSize: 11, color: '#ef4444', display: 'flex', alignItems: 'center', gap: 4 }}
+                    title="Remove key from SQLite DB"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                )}
+              </div>
             </div>
 
-            {/* Ollama Base URL */}
-            <div>
-              <label style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>
-                Ollama Base URL:
-              </label>
-              <input
-                type="text"
-                className="input"
-                placeholder="http://localhost:11434"
-                value={ollamaUrlOverride}
-                onChange={(e) => {
-                  setOllamaUrlOverride(e.target.value);
-                  localStorage.setItem('rc_ollama_url', e.target.value);
-                }}
-                style={{ fontSize: 12, width: '100%', padding: '6px 10px' }}
-              />
+            {/* 2. Google Gemini Card */}
+            <div
+              style={{
+                padding: '14px 16px',
+                borderRadius: 'var(--radius-sm)',
+                border: '1px solid var(--border-subtle)',
+                background: isDark ? '#1e293b' : '#ffffff',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Sparkles size={14} style={{ color: '#3b82f6' }} />
+                  <strong style={{ fontSize: 13 }}>Google Gemini</strong>
+                </div>
+                {providersStatus?.gemini?.stored_in_db ? (
+                  <span className="badge badge-emerald" style={{ fontSize: 10, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <Database size={10} /> SQLite Saved
+                  </span>
+                ) : (
+                  <span className="badge badge-blue" style={{ fontSize: 10, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <Key size={10} /> .env Active
+                  </span>
+                )}
+              </div>
+
+              <div style={{ marginBottom: 10 }}>
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>
+                  API Key: {providersStatus?.gemini?.api_key_masked && <span style={{ color: 'var(--text-muted)', fontWeight: 'normal' }}>({providersStatus.gemini.api_key_masked})</span>}
+                </label>
+                <input
+                  type={showKeyPassword ? 'text' : 'password'}
+                  className="input"
+                  placeholder={providersStatus?.gemini?.api_key_masked || 'Paste Gemini key (AQ...)'}
+                  value={geminiKeyOverride}
+                  onChange={(e) => setGeminiKeyOverride(e.target.value)}
+                  style={{ fontSize: 12, width: '100%', padding: '6px 10px' }}
+                />
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>
+                  Target Model:
+                </label>
+                <select
+                  className="input"
+                  value={selectedProvider === 'gemini' ? selectedModel : ''}
+                  onChange={(e) => {
+                    setSelectedProvider('gemini');
+                    setSelectedModel(e.target.value);
+                  }}
+                  style={{ fontSize: 12, width: '100%', padding: '6px 10px' }}
+                >
+                  <option value="">Default (gemini-3.5-flash-lite)</option>
+                  <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite</option>
+                  <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite</option>
+                  <option value="gemini-1.5-flash">gemini-1.5-flash</option>
+                  <option value="gemini-1.5-pro">gemini-1.5-pro</option>
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={() => handleSaveKeyToDb('gemini', geminiKeyOverride, selectedModel)}
+                  disabled={savingKey || !geminiKeyOverride}
+                  style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6, flex: 1, justifyContent: 'center' }}
+                >
+                  <Save size={12} />
+                  <span>{savingKey ? 'Saving...' : 'Save to SQLite DB'}</span>
+                </button>
+                {providersStatus?.gemini?.stored_in_db && (
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => handleRemoveKeyFromDb('gemini')}
+                    style={{ fontSize: 11, color: '#ef4444', display: 'flex', alignItems: 'center', gap: 4 }}
+                    title="Remove key from SQLite DB"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                )}
+              </div>
             </div>
 
-            {/* Model Selection Override */}
-            <div>
-              <label style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>
-                Target Model:
-              </label>
-              <select
-                className="input"
-                value={selectedModel}
-                onChange={(e) => setSelectedModel(e.target.value)}
-                style={{ fontSize: 12, width: '100%', padding: '6px 10px' }}
-              >
-                <option value="">Default for {selectedProvider.toUpperCase()}</option>
-                {selectedProvider === 'gemini' && (
-                  <>
-                    <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite</option>
-                    <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite</option>
-                    <option value="gemini-1.5-flash">gemini-1.5-flash</option>
-                    <option value="gemini-1.5-pro">gemini-1.5-pro</option>
-                  </>
-                )}
-                {selectedProvider === 'groq' && (
-                  <>
-                    <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile</option>
-                    <option value="llama-3.1-8b-instant">llama-3.1-8b-instant</option>
-                    <option value="deepseek-r1-distill-llama-70b">deepseek-r1-distill-llama-70b</option>
-                    <option value="mixtral-8x7b-32768">mixtral-8x7b-32768</option>
-                  </>
-                )}
-                {selectedProvider === 'ollama' && (
-                  <>
-                    <option value="phi4-mini">phi4-mini (Local Active)</option>
-                    <option value="phi4-mini:latest">phi4-mini:latest</option>
-                    {providersStatus?.ollama?.supported_models?.filter(m => !m.includes('phi4-mini')).map((m) => (
-                      <option key={m} value={m}>{m}</option>
-                    ))}
-                    <option value="llama3">llama3</option>
-                    <option value="mistral">mistral</option>
-                    <option value="qwen2.5">qwen2.5</option>
-                    <option value="deepseek-r1">deepseek-r1</option>
-                  </>
-                )}
-              </select>
+            {/* 3. Local Ollama Card */}
+            <div
+              style={{
+                padding: '14px 16px',
+                borderRadius: 'var(--radius-sm)',
+                border: '1px solid var(--border-subtle)',
+                background: isDark ? '#1e293b' : '#ffffff',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Server size={14} style={{ color: '#10b981' }} />
+                  <strong style={{ fontSize: 13 }}>Local Ollama</strong>
+                </div>
+                <span className={providersStatus?.ollama?.online ? 'badge badge-emerald' : 'badge badge-gray'} style={{ fontSize: 10 }}>
+                  {providersStatus?.ollama?.online ? '● Daemon Online' : '○ Offline'}
+                </span>
+              </div>
+
+              <div style={{ marginBottom: 10 }}>
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>
+                  Base URL:
+                </label>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="http://localhost:11434"
+                  value={ollamaUrlOverride}
+                  onChange={(e) => setOllamaUrlOverride(e.target.value)}
+                  style={{ fontSize: 12, width: '100%', padding: '6px 10px' }}
+                />
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>
+                  Target Model:
+                </label>
+                <select
+                  className="input"
+                  value={selectedProvider === 'ollama' ? selectedModel : ''}
+                  onChange={(e) => {
+                    setSelectedProvider('ollama');
+                    setSelectedModel(e.target.value);
+                  }}
+                  style={{ fontSize: 12, width: '100%', padding: '6px 10px' }}
+                >
+                  <option value="">Default ({providersStatus?.ollama?.default_model || 'phi4-mini'})</option>
+                  <option value="phi4-mini">phi4-mini (Local Active)</option>
+                  <option value="phi4-mini:latest">phi4-mini:latest</option>
+                  {providersStatus?.ollama?.supported_models?.filter(m => !m.includes('phi4-mini')).map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                  <option value="llama3">llama3</option>
+                  <option value="mistral">mistral</option>
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={() => handleSaveKeyToDb('ollama', null, selectedModel, ollamaUrlOverride)}
+                  disabled={savingKey}
+                  style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6, flex: 1, justifyContent: 'center' }}
+                >
+                  <Save size={12} />
+                  <span>{savingKey ? 'Saving...' : 'Save to SQLite DB'}</span>
+                </button>
+              </div>
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          {/* Diagnostics Test Bar */}
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', paddingTop: 10, borderTop: '1px solid var(--border-subtle)' }}>
             <button
               className="btn btn-secondary btn-sm"
               onClick={handleTestConnection}
@@ -662,7 +901,7 @@ ${nov.mathematical_formulation || 'N/A'}
                 {testResult.success ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
                 <span>
                   {testResult.success
-                    ? `${testResult.message} (${testResult.latency_ms}ms)`
+                    ? `${testResult.message} (${testResult.latency_ms}ms) [Source: ${testResult.key_source || 'direct'}]`
                     : testResult.error}
                 </span>
               </div>
