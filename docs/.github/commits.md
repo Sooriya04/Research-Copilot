@@ -1259,6 +1259,29 @@ bundle compilation (`npm run build`).
   * Full test suite across novelty and settings passing 9/9 in 6.88s.
   * Production frontend bundle rebuilt in 7.83s.
 
+<br />
 
+## Commit 36 (dev and main) : Fix Settings Provider Save Event Leakage, Update Deprecated Groq/Gemini Models & SQLite Synchronization
 
+* **Settings API Key Persistence & React Event Leakage Fix (`frontend/src/views/SettingsView.jsx`)**:
+  * Resolved critical regression where clicking "Save" or "Update" on a provider card passed React's synthetic mouse click event as `overrideParams` into `handleSave`.
+  * The synthetic event object contained circular DOM/Fiber references that caused `JSON.stringify` to throw a `TypeError: Converting circular structure to JSON`, aborting the HTTP request and causing key saves to fail silently with a "Failed" badge.
+  * Sanitized `handleSave` to clean argument signatures (`const handleSave = async () => ...`), preventing event leakage and guaranteeing clean `{ api_key, model, base_url }` payloads to `POST /api/v1/settings/providers`.
+  * Enhanced error extraction on save failures to inspect and display `errData.detail` or `errData.error` directly.
+
+* **Groq LPU Model Migration & Catalog Alignment (`frontend/src/views/SettingsView.jsx`, `data/research_copilot.db`)**:
+  * Resolved connectivity error `The model llama-3.3-70b-versatile does not exist or you do not have access to it`.
+  * Queried Groq's live `/models` endpoint to discover active models for current credentials: `qwen/qwen3.8-27b`, `openai/gpt-oss-120b`, `openai/gpt-oss-20b`, and `allam-2-7b`.
+  * Replaced the deprecated `llama-3.3-70b-versatile` default placeholder and suggestions with `qwen/qwen3.8-27b`.
+  * Migrated existing SQLite `user_settings` records to `qwen/qwen3.8-27b`, verified live round-trip latency at ~289-350 ms.
+
+* **Google Gemini & OpenRouter Model Verification (`frontend/src/views/SettingsView.jsx`)**:
+  * Pruned deprecated `gemini-1.5-flash` and `gemini-1.5-pro` (returning HTTP 404 from Google's v1beta endpoint) from UI suggestions.
+  * Added verified, active models: `gemini-2.0-flash`, `gemini-2.0-flash-lite`, `gemini-2.5-flash`, and `gemini-3.5-flash-lite`.
+  * Fixed OpenRouter invalid model suggestion typo (`google/gemma-4-31b-it:free` → `deepseek/deepseek-r1:free`).
+
+* **Operational Status & Live Verification**:
+  * Verified end-to-end SQLite persistence in `user_settings` via `POST /api/v1/settings/providers`.
+  * Verified live connection testing across active providers via `POST /api/v1/settings/test-connection`.
+  * Backend and frontend services confirmed healthy on ports 8000 and 5173.
 
