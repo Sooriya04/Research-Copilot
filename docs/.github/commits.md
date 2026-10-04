@@ -1221,4 +1221,21 @@ bundle compilation (`npm run build`).
   * Full test suite `tests/test_novelty_routes.py` (6/6 passing including new SQLite persistence tests).
   * Production frontend bundle rebuilt in 6.72s.
 
+<br />
+
+## Commit 34 (dev and main) : System & Operational Status Report Artifact and Targeted Artifact Tracking
+
+* **System & Operational Status Report (`artifacts/status.md`)**:
+  * Authored comprehensive platform status artifact covering live daemons, multi-provider credentials, database state, and novelty routes.
+  * Documented active services:
+    * FastAPI Backend on `http://localhost:8000` (Python 3.12 / Uvicorn).
+    * Vite Frontend UI on `http://localhost:5173` (React 18).
+    * Local Ollama Daemon on `http://localhost:11434` with RTX 3050 CUDA 13.2 GPU acceleration and `phi4-mini:latest` in VRAM.
+  * Documented hierarchical credential resolution architecture (Request override > SQLite `user_settings` > `.env`) with Mermaid architecture flowchart.
+  * Documented live SQLite schema layout (`user_settings`, `graph_novelty_cache`, `graph_nodes`, `graph_edges`, `workspaces`).
+  * Summarized test suite results (6/6 passing in 10.06s) and clean Vite production build verification.
+* **Targeted Artifact Tracking (`.gitignore`)**:
+  * Configured `.gitignore` to track `artifacts/status.md` explicitly (`!artifacts/status.md`) while keeping other scratch / binary artifacts safely ignored.
+
+
 

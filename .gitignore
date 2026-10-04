@@ -22,7 +22,8 @@ services/reranker/model
 node_modules/
 frontend/node_modules/
 public
-artifacts
+artifacts/*
+!artifacts/status.md
 data/
 others/
 dump_extract/
