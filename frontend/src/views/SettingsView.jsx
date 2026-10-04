@@ -200,11 +200,11 @@ function ProviderRow({ provider, saved, onSave, onDelete }) {
     }
   };
 
-  const handleSave = async (overrideParams = null) => {
+  const handleSave = async () => {
     setStatus('saving');
     const targetModel = (model.trim() || saved?.model || provider.modelPlaceholder || '').trim();
     try {
-      await onSave(provider.id, overrideParams || {
+      await onSave(provider.id, {
         api_key: provider.isLocal ? null : (key.trim() || undefined),
         base_url: provider.isLocal ? (url.trim() || undefined) : undefined,
         model: targetModel,
@@ -212,7 +212,8 @@ function ProviderRow({ provider, saved, onSave, onDelete }) {
       setKey('');
       setStatus('ok');
       setTimeout(() => setStatus(null), 2500);
-    } catch {
+    } catch (err) {
+      console.error('Error saving provider settings:', err);
       setStatus('err');
       setTimeout(() => setStatus(null), 2500);
     }
@@ -606,7 +607,7 @@ function ProviderRow({ provider, saved, onSave, onDelete }) {
 
           <button
             type="button"
-            onClick={handleSave}
+            onClick={() => handleSave()}
             disabled={!canSave || status === 'saving'}
             className={isActive ? 'btn btn-secondary btn-sm' : 'btn btn-primary btn-sm'}
             style={{
@@ -655,12 +656,21 @@ export default function SettingsView() {
   }, [load]);
 
   const handleSave = async (providerId, config) => {
+    const payload = {
+      provider_id: providerId,
+      api_key: config?.api_key || null,
+      base_url: config?.base_url || null,
+      model: config?.model || null,
+    };
     const res = await fetch(`${API}/providers`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider_id: providerId, ...config }),
+      body: JSON.stringify(payload),
     });
-    if (!res.ok) throw new Error('Save failed');
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      throw new Error(`Save failed: ${errText || res.statusText}`);
+    }
     await load();
   };
 
