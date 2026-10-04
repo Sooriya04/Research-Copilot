@@ -19,6 +19,10 @@ import {
   Layers,
   ArrowRight,
   SlidersHorizontal,
+  Lightbulb,
+  Zap,
+  CheckCircle2,
+  MessageSquare,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
@@ -113,6 +117,9 @@ function getNodeDescription(entity) {
 
   if (raw.description && String(raw.description).trim()) return String(raw.description).trim();
   if (raw.abstract && String(raw.abstract).trim()) return String(raw.abstract).trim();
+  if (entity.id?.startsWith('cand-') || raw.category === 'Proposed Novelty') {
+    return raw.hypothesis ? `Testable Hypothesis: ${raw.hypothesis}` : (raw.formulation || 'Proposed novel research contribution grounded in graph topology.');
+  }
 
   const lower = title.toLowerCase();
   if (type === 'METHOD') {
@@ -310,6 +317,13 @@ export default function KnowledgeGraphView() {
   const [buildStatusMessage, setBuildStatusMessage] = useState('');
   const [synthesisInfo, setSynthesisInfo] = useState(null);
 
+  // Graph-Grounded Novelty Engine states
+  const [inspectorTab, setInspectorTab] = useState('inspector'); // 'inspector' | 'novelty'
+  const [generatingNovelty, setGeneratingNovelty] = useState(false);
+  const [noveltyList, setNoveltyList] = useState([]);
+  const [injectingNoveltyId, setInjectingNoveltyId] = useState(null);
+  const [noveltySuccessMsg, setNoveltySuccessMsg] = useState(null);
+
   // Filter & Layout states
   const [nodeTypeFilter, setNodeTypeFilter] = useState('all');
   const [relationFilter, setRelationFilter] = useState('all');
@@ -376,6 +390,36 @@ export default function KnowledgeGraphView() {
           }
         } catch (cErr) {
           console.debug('Cache status notice:', cErr);
+        }
+
+        // Check SQLite novelty cache status for workspace
+        try {
+          const novStatusUrl = `/api/v1/graph/novelty-cache-status?workspace_id=${encodeURIComponent(wsId)}${
+            (addedToGraphPaperIds || []).map(id => `&paper_ids=${encodeURIComponent(id)}`).join('')
+          }`;
+          const novStatusRes = await fetch(novStatusUrl, { signal: controller.signal });
+          if (novStatusRes.ok) {
+            const novStatus = await novStatusRes.json();
+            if (novStatus.cached && novStatus.novelties_count > 0) {
+              const novGenRes = await fetch('/api/v1/graph/generate-novelty', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  workspace_id: wsId,
+                  topic: activeTopic,
+                  paper_ids: addedToGraphPaperIds,
+                  force_refresh: false,
+                }),
+                signal: controller.signal,
+              });
+              if (novGenRes.ok) {
+                const novGenData = await novGenRes.json();
+                setNoveltyList(novGenData.novelties || []);
+              }
+            }
+          }
+        } catch (nErr) {
+          console.debug('Novelty cache status notice:', nErr);
         }
       }
 
@@ -452,6 +496,62 @@ export default function KnowledgeGraphView() {
     } finally {
       setBuildingGraph(false);
       setBuildStatusMessage('');
+    }
+  };
+
+  const handleGenerateNovelty = async (forceRefresh = false) => {
+    setGeneratingNovelty(true);
+    setInspectorTab('novelty');
+    setNoveltySuccessMsg(null);
+    const activeTopic = (searchQuery || activeWorkspace?.title || graphSearchInput || 'Literature Synthesis').trim();
+    const wsId = (activeWorkspace?.id || '').trim();
+
+    try {
+      const res = await fetch('/api/v1/graph/generate-novelty', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspace_id: wsId || null,
+          topic: activeTopic,
+          paper_ids: addedToGraphPaperIds,
+          force_refresh: forceRefresh,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setNoveltyList(data.novelties || []);
+      } else {
+        console.error('Failed to generate novelty:', await res.text());
+      }
+    } catch (err) {
+      console.error('Error during novelty synthesis:', err);
+    } finally {
+      setGeneratingNovelty(false);
+    }
+  };
+
+  const handleAddNoveltyToGraph = async (novelty) => {
+    const wsId = (activeWorkspace?.id || '').trim();
+    setInjectingNoveltyId(novelty.id);
+    setNoveltySuccessMsg(null);
+    try {
+      const res = await fetch('/api/v1/graph/add-novelty-to-graph', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workspace_id: wsId || null,
+          novelty: novelty,
+        }),
+      });
+      if (res.ok) {
+        setNoveltySuccessMsg(`Candidate node "${novelty.title}" added to Knowledge Graph!`);
+        await fetchGraphData();
+      }
+    } catch (err) {
+      console.error('Failed to add novelty to graph:', err);
+    } finally {
+      setInjectingNoveltyId(null);
     }
   };
 
@@ -679,7 +779,8 @@ export default function KnowledgeGraphView() {
       if (['method', 'dataset', 'gap', 'metric'].includes(ntype)) {
         const connectedPapers = paperConnectionCount.get(n.id);
         const count = connectedPapers ? connectedPapers.size : 0;
-        if (ntype === 'gap') {
+        const isCandidate = n.id.startsWith('cand-') || n.data?.category === 'Proposed Novelty';
+        if (ntype === 'gap' || isCandidate) {
           bridgeNodes.push(n);
         } else if (paperIds.size >= 2) {
           if (count >= 2) {
@@ -764,6 +865,7 @@ export default function KnowledgeGraphView() {
     const nodes = filteredData.nodes.map(n => {
       const ntype = (n.node_type || 'paper').toLowerCase();
       const rawLabel = n.data?.title || n.data?.name || n.data?.text || n.label || n.id || 'Paper';
+      const isCandidate = n.id.startsWith('cand-') || n.data?.category === 'Proposed Novelty';
 
       let formattedLabel;
       let shape = 'box';
@@ -781,6 +883,16 @@ export default function KnowledgeGraphView() {
         textColor = '#ffffff'; // Pure white bold text in both themes
         highlightBg = isDark ? '#4338ca' : '#312e81';
         highlightBorder = '#a5b4fc';
+      } else if (isCandidate) {
+        formattedLabel = `⭐ PROPOSED:\n${wrapLabel(rawLabel, 20)}`;
+        shape = 'box';
+        borderRadius = 8;
+        mass = 3;
+        bg = isDark ? '#064e3b' : '#ecfdf5';
+        border = isDark ? '#34d399' : '#059669';
+        textColor = isDark ? '#ecfdf5' : '#065f46';
+        highlightBg = isDark ? '#047857' : '#d1fae5';
+        highlightBorder = '#10b981';
       } else if (ntype === 'paper') {
         const yearPart = n.data?.year ? `\n(${n.data.year})` : '';
         formattedLabel = wrapLabel(rawLabel, 22) + yearPart;
@@ -839,15 +951,15 @@ export default function KnowledgeGraphView() {
         },
         widthConstraint: ntype === 'topic'
           ? { minimum: 150, maximum: 240 }
-          : ntype === 'paper'
-          ? { minimum: 150, maximum: 220 }
+          : (ntype === 'paper' || isCandidate)
+          ? { minimum: 150, maximum: 230 }
           : { maximum: 90 },
         margin: ntype === 'topic'
           ? { top: 12, right: 20, bottom: 12, left: 20 }
-          : ntype === 'paper'
+          : (ntype === 'paper' || isCandidate)
           ? { top: 12, right: 14, bottom: 12, left: 14 }
           : 8,
-        borderWidth: ntype === 'topic' ? 2.5 : 1.5,
+        borderWidth: (ntype === 'topic' || isCandidate) ? 2.5 : 1.5,
         shadow: {
           enabled: true,
           color: 'rgba(0, 0, 0, 0.1)',
@@ -1010,9 +1122,11 @@ export default function KnowledgeGraphView() {
         const nodeId = params.nodes[0];
         const foundNode = filteredData.nodes.find(n => n.id === nodeId) || rawNodes.find(n => n.id === nodeId);
         if (foundNode) {
+          setInspectorTab('inspector');
           handleSelectNode(foundNode);
         }
       } else if (params.edges.length > 0) {
+        setInspectorTab('inspector');
         const edgeId = params.edges[0];
         const foundEdge = filteredData.edges.find(e => `${e.source}->${e.target}:${e.relation}` === edgeId) ||
           filteredData.edges.find(e => e.source === edgeId || e.target === edgeId);
@@ -1184,6 +1298,37 @@ export default function KnowledgeGraphView() {
                   <span>Re-synthesize</span>
                 </button>
               )}
+
+              <button
+                className="btn btn-sm"
+                onClick={() => handleGenerateNovelty(false)}
+                disabled={generatingNovelty || addedToGraphPaperIds.length === 0}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                  color: '#ffffff',
+                  fontWeight: 600,
+                  border: 'none',
+                  boxShadow: '0 1px 3px rgba(16, 185, 129, 0.3)',
+                  cursor: addedToGraphPaperIds.length === 0 ? 'not-allowed' : 'pointer',
+                  opacity: addedToGraphPaperIds.length === 0 ? 0.6 : 1,
+                }}
+                title="Synthesize 4-quadrant scientific novelty proposals from graph topology with Gemini & SQLite cache"
+              >
+                {generatingNovelty ? (
+                  <>
+                    <Loader2 size={13} className="animate-spin" />
+                    <span>Synthesizing...</span>
+                  </>
+                ) : (
+                  <>
+                    <Lightbulb size={13} />
+                    <span>Novelty Ideas {noveltyList.length > 0 ? `(${noveltyList.length})` : ''}</span>
+                  </>
+                )}
+              </button>
 
               <button
                 className="btn btn-secondary btn-sm"
@@ -1656,16 +1801,60 @@ export default function KnowledgeGraphView() {
 
           {/* Entity & Relationship Inspector Panel */}
           <div className="card" id="graph-inspector-panel" style={{ height: 620, overflowY: 'auto' }}>
-            <h3 style={{ fontSize: 14, marginBottom: 4 }}>Entity & Relationship Inspector</h3>
-            <p className="panel-subtitle" style={{ fontSize: 12 }}>
-              Click any node on the canvas to inspect its semantic connections.
-            </p>
+            {/* Top Inspector Tab Switcher */}
+            <div style={{ display: 'flex', borderBottom: '1px solid var(--border-subtle)', marginBottom: 12, paddingBottom: 8, gap: 8, alignItems: 'center' }}>
+              <button
+                type="button"
+                onClick={() => setInspectorTab('inspector')}
+                className={`btn btn-sm ${inspectorTab === 'inspector' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ fontSize: 12, padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 6 }}
+              >
+                <NetworkIcon size={12} />
+                <span>Node Inspector</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setInspectorTab('novelty')}
+                className={`btn btn-sm ${inspectorTab === 'novelty' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{
+                  fontSize: 12,
+                  padding: '4px 10px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  ...(inspectorTab === 'novelty' ? { background: '#059669', borderColor: '#059669', color: '#fff' } : {})
+                }}
+              >
+                <Lightbulb size={12} />
+                <span>Novelty Ideas {noveltyList.length > 0 ? `(${noveltyList.length})` : ''}</span>
+              </button>
+              {inspectorTab === 'novelty' && noveltyList.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => handleGenerateNovelty(true)}
+                  disabled={generatingNovelty}
+                  className="btn btn-secondary btn-sm"
+                  style={{ marginLeft: 'auto', fontSize: 11, padding: '2px 8px', display: 'flex', alignItems: 'center', gap: 4 }}
+                  title="Re-synthesize novelties (bypasses SQLite cache)"
+                >
+                  <RotateCw size={11} className={generatingNovelty ? 'animate-spin' : ''} />
+                  <span>Re-run</span>
+                </button>
+              )}
+            </div>
+
+            {inspectorTab === 'inspector' && (
+              <div>
+                <h3 style={{ fontSize: 14, marginBottom: 4 }}>Entity & Relationship Inspector</h3>
+                <p className="panel-subtitle" style={{ fontSize: 12 }}>
+                  Click any node on the canvas to inspect its semantic connections.
+                </p>
 
             {selectedEntity ? (
               <div id="inspector-details-content" style={{ marginTop: 14 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span className={`badge ${selectedEntity.type === 'TOPIC' ? 'badge-blue' : selectedEntity.type === 'METHOD' ? 'badge-purple' : selectedEntity.type === 'DATASET' ? 'badge-amber' : selectedEntity.type === 'RELATIONSHIP' ? 'badge-emerald' : 'badge-neutral'}`}>
-                    {selectedEntity.type}
+                  <span className={`badge ${selectedEntity.raw?.category === 'Proposed Novelty' || selectedEntity.id?.startsWith('cand-') ? 'badge-emerald' : selectedEntity.type === 'TOPIC' ? 'badge-blue' : selectedEntity.type === 'METHOD' ? 'badge-purple' : selectedEntity.type === 'DATASET' ? 'badge-amber' : selectedEntity.type === 'RELATIONSHIP' ? 'badge-emerald' : 'badge-neutral'}`}>
+                    {selectedEntity.raw?.category === 'Proposed Novelty' || selectedEntity.id?.startsWith('cand-') ? '⭐ PROPOSED NOVELTY' : selectedEntity.type}
                   </span>
                   <button
                     className="btn btn-secondary btn-sm"
@@ -1679,6 +1868,24 @@ export default function KnowledgeGraphView() {
                 <h4 style={{ fontSize: 14, fontWeight: 600, margin: '10px 0 6px', color: 'var(--text-primary)' }}>
                   {selectedEntity.title}
                 </h4>
+
+                {(selectedEntity.id?.startsWith('cand-') || selectedEntity.raw?.category === 'Proposed Novelty') && (
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ padding: '10px 12px', borderRadius: 'var(--radius-sm)', background: 'var(--bg-secondary)', border: '1px solid #10b981', marginBottom: 10 }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: '#10b981', textTransform: 'uppercase', marginBottom: 4 }}>
+                        Mechanism: {selectedEntity.raw?.mechanism || 'Orthogonal Recombination'}
+                      </div>
+                      <div style={{ fontSize: 11.5, fontStyle: 'italic', color: 'var(--text-primary)', marginBottom: 6 }}>
+                        "{selectedEntity.raw?.hypothesis || selectedEntity.raw?.description}"
+                      </div>
+                      {selectedEntity.raw?.formulation && (
+                        <div style={{ marginTop: 6, padding: '6px 8px', background: 'var(--bg-card)', borderRadius: 4, fontFamily: 'monospace', fontSize: 10.5, color: 'var(--text-secondary)' }}>
+                          {selectedEntity.raw.formulation}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 {/* RELATIONSHIP NODE SPECIFIC CARD */}
                 {selectedEntity.type === 'RELATIONSHIP' && (
@@ -1950,6 +2157,261 @@ export default function KnowledgeGraphView() {
               <div style={{ marginTop: 40, textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
                 <Info size={24} style={{ marginBottom: 8, display: 'block', margin: '0 auto 8px' }} />
                 Click any node on the graph to inspect incoming and outgoing scientific relationships.
+              </div>
+            )}
+              </div>
+            )}
+
+            {/* Novelty Ideas Deck */}
+            {inspectorTab === 'novelty' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div>
+                  <h3 style={{ fontSize: 14, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Lightbulb size={15} style={{ color: '#10b981' }} />
+                    <span>Scientific Novelty Deck</span>
+                  </h3>
+                  <p className="panel-subtitle" style={{ fontSize: 12 }}>
+                    4-quadrant research proposals synthesized from graph topology & cross-paper citations.
+                  </p>
+                </div>
+
+                {noveltySuccessMsg && (
+                  <div
+                    style={{
+                      padding: '8px 12px',
+                      background: theme === 'dark' ? '#064e3b' : '#ecfdf5',
+                      border: '1px solid #10b981',
+                      borderRadius: 'var(--radius-sm)',
+                      fontSize: 12,
+                      color: theme === 'dark' ? '#ecfdf5' : '#065f46',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                    }}
+                  >
+                    <CheckCircle2 size={14} style={{ color: '#10b981', flexShrink: 0 }} />
+                    <span style={{ flex: 1 }}>{noveltySuccessMsg}</span>
+                    <button
+                      onClick={() => setNoveltySuccessMsg(null)}
+                      style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'inherit' }}
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                )}
+
+                {generatingNovelty ? (
+                  <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted)' }}>
+                    <Loader2 size={28} className="animate-spin" style={{ margin: '0 auto 12px', color: '#10b981' }} />
+                    <h4 style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6 }}>
+                      Synthesizing Research Novelty...
+                    </h4>
+                    <p style={{ fontSize: 11.5, maxWidth: 320, margin: '0 auto', lineHeight: 1.4 }}>
+                      Evaluating cross-paper edges, contradictory claims, methodological limitations, and untested gap intersections via Gemini Flash-Lite.
+                    </p>
+                  </div>
+                ) : noveltyList.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '36px 16px', color: 'var(--text-muted)' }}>
+                    <Lightbulb size={32} style={{ margin: '0 auto 10px', color: 'var(--text-muted)', opacity: 0.5 }} />
+                    <h4 style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6 }}>
+                      No Novelties Synthesized Yet
+                    </h4>
+                    <p style={{ fontSize: 11.5, maxWidth: 300, margin: '0 auto 14px', lineHeight: 1.4 }}>
+                      Generate publication-grade hypothesis proposals grounded directly in the literature topology of this workspace.
+                    </p>
+                    <button
+                      className="btn btn-sm"
+                      onClick={() => handleGenerateNovelty(false)}
+                      disabled={generatingNovelty || addedToGraphPaperIds.length === 0}
+                      style={{
+                        margin: '0 auto',
+                        background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                        color: '#fff',
+                        fontWeight: 600,
+                        border: 'none',
+                        padding: '6px 14px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        cursor: addedToGraphPaperIds.length === 0 ? 'not-allowed' : 'pointer',
+                        opacity: addedToGraphPaperIds.length === 0 ? 0.6 : 1,
+                      }}
+                    >
+                      <Sparkles size={13} />
+                      <span>Synthesize Novelty ({addedToGraphPaperIds.length} papers)</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    {noveltyList.map((nov, idx) => {
+                      const isCandidateInGraph = rawNodes.some(
+                        rn => rn.id === nov.id || rn.id === `cand-${nov.id}` || rn.data?.name === nov.title || rn.label === nov.title
+                      );
+                      const mech = (nov.mechanism || '').toLowerCase();
+                      let badgeBg = 'var(--bg-secondary)';
+                      let badgeColor = 'var(--accent-primary)';
+                      let badgeLabel = '💡 Proposal';
+
+                      if (mech.includes('recombination') || mech.includes('orthogonal')) {
+                        badgeBg = theme === 'dark' ? '#064e3b' : '#ecfdf5';
+                        badgeColor = theme === 'dark' ? '#34d399' : '#059669';
+                        badgeLabel = '⚡ Recombination';
+                      } else if (mech.includes('contradict') || mech.includes('tension')) {
+                        badgeBg = theme === 'dark' ? '#451a03' : '#fffbeb';
+                        badgeColor = theme === 'dark' ? '#fbbf24' : '#b45309';
+                        badgeLabel = '⚖️ Tension Resolution';
+                      } else if (mech.includes('limitation') || mech.includes('inversion')) {
+                        badgeBg = theme === 'dark' ? '#172554' : '#eff6ff';
+                        badgeColor = theme === 'dark' ? '#60a5fa' : '#1d4ed8';
+                        badgeLabel = '🛡️ Limitation Inversion';
+                      } else if (mech.includes('gap') || mech.includes('realization')) {
+                        badgeBg = theme === 'dark' ? '#500724' : '#fdf2f8';
+                        badgeColor = theme === 'dark' ? '#f472b6' : '#be185d';
+                        badgeLabel = '🎯 Gap Realization';
+                      }
+
+                      return (
+                        <div
+                          key={nov.id || idx}
+                          style={{
+                            padding: '12px 14px',
+                            borderRadius: 'var(--radius-sm)',
+                            background: 'var(--bg-secondary)',
+                            border: '1px solid var(--border-subtle)',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 8,
+                            transition: 'border-color 0.15s',
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
+                            <span
+                              style={{
+                                fontSize: 10,
+                                fontWeight: 700,
+                                padding: '2px 8px',
+                                borderRadius: 10,
+                                background: badgeBg,
+                                color: badgeColor,
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.3px',
+                              }}
+                            >
+                              {badgeLabel}
+                            </span>
+                            {nov.feasibility && (
+                              <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                                {nov.feasibility} Feasibility
+                              </span>
+                            )}
+                          </div>
+
+                          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.3 }}>
+                            {nov.title}
+                          </div>
+
+                          <div
+                            style={{
+                              fontSize: 11.5,
+                              fontStyle: 'italic',
+                              color: 'var(--text-secondary)',
+                              lineHeight: 1.4,
+                              borderLeft: '2px solid var(--accent-primary)',
+                              paddingLeft: 8,
+                            }}
+                          >
+                            "{nov.testable_hypothesis}"
+                          </div>
+
+                          {nov.mathematical_formulation && (
+                            <div
+                              style={{
+                                padding: '6px 8px',
+                                background: 'var(--bg-card)',
+                                border: '1px solid var(--border-subtle)',
+                                borderRadius: 4,
+                                fontFamily: 'monospace',
+                                fontSize: 10.5,
+                                color: 'var(--text-muted)',
+                                overflowX: 'auto',
+                              }}
+                            >
+                              {nov.mathematical_formulation}
+                            </div>
+                          )}
+
+                          {nov.foundation_papers && nov.foundation_papers.length > 0 && (
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
+                              <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600 }}>Grounding:</span>
+                              {nov.foundation_papers.map((fp, i) => (
+                                <span
+                                  key={i}
+                                  className="badge badge-neutral"
+                                  style={{ fontSize: 9.5, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                                >
+                                  {fp}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
+                          {nov.target_datasets && nov.target_datasets.length > 0 && (
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
+                              <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600 }}>Target Datasets:</span>
+                              {nov.target_datasets.map((td, i) => (
+                                <span key={i} className="badge badge-amber" style={{ fontSize: 9.5 }}>
+                                  {td}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
+                          <div style={{ display: 'flex', gap: 8, marginTop: 4, paddingTop: 8, borderTop: '1px dashed var(--border-subtle)' }}>
+                            {isCandidateInGraph ? (
+                              <button
+                                className="btn btn-secondary btn-sm"
+                                disabled
+                                style={{ flex: 1, fontSize: 11, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 5, color: '#10b981' }}
+                              >
+                                <CheckCircle2 size={12} />
+                                <span>In Canvas</span>
+                              </button>
+                            ) : (
+                              <button
+                                className="btn btn-primary btn-sm"
+                                onClick={() => handleAddNoveltyToGraph(nov)}
+                                disabled={injectingNoveltyId === nov.id}
+                                style={{ flex: 1, fontSize: 11, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 5, background: '#059669', borderColor: '#059669', color: '#fff' }}
+                              >
+                                {injectingNoveltyId === nov.id ? (
+                                  <Loader2 size={12} className="animate-spin" />
+                                ) : (
+                                  <Plus size={12} />
+                                )}
+                                <span>Add to Canvas</span>
+                              </button>
+                            )}
+
+                            <button
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => {
+                                navigate('/chat', {
+                                  state: {
+                                    initialPrompt: `Let's discuss and formalize this research novelty proposal:\n\n**${nov.title}**\n\n- **Mechanism**: ${nov.mechanism}\n- **Testable Hypothesis**: ${nov.testable_hypothesis}\n- **Mathematical Formulation**: ${nov.mathematical_formulation || 'N/A'}\n- **Target Benchmarks**: ${(nov.target_datasets || []).join(', ') || 'N/A'}\n- **Baselines to Beat**: ${(nov.baseline_methods || []).join(', ') || 'N/A'}\n\nPlease help me formulate a detailed experiment execution plan and benchmark evaluation suite.`
+                                  }
+                                });
+                              }}
+                              style={{ flex: 1, fontSize: 11, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 5 }}
+                            >
+                              <MessageSquare size={12} />
+                              <span>Discuss in Chat</span>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
           </div>

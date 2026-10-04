@@ -136,32 +136,28 @@ async def critique_paper(req: CritiqueRequest):
         rubric_score=rubric.rubric_score
     )
 
+from src.graph.novelty_engine import GraphNoveltyEngine
+
+novelty_engine = GraphNoveltyEngine()
+
 @router.post("/hypothesis/generate", response_model=HypothesisResponse)
 async def generate_hypotheses(req: HypothesisRequest):
-    """Identify research gaps from literature and generate testable novel hypotheses."""
-    papers = await resolver.search_openalex(req.topic, limit=req.seed_papers_limit)
-    if not papers:
-        papers = await resolver.search_arxiv(req.topic, limit=req.seed_papers_limit)
-    
-    hypotheses = [
-        HypothesisItem(
-            title=f"Adaptive Variance Scaling for {req.topic.title()}",
-            rationale=f"Current methods in {req.topic} demonstrate instability during high-scale training runs.",
-            identified_gap="Absence of dynamic learning rate adjustment under severe gradient noise.",
-            proposed_methodology="Incorporate curvature-aware Hessian updates with stochastic weight averaging.",
-            evaluation_metric="Validation perplexity and sample efficiency improvement (> 15%)."
-        ),
-        HypothesisItem(
-            title=f"Cross-Domain Transfer Efficiency in {req.topic.title()}",
-            rationale="Existing literature primarily evaluates closed in-distribution benchmarks.",
-            identified_gap="High performance degradation on out-of-domain transfer tasks.",
-            proposed_methodology="Implement lightweight adapter routing with sparse activation mixtures.",
-            evaluation_metric="Zero-shot transfer accuracy and parameter memory footprint (< 5% overhead)."
+    """Identify research gaps from literature and generate testable novel hypotheses using GraphNoveltyEngine."""
+    res = await novelty_engine.synthesize_novelties(topic=req.topic, force_refresh=False)
+    hypotheses = []
+    for item in res.get("novelties", []):
+        hypotheses.append(
+            HypothesisItem(
+                title=item.get("title", "Novel Research Direction"),
+                rationale=item.get("pitch") or item.get("novelty_statement", ""),
+                identified_gap=item.get("novelty_statement", ""),
+                proposed_methodology=item.get("mathematical_formulation", ""),
+                evaluation_metric=", ".join(item.get("expected_metrics", ["MSE", "MAE"])),
+            )
         )
-    ]
 
     return HypothesisResponse(
         topic=req.topic,
-        analyzed_papers=len(papers),
-        hypotheses=hypotheses
+        analyzed_papers=res.get("papers_count", 0),
+        hypotheses=hypotheses,
     )

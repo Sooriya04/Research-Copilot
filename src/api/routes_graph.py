@@ -17,6 +17,7 @@ from src.graph.schema import NodeType, Relation, ResearchEdge, ResearchGapNode, 
 from src.graph.state import create_initial_state
 from src.graph.store import ResearchGraphStore
 from src.graph.synthesizer import GraphSynthesizer
+from src.graph.novelty_engine import GraphNoveltyEngine
 
 router = APIRouter(prefix="/api/v1/graph", tags=["Research Loop & Graph Engine"])
 
@@ -26,6 +27,7 @@ gap_detection_engine = GapDetectionEngine(store=graph_store)
 intel_engine = PaperIntelligenceEngine()
 paper_enricher = PaperEnricher()
 graph_synthesizer = GraphSynthesizer(store=graph_store, enricher=paper_enricher)
+novelty_engine = GraphNoveltyEngine(store=graph_store)
 
 
 class GraphNodeVisual(BaseModel):
@@ -87,6 +89,18 @@ class BuildWorkspaceGraphResponse(BaseModel):
     nodes: List[Dict[str, Any]] = []
     edges: List[Dict[str, Any]] = []
     stats: Dict[str, Any] = {}
+
+
+class GenerateNoveltyRequest(BaseModel):
+    workspace_id: Optional[str] = None
+    topic: Optional[str] = None
+    paper_ids: Optional[List[str]] = None
+    force_refresh: bool = False
+
+
+class AddNoveltyNodeRequest(BaseModel):
+    workspace_id: Optional[str] = None
+    novelty: Dict[str, Any]
 
 
 @router.post("/clear")
@@ -302,6 +316,42 @@ async def get_workspace_cache_status(
         "nodes_count": 0,
         "edges_count": 0,
     }
+
+
+@router.post("/generate-novelty")
+async def generate_graph_novelty_endpoint(req: GenerateNoveltyRequest):
+    """Synthesize grounded novel research hypotheses and architectures from the active knowledge graph."""
+    res = await novelty_engine.synthesize_novelties(
+        workspace_id=req.workspace_id,
+        topic=req.topic,
+        paper_ids=req.paper_ids,
+        force_refresh=req.force_refresh,
+    )
+    return res
+
+
+@router.get("/novelty-cache-status")
+async def get_novelty_cache_status(
+    workspace_id: str = Query(..., description="Workspace ID"),
+    paper_ids: List[str] = Query(default=[], description="Paper IDs currently staged in workspace"),
+):
+    """Check if novelty proposals are cached in SQLite for the given workspace."""
+    cached = await novelty_engine.get_cached_novelties(workspace_id, paper_ids)
+    return {
+        "workspace_id": workspace_id,
+        "cached": bool(cached and len(cached) > 0),
+        "novelties_count": len(cached) if cached else 0,
+    }
+
+
+@router.post("/add-novelty-to-graph")
+async def add_novelty_to_graph_endpoint(req: AddNoveltyNodeRequest):
+    """Inject a synthesized novelty proposal directly into the graph canvas as a candidate node."""
+    res = await novelty_engine.add_novelty_candidate_node(
+        workspace_id=req.workspace_id or "global",
+        novelty=req.novelty,
+    )
+    return res
 
 
 @router.get("/summary")

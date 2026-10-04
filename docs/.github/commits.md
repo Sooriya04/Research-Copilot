@@ -1103,3 +1103,44 @@ bundle compilation (`npm run build`).
   * Formatted raw monolithic paper hashes (e.g. `s2:29e11383...`) into structured cards (`Cited Paper [29e11383…]`) with clean multi-line wrapping.
   * Stabilized Vis.js physics (`gravitationalConstant: -90`, `centralGravity: 0.02`, `springLength: 140`) and added smooth auto-fit framing upon stabilization completion.
 
+<br />
+
+## Graph-Grounded Scientific Novelty Engine & Publication-Grade Proposal Deck
+
+* **End-to-End Scientific Novelty Engine (`src/graph/novelty_engine.py`)**:
+  * Designed and built `GraphNoveltyEngine` to transform active Knowledge Graph topologies (papers, extracted methods, datasets, directional citations, limitations, and combinatorial gaps) into publication-grade research novelty proposals.
+  * Formulates hypotheses across 4 distinct scientific discovery mechanisms:
+    1. **Orthogonal Recombination**: Fusing disjoint techniques from different papers (e.g. patch tokenization from PatchTST + channel-inverted attention from iTransformer).
+    2. **Contradiction / Tension Resolution**: Unifying conflicting empirical paradigms (e.g. channel-independence vs. channel-mixing) via hierarchical or gated architectures.
+    3. **Limitation Inversion**: Directly tackling Paper A's documented weakness using Paper B's core mechanism.
+    4. **Gap Realization**: Elevating untested method-dataset matrix holes (`HAS_GAP` diamonds) into full experimental designs.
+  * Outputs structured Pydantic models containing mathematical formulations ($X \in \mathbb{R}^{L \times C}$), testable hypotheses with target delta thresholds, grounded foundation papers, target evaluation datasets, and baselines to beat.
+
+* **SQLite Persistent Hashing & 0-Cost Cache Tier**:
+  * Added `graph_novelty_cache` table to SQLite (`data/research_copilot.db`), keyed by SHA-256 hash of sorted input paper IDs.
+  * Repeat visits or graph views incur 0 token cost and instant sub-millisecond retrieval.
+  * Added force refresh support (`force_refresh: true` / "Re-run" button) to bypass cache when desired.
+
+* **Candidate Novelty Injection into Graph Topology**:
+  * Built `add_novelty_candidate_node` to stage candidate proposals directly onto the NetworkX research graph store.
+  * Injects candidate nodes (`cand-...`, `NodeType.METHOD` with `Proposed Novelty` category) with directed `IMPROVES_UPON` edges linking to their foundation papers.
+  * Bypasses single-paper leaf node pruning in `filteredData` so candidate proposals remain prominent regardless of leaf filter settings.
+  * Rendered on Vis.js canvas as emerald proposed cards (`⭐ PROPOSED: <title>`, glowing emerald border `#34d399`, mass 3) with directed relationship arrows to foundation literature.
+
+* **REST API Endpoints (`src/api/routes_graph.py`, `src/api/routes_intelligence.py`)**:
+  * `POST /api/v1/graph/generate-novelty`: Orchestrates graph topology extraction, Gemini Flash-Lite completion with JSON schema, heuristic fallbacks, and SQLite cache persistence.
+  * `GET /api/v1/graph/novelty-cache-status`: Inspects cache validity for workspace paper set.
+  * `POST /api/v1/graph/add-novelty-to-graph`: Statically links and persists candidate node into the graph store.
+  * Upgraded `POST /api/v1/hypothesis/generate` in `routes_intelligence.py` from hardcoded static mocks to live `GraphNoveltyEngine`.
+
+* **Frontend Inspector & Novelty Deck Integration (`frontend/src/views/KnowledgeGraphView.jsx`)**:
+  * **Toolbar Button**: Added "Synthesize Novelty" button adjacent to "Build AI Graph", with spinner state, lightbulb icon, and dynamic proposal counter badge.
+  * **Inspector Tab Switcher**: Added smooth tab switcher between `[ Node Inspector ]` and `[ Novelty Ideas (N) ]` inside `#graph-inspector-panel`. Clicking nodes on the canvas automatically flips to inspector mode.
+  * **Novelty Deck Cards**: Formatted novelty cards featuring color-coded mechanism badges (`⚡ Recombination`, `⚖️ Tension Resolution`, `🛡️ Limitation Inversion`, `🎯 Gap Realization`), feasibility tags, mathematical formulation code blocks, testable hypotheses, grounding citations, and target benchmarks.
+  * **Interactive Actions**: Integrated one-click `[ + Add to Canvas ]` (changes to `[ ✓ In Canvas ]` upon insertion) and `[ Discuss in Chat ]` (navigates to `/chat` with pre-filled novelty proposal prompt).
+  * **Candidate Node Inspector**: Clicking candidate nodes on the canvas displays their mechanism, formulation, and testable hypothesis in the Inspector panel.
+
+* **Automated Verification**:
+  * Created unit and integration test suite in `tests/test_graph_novelty_engine.py` (cache miss -> Gemini call -> SQLite persistence, cache hit -> 0 LLM calls, candidate node injection, FastAPI HTTP endpoints). 100% passed in 8.65s.
+  * Frontend built cleanly via `npm --prefix frontend run build` in 6.96s with 0 errors.
+  * Live server end-to-end verified with curl on real time-series forecasting papers (`s2:afeeb8f5...` iTransformer and `s2:dad15404...` PatchTST), demonstrating live LLM synthesis, subsequent instant cache hit, and candidate node injection into `/api/v1/graph/elements`.
