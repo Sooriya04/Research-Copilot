@@ -158,80 +158,104 @@ async def get_provider_key(provider_id: str, db: AsyncSession = Depends(get_db))
 # ---------------------------------------------------------------------------
 
 async def _test_openai(api_key: str, base_url: str = "", model: str = "") -> Dict[str, Any]:
+    target_model = (model or "gpt-4o").strip()
     if not api_key:
-        return {"success": False, "latency_ms": 0.0, "error": "OpenAI API key is missing."}
+        return {"success": False, "latency_ms": 0.0, "error": "OpenAI API key is missing.", "model": target_model}
     start = time.perf_counter()
     url = (base_url or "https://api.openai.com/v1").rstrip("/")
-    headers = {"Authorization": f"Bearer {api_key}"}
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    payload = {
+        "model": target_model,
+        "messages": [{"role": "user", "content": "ping"}],
+        "max_tokens": 1,
+    }
     try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
-            resp = await client.get(f"{url}/models", headers=headers)
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(f"{url}/chat/completions", headers=headers, json=payload)
             latency = round((time.perf_counter() - start) * 1000, 2)
             if resp.status_code == 200:
-                data = resp.json().get("data", [])
-                models = [m.get("id") for m in data if m.get("id")]
                 return {
                     "success": True,
                     "latency_ms": latency,
-                    "message": f"Connected to OpenAI ({len(models)} models available)",
-                    "models": models[:10],
+                    "message": f"Connected & verified OpenAI model '{target_model}'",
+                    "model": target_model,
                 }
             elif resp.status_code == 401:
                 return {
                     "success": False,
                     "latency_ms": latency,
                     "error": "Authentication failed: Invalid OpenAI API key (HTTP 401).",
+                    "model": target_model,
                 }
-            return {
-                "success": False,
-                "latency_ms": latency,
-                "error": f"OpenAI check failed (HTTP {resp.status_code}): {resp.text[:120]}",
-            }
+            else:
+                err_msg = resp.text[:120]
+                try:
+                    err_msg = resp.json().get("error", {}).get("message") or err_msg
+                except Exception:
+                    pass
+                return {
+                    "success": False,
+                    "latency_ms": latency,
+                    "error": f"OpenAI model '{target_model}' check failed: {err_msg}",
+                    "model": target_model,
+                }
     except Exception as e:
         latency = round((time.perf_counter() - start) * 1000, 2)
-        return {"success": False, "latency_ms": latency, "error": f"Failed reaching OpenAI: {str(e)}"}
+        return {"success": False, "latency_ms": latency, "error": f"Failed reaching OpenAI: {str(e)}", "model": target_model}
 
 
 async def _test_nvidia(api_key: str, base_url: str = "", model: str = "") -> Dict[str, Any]:
+    target_model = (model or "meta/llama-3.3-70b-instruct").strip()
     if not api_key:
-        return {"success": False, "latency_ms": 0.0, "error": "NVIDIA API key is missing."}
+        return {"success": False, "latency_ms": 0.0, "error": "NVIDIA API key is missing.", "model": target_model}
     start = time.perf_counter()
     url = (base_url or "https://integrate.api.nvidia.com/v1").rstrip("/")
-    headers = {"Authorization": f"Bearer {api_key}"}
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    payload = {
+        "model": target_model,
+        "messages": [{"role": "user", "content": "ping"}],
+        "max_tokens": 1,
+    }
     try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
-            resp = await client.get(f"{url}/models", headers=headers)
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(f"{url}/chat/completions", headers=headers, json=payload)
             latency = round((time.perf_counter() - start) * 1000, 2)
             if resp.status_code == 200:
-                data = resp.json().get("data", [])
-                models = [m.get("id") for m in data if m.get("id")]
                 return {
                     "success": True,
                     "latency_ms": latency,
-                    "message": f"Connected to NVIDIA NIM ({len(models)} models available)",
-                    "models": models[:10],
+                    "message": f"Connected & verified NVIDIA NIM model '{target_model}'",
+                    "model": target_model,
                 }
             elif resp.status_code == 401:
                 return {
                     "success": False,
                     "latency_ms": latency,
                     "error": "Authentication failed: Invalid NVIDIA API key (HTTP 401).",
+                    "model": target_model,
                 }
-            return {
-                "success": False,
-                "latency_ms": latency,
-                "error": f"NVIDIA check failed (HTTP {resp.status_code}): {resp.text[:120]}",
-            }
+            else:
+                err_msg = resp.text[:120]
+                try:
+                    err_msg = resp.json().get("error", {}).get("message") or err_msg
+                except Exception:
+                    pass
+                return {
+                    "success": False,
+                    "latency_ms": latency,
+                    "error": f"NVIDIA model '{target_model}' check failed: {err_msg}",
+                    "model": target_model,
+                }
     except Exception as e:
         latency = round((time.perf_counter() - start) * 1000, 2)
-        return {"success": False, "latency_ms": latency, "error": f"Failed reaching NVIDIA NIM: {str(e)}"}
+        return {"success": False, "latency_ms": latency, "error": f"Failed reaching NVIDIA NIM: {str(e)}", "model": target_model}
 
 
 @router.post("/test-connection")
 async def test_provider_connection_endpoint(req: TestConnectionRequest):
     """Test connectivity to any configured provider and measure round-trip latency."""
     p_id = req.provider_id.lower().strip()
-    logger.info("📡 [SettingsAPI] Testing connection for provider '%s'...", p_id)
+    logger.info("📡 [SettingsAPI] Testing connection for provider '%s' with model '%s'...", p_id, req.model)
 
     creds = await resolve_provider_credentials(
         provider_id=p_id,
@@ -241,23 +265,24 @@ async def test_provider_connection_endpoint(req: TestConnectionRequest):
     )
     api_key = creds.get("api_key") or ""
     base_url = creds.get("base_url") or ""
-    model = creds.get("model") or ""
+    model = (req.model or creds.get("model") or "").strip()
 
     if p_id == "gemini":
         prov = GeminiFlashLiteProvider(api_key=api_key, model=model or "gemini-3.5-flash-lite")
-        res = await prov.test_connection()
+        res = await prov.test_connection(model=model)
     elif p_id == "groq":
         prov = GroqProvider(api_key=api_key, model=model or "qwen/qwen3.8-27b")
-        res = await prov.test_connection()
+        res = await prov.test_connection(model=model)
     elif p_id == "ollama":
         prov = LocalOllamaProvider(base_url=base_url, model=model)
-        res = await prov.test_connection()
+        res = await prov.test_connection(model=model)
     elif p_id == "openrouter":
         prov = OpenRouterProvider(api_key=api_key, model=model, base_url=base_url)
-        res = await prov.test_connection()
+        res = await prov.test_connection(model=model)
     elif p_id == "openai":
         res = await _test_openai(api_key=api_key, base_url=base_url, model=model)
     elif p_id == "nvidia":
+        res = await _test_nvidia(api_key=api_key, base_url=base_url, model=model)
         res = await _test_nvidia(api_key=api_key, base_url=base_url, model=model)
     else:
         res = {

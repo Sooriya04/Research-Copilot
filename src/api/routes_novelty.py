@@ -224,29 +224,31 @@ async def test_provider_connection(req: ProviderTestRequest):
         explicit_base_url=req.base_url,
     )
 
+    target_model = req.model or creds["model"]
+
     if p_name == "groq":
-        provider = GroqProvider(api_key=creds["api_key"], model=creds["model"] or "qwen/qwen3.8-27b")
-        res = await provider.test_connection()
+        provider = GroqProvider(api_key=creds["api_key"], model=target_model or "qwen/qwen3.8-27b")
+        res = await provider.test_connection(model=target_model)
         res["provider"] = "groq"
         res["key_source"] = creds["key_source"]
         res["stored_in_db"] = creds["stored_in_db"]
         return res
     elif p_name == "ollama":
-        provider = LocalOllamaProvider(base_url=creds["base_url"], model=creds["model"])
-        res = await provider.test_connection()
+        provider = LocalOllamaProvider(base_url=creds["base_url"], model=target_model)
+        res = await provider.test_connection(model=target_model)
         res["provider"] = "ollama"
         res["stored_in_db"] = creds["stored_in_db"]
         return res
     elif p_name == "openrouter":
-        provider = OpenRouterProvider(api_key=creds["api_key"], model=creds["model"], base_url=creds["base_url"])
-        res = await provider.test_connection()
+        provider = OpenRouterProvider(api_key=creds["api_key"], model=target_model, base_url=creds["base_url"])
+        res = await provider.test_connection(model=target_model)
         res["provider"] = "openrouter"
         res["key_source"] = creds["key_source"]
         res["stored_in_db"] = creds["stored_in_db"]
         return res
     else:
-        provider = GeminiFlashLiteProvider(api_key=creds["api_key"], model=creds["model"] or "gemini-3.5-flash-lite")
-        res = await provider.test_connection()
+        provider = GeminiFlashLiteProvider(api_key=creds["api_key"], model=target_model or "gemini-3.5-flash-lite")
+        res = await provider.test_connection(model=target_model)
         res["provider"] = "gemini"
         res["key_source"] = creds["key_source"]
         res["stored_in_db"] = creds["stored_in_db"]

@@ -15,34 +15,59 @@ class LocalOllamaProvider(BaseLLMProvider):
         self.base_url = raw_url.rstrip("/")
         self.default_model = model or default_model or getattr(settings, "ollama_model", "phi4-mini")
 
-    async def test_connection(self) -> dict:
-        """Probe local Ollama daemon for connectivity and installed models."""
+    async def test_connection(self, model: Optional[str] = None) -> dict:
+        """Probe local Ollama daemon for connectivity and verify the particular target model."""
         import time
+        target_model = (model or self.default_model or "phi4-mini").strip()
         start = time.perf_counter()
         try:
-            async with httpx.AsyncClient(timeout=4.0) as client:
-                resp = await client.get(f"{self.base_url}/api/tags")
+            async with httpx.AsyncClient(timeout=6.0) as client:
+                tags_resp = await client.get(f"{self.base_url}/api/tags")
+                if tags_resp.status_code != 200:
+                    latency = round((time.perf_counter() - start) * 1000, 2)
+                    return {
+                        "success": False,
+                        "latency_ms": latency,
+                        "model": target_model,
+                        "error": f"Ollama HTTP {tags_resp.status_code}: {tags_resp.text[:120]}",
+                    }
+                raw_models = [m.get("name") for m in tags_resp.json().get("models", []) if m.get("name")]
+
+                # Verify the specific target model via /api/show
+                show_resp = await client.post(
+                    f"{self.base_url}/api/show",
+                    json={"name": target_model},
+                    timeout=5.0,
+                )
                 latency = round((time.perf_counter() - start) * 1000, 2)
-                if resp.status_code == 200:
-                    raw_models = [m.get("name") for m in resp.json().get("models", []) if m.get("name")]
-                    # Prioritize generative LLMs and filter out pure embedding models
-                    models = [m for m in raw_models if "embed" not in m.lower()] or raw_models
+                if show_resp.status_code == 200:
                     return {
                         "success": True,
                         "latency_ms": latency,
-                        "models": models,
-                        "message": f"Ollama online ({len(models)} generative models available)",
+                        "model": target_model,
+                        "message": f"Connected & verified local model '{target_model}'",
+                        "models": raw_models,
                     }
-                return {
-                    "success": False,
-                    "latency_ms": latency,
-                    "error": f"Ollama HTTP {resp.status_code}: {resp.text[:120]}",
-                }
+                elif show_resp.status_code == 404:
+                    return {
+                        "success": False,
+                        "latency_ms": latency,
+                        "model": target_model,
+                        "error": f"Model '{target_model}' not found in Ollama. Pull it with: `ollama run {target_model}`",
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "latency_ms": latency,
+                        "model": target_model,
+                        "error": f"Ollama model '{target_model}' check error: {show_resp.text[:120]}",
+                    }
         except Exception as e:
             latency = round((time.perf_counter() - start) * 1000, 2)
             return {
                 "success": False,
                 "latency_ms": latency,
+                "model": target_model,
                 "error": f"Ollama daemon unreachable at {self.base_url}: {str(e)}",
             }
 

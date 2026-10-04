@@ -14,38 +14,59 @@ class GeminiFlashLiteProvider(BaseLLMProvider):
         self.model = model
         self.base_url = "https://generativelanguage.googleapis.com/v1beta"
 
-    async def test_connection(self) -> dict:
-        """Verify Gemini API key validity and probe endpoint latency."""
+    async def test_connection(self, model: Optional[str] = None) -> dict:
+        """Verify Gemini API key validity and probe the particular target model."""
         import time
+        target_model = (model or self.model or "gemini-2.5-flash").strip()
+        clean_model = target_model.replace("models/", "")
         if not self.api_key:
             return {
                 "success": False,
                 "latency_ms": 0,
                 "error": "No GEMINI_API_KEY configured in environment or request.",
+                "model": clean_model,
             }
         start = time.perf_counter()
-        url = f"{self.base_url}/models?key={self.api_key}"
+        probe_url = f"{self.base_url}/models/{clean_model}?key={self.api_key}"
         try:
-            async with httpx.AsyncClient(timeout=8.0) as client:
-                resp = await client.get(url)
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(probe_url)
                 latency = round((time.perf_counter() - start) * 1000, 2)
                 if resp.status_code == 200:
+                    data = resp.json()
+                    display_name = data.get("displayName") or clean_model
                     return {
                         "success": True,
                         "latency_ms": latency,
-                        "model": self.model,
-                        "message": "Connected to Google Gemini successfully",
+                        "model": clean_model,
+                        "message": f"Connected & verified Gemini model '{display_name}'",
                     }
-                return {
-                    "success": False,
-                    "latency_ms": latency,
-                    "error": f"Gemini HTTP {resp.status_code}: {resp.text[:150]}",
-                }
+                elif resp.status_code == 404:
+                    return {
+                        "success": False,
+                        "latency_ms": latency,
+                        "model": clean_model,
+                        "error": f"Gemini model '{clean_model}' was not found. Please verify model name.",
+                    }
+                else:
+                    err_msg = resp.text[:150]
+                    try:
+                        err_json = resp.json()
+                        err_msg = err_json.get("error", {}).get("message") or err_msg
+                    except Exception:
+                        pass
+                    return {
+                        "success": False,
+                        "latency_ms": latency,
+                        "model": clean_model,
+                        "error": f"Gemini model '{clean_model}' check failed: {err_msg}",
+                    }
         except Exception as e:
             latency = round((time.perf_counter() - start) * 1000, 2)
             return {
                 "success": False,
                 "latency_ms": latency,
+                "model": clean_model,
                 "error": f"Gemini connection failed: {str(e)}",
             }
 

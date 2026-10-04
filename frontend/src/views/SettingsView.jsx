@@ -160,6 +160,7 @@ function ProviderRow({ provider, saved, onSave, onDelete }) {
   const canTest = Boolean(isActive || key.trim() || (provider.isLocal && url.trim()));
 
   const handleTest = async () => {
+    const targetModel = (model.trim() || saved?.model || provider.modelPlaceholder || '').trim();
     setTestStatus('testing');
     setTestResult(null);
     try {
@@ -170,7 +171,7 @@ function ProviderRow({ provider, saved, onSave, onDelete }) {
           provider_id: provider.id,
           api_key: key.trim() || undefined,
           base_url: url.trim() || undefined,
-          model: model.trim() || undefined,
+          model: targetModel || undefined,
         }),
       });
       const data = await res.json();
@@ -178,12 +179,14 @@ function ProviderRow({ provider, saved, onSave, onDelete }) {
         setTestStatus('success');
         setTestResult({
           latency_ms: data.latency_ms,
-          message: data.message || `Connected (${data.latency_ms} ms)`,
+          message: data.message || `Connected & verified model '${data.model || targetModel}' (${data.latency_ms} ms)`,
+          model: data.model || targetModel,
         });
       } else {
         setTestStatus('error');
         setTestResult({
-          error: data.error || 'Connection failed',
+          error: data.error || `Model '${targetModel}' failed to respond`,
+          model: data.model || targetModel,
         });
       }
     } catch (err) {

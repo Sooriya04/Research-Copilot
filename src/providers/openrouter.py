@@ -104,64 +104,66 @@ class OpenRouterProvider(BaseLLMProvider):
                         except Exception:
                             continue
 
-    async def test_connection(self) -> Dict[str, Any]:
-        """Test API connectivity and validate the OpenRouter API key."""
+    async def test_connection(self, model: Optional[str] = None) -> Dict[str, Any]:
+        """Test API connectivity and validate the OpenRouter API key and specific target model."""
+        target_model = (model or self.default_model).strip()
         if not self.api_key:
             return {
                 "success": False,
                 "latency_ms": 0.0,
                 "error": "OpenRouter API key is missing. Enter a valid key starting with 'sk-or-v1-'.",
+                "model": target_model,
             }
 
         start = time.perf_counter()
         try:
-            async with httpx.AsyncClient(timeout=8.0) as client:
-                # OpenRouter provides /auth/key for direct key validation & usage checks
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                # 1. OpenRouter auth check via /auth/key
                 resp = await client.get(
                     f"{self.base_url}/auth/key",
                     headers=self._get_headers(),
                 )
-                latency = round((time.perf_counter() - start) * 1000, 2)
-                if resp.status_code == 200:
-                    data = resp.json().get("data", {})
-                    label = data.get("label") or "OpenRouter Key"
-                    limit = data.get("limit")
-                    usage = data.get("usage", 0)
-                    is_free = data.get("is_free_tier", False)
-                    return {
-                        "success": True,
-                        "latency_ms": latency,
-                        "message": f"Connected to OpenRouter ({label})",
-                        "label": label,
-                        "usage": usage,
-                        "limit": limit,
-                        "is_free_tier": is_free,
-                        "model": self.default_model,
-                    }
-                elif resp.status_code == 401:
+                if resp.status_code == 401:
+                    latency = round((time.perf_counter() - start) * 1000, 2)
                     return {
                         "success": False,
                         "latency_ms": latency,
                         "error": "OpenRouter Authentication failed: Invalid API key (HTTP 401).",
+                        "model": target_model,
+                    }
+
+                # 2. Check the specific target model with a minimal 1-token probe
+                probe_payload = {
+                    "model": target_model,
+                    "messages": [{"role": "user", "content": "ping"}],
+                    "max_tokens": 1,
+                }
+                probe_resp = await client.post(
+                    f"{self.base_url}/chat/completions",
+                    headers=self._get_headers(),
+                    json=probe_payload,
+                )
+                latency = round((time.perf_counter() - start) * 1000, 2)
+
+                if probe_resp.status_code == 200:
+                    return {
+                        "success": True,
+                        "latency_ms": latency,
+                        "message": f"Connected & verified model '{target_model}'",
+                        "model": target_model,
                     }
                 else:
-                    # Fallback check against models endpoint
-                    resp_models = await client.get(
-                        f"{self.base_url}/models",
-                        headers=self._get_headers(),
-                    )
-                    latency = round((time.perf_counter() - start) * 1000, 2)
-                    if resp_models.status_code == 200:
-                        return {
-                            "success": True,
-                            "latency_ms": latency,
-                            "message": "Connected to OpenRouter API (Models endpoint verified)",
-                            "model": self.default_model,
-                        }
+                    err_msg = f"HTTP {probe_resp.status_code}"
+                    try:
+                        err_json = probe_resp.json()
+                        err_msg = err_json.get("error", {}).get("message") or err_msg
+                    except Exception:
+                        err_msg = probe_resp.text[:120]
                     return {
                         "success": False,
                         "latency_ms": latency,
-                        "error": f"OpenRouter check failed (HTTP {resp.status_code}): {resp.text[:120]}",
+                        "error": f"Model '{target_model}' check failed: {err_msg}",
+                        "model": target_model,
                     }
         except Exception as e:
             latency = round((time.perf_counter() - start) * 1000, 2)
