@@ -13,6 +13,7 @@ from src.graph.store import ResearchGraphStore
 from src.providers.gemini import GeminiFlashLiteProvider
 from src.providers.groq import GroqProvider
 from src.providers.llm import LocalOllamaProvider
+from src.providers.openrouter import OpenRouterProvider
 
 from src.core.provider_settings import (
     resolve_provider_credentials,
@@ -63,6 +64,7 @@ async def get_providers_status():
     gemini_creds = await resolve_provider_credentials("gemini")
     groq_creds = await resolve_provider_credentials("groq")
     ollama_creds = await resolve_provider_credentials("ollama")
+    openrouter_creds = await resolve_provider_credentials("openrouter")
 
     # Probe Groq dynamic models if key is present
     groq_models = ["qwen/qwen3.8-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama-3.3-70b-versatile"]
@@ -123,6 +125,23 @@ async def get_providers_status():
                 "latency_ms": ollama_check.get("latency_ms"),
                 "badge": "Local & Private",
             },
+            "openrouter": {
+                "name": "OpenRouter",
+                "configured": openrouter_creds["has_key"],
+                "has_key": openrouter_creds["has_key"],
+                "stored_in_db": openrouter_creds["stored_in_db"],
+                "key_source": openrouter_creds["key_source"],
+                "api_key_masked": openrouter_creds["api_key_masked"],
+                "default_model": openrouter_creds.get("model") or "anthropic/claude-3.5-sonnet",
+                "supported_models": [
+                    "anthropic/claude-3.5-sonnet",
+                    "deepseek/deepseek-r1",
+                    "meta-llama/llama-3.3-70b-instruct",
+                    "google/gemini-2.0-flash-001",
+                    "openai/gpt-4o-mini",
+                ],
+                "badge": "Universal Frontier",
+            },
         },
         "system_time": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
@@ -158,6 +177,11 @@ async def save_provider_key_endpoint(req: SaveProviderKeyRequest):
             latency_ms = t_res.get("latency_ms")
         elif p_name == "ollama":
             prov = LocalOllamaProvider(base_url=req.base_url, model=req.model)
+            t_res = await prov.test_connection()
+            online = t_res.get("success", False)
+            latency_ms = t_res.get("latency_ms")
+        elif p_name == "openrouter":
+            prov = OpenRouterProvider(api_key=req.api_key, model=req.model, base_url=req.base_url)
             t_res = await prov.test_connection()
             online = t_res.get("success", False)
             latency_ms = t_res.get("latency_ms")
@@ -211,6 +235,13 @@ async def test_provider_connection(req: ProviderTestRequest):
         provider = LocalOllamaProvider(base_url=creds["base_url"], model=creds["model"])
         res = await provider.test_connection()
         res["provider"] = "ollama"
+        res["stored_in_db"] = creds["stored_in_db"]
+        return res
+    elif p_name == "openrouter":
+        provider = OpenRouterProvider(api_key=creds["api_key"], model=creds["model"], base_url=creds["base_url"])
+        res = await provider.test_connection()
+        res["provider"] = "openrouter"
+        res["key_source"] = creds["key_source"]
         res["stored_in_db"] = creds["stored_in_db"]
         return res
     else:

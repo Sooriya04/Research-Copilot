@@ -15,6 +15,8 @@ import {
   Globe,
   Cpu,
   ShieldCheck,
+  Zap,
+  Activity,
 } from 'lucide-react';
 
 const API = 'http://localhost:8000/api/v1/settings';
@@ -51,21 +53,6 @@ const PROVIDERS = [
     isLocal: false,
   },
   {
-    id: 'nvidia',
-    name: 'NVIDIA NIM',
-    short: 'NV',
-    tagline: 'Llama 3.3 70B, Mixtral, DeepSeek-R1',
-    color: '#76b900',
-    bg: 'rgba(118,185,0,0.08)',
-    border: 'rgba(118,185,0,0.22)',
-    keyPlaceholder: 'nvapi-...',
-    modelPlaceholder: 'meta/llama-3.3-70b-instruct',
-    suggestions: ['meta/llama-3.3-70b-instruct', 'mistralai/mixtral-8x22b-instruct-v0.1', 'deepseek-ai/deepseek-r1'],
-    docUrl: 'https://build.nvidia.com/explore/discover',
-    docLabel: 'build.nvidia.com',
-    isLocal: false,
-  },
-  {
     id: 'groq',
     name: 'Groq',
     short: 'GQ',
@@ -81,6 +68,43 @@ const PROVIDERS = [
     isLocal: false,
   },
   {
+    id: 'openrouter',
+    name: 'OpenRouter',
+    short: 'OR',
+    tagline: 'Universal API: Claude 3.5, GPT-4o, DeepSeek-R1, Llama 3.3',
+    color: '#8b5cf6',
+    bg: 'rgba(139, 92, 246, 0.08)',
+    border: 'rgba(139, 92, 246, 0.22)',
+    keyPlaceholder: 'sk-or-v1-...',
+    modelPlaceholder: 'anthropic/claude-3.5-sonnet',
+    suggestions: [
+      'anthropic/claude-3.5-sonnet',
+      'deepseek/deepseek-r1',
+      'meta-llama/llama-3.3-70b-instruct',
+      'google/gemini-2.0-flash-001',
+      'openai/gpt-4o-mini',
+      'mistralai/mistral-large-2407',
+    ],
+    docUrl: 'https://openrouter.ai/keys',
+    docLabel: 'openrouter.ai',
+    isLocal: false,
+  },
+  {
+    id: 'nvidia',
+    name: 'NVIDIA NIM',
+    short: 'NV',
+    tagline: 'Llama 3.3 70B, Mixtral, DeepSeek-R1',
+    color: '#76b900',
+    bg: 'rgba(118,185,0,0.08)',
+    border: 'rgba(118,185,0,0.22)',
+    keyPlaceholder: 'nvapi-...',
+    modelPlaceholder: 'meta/llama-3.3-70b-instruct',
+    suggestions: ['meta/llama-3.3-70b-instruct', 'mistralai/mixtral-8x22b-instruct-v0.1', 'deepseek-ai/deepseek-r1'],
+    docUrl: 'https://build.nvidia.com/explore/discover',
+    docLabel: 'build.nvidia.com',
+    isLocal: false,
+  },
+  {
     id: 'ollama',
     name: 'Ollama (Local)',
     short: 'OL',
@@ -90,8 +114,8 @@ const PROVIDERS = [
     border: 'rgba(99,102,241,0.22)',
     keyPlaceholder: null,
     urlPlaceholder: 'http://localhost:11434',
-    modelPlaceholder: 'llama3.3',
-    suggestions: ['llama3.3', 'mistral', 'phi3', 'gemma2', 'deepseek-r1', 'codellama'],
+    modelPlaceholder: 'phi4-mini',
+    suggestions: ['phi4-mini', 'llama3.3', 'mistral', 'deepseek-r1', 'qwen2.5'],
     docUrl: 'https://ollama.com',
     docLabel: 'ollama.com',
     isLocal: true,
@@ -118,14 +142,57 @@ function ProviderRow({ provider, saved, onSave, onDelete }) {
   const [url, setUrl] = useState(saved?.base_url || '');
   const [show, setShow] = useState(false);
   const [status, setStatus] = useState(null);
+  const [testStatus, setTestStatus] = useState(null); // null | 'testing' | 'success' | 'error'
+  const [testResult, setTestResult] = useState(null); // { message, latency_ms, error }
 
   useEffect(() => {
     setModel(saved?.model || '');
     setUrl(saved?.base_url || '');
   }, [saved]);
 
+  useEffect(() => {
+    setTestStatus(null);
+    setTestResult(null);
+  }, [key, model, url]);
+
   const isActive = !!saved?.has_key;
   const canSave = provider.isLocal ? Boolean(url.trim() || model.trim()) : Boolean(key.trim() || model.trim());
+  const canTest = Boolean(isActive || key.trim() || (provider.isLocal && url.trim()));
+
+  const handleTest = async () => {
+    setTestStatus('testing');
+    setTestResult(null);
+    try {
+      const res = await fetch(`${API}/test-connection`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider_id: provider.id,
+          api_key: key.trim() || undefined,
+          base_url: url.trim() || undefined,
+          model: model.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setTestStatus('success');
+        setTestResult({
+          latency_ms: data.latency_ms,
+          message: data.message || `Connected (${data.latency_ms} ms)`,
+        });
+      } else {
+        setTestStatus('error');
+        setTestResult({
+          error: data.error || 'Connection failed',
+        });
+      }
+    } catch (err) {
+      setTestStatus('error');
+      setTestResult({
+        error: err.message || 'Network error reaching backend server',
+      });
+    }
+  };
 
   const handleSave = async () => {
     setStatus('saving');
@@ -194,7 +261,7 @@ function ProviderRow({ provider, saved, onSave, onDelete }) {
                       padding: '1px 7px',
                     }}
                   >
-                    Active
+                    {saved?.stored_in_db ? '● SQLite Active' : (saved?.key_source === 'env' ? '● .env Active' : 'Active')}
                   </span>
                 )}
               </div>
@@ -303,7 +370,13 @@ function ProviderRow({ provider, saved, onSave, onDelete }) {
                   name={`apikey_${provider.id}_token`}
                   value={key}
                   onChange={(e) => setKey(e.target.value)}
-                  placeholder={isActive ? 'Saved - enter new to update' : provider.keyPlaceholder}
+                  placeholder={
+                    isActive
+                      ? saved?.api_key_masked
+                        ? `Saved (${saved.api_key_masked})`
+                        : 'Saved - enter new to update'
+                      : provider.keyPlaceholder
+                  }
                   autoComplete="off"
                   autoCorrect="off"
                   autoCapitalize="off"
@@ -407,6 +480,49 @@ function ProviderRow({ provider, saved, onSave, onDelete }) {
             </button>
           ))}
         </div>
+        {/* Inline Test Result Alert */}
+        {testStatus && testStatus !== 'testing' && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '7px 12px',
+              marginBottom: 12,
+              borderRadius: 6,
+              fontSize: 11.5,
+              background: testStatus === 'success' ? 'rgba(5, 150, 105, 0.08)' : 'rgba(225, 29, 72, 0.08)',
+              border: `1px solid ${testStatus === 'success' ? 'rgba(5, 150, 105, 0.25)' : 'rgba(225, 29, 72, 0.25)'}`,
+              color: testStatus === 'success' ? '#059669' : '#e11d48',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden' }}>
+              {testStatus === 'success' ? (
+                <CheckCircle2 size={13} style={{ flexShrink: 0 }} />
+              ) : (
+                <AlertCircle size={13} style={{ flexShrink: 0 }} />
+              )}
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {testStatus === 'success'
+                  ? testResult?.message || 'Connected successfully'
+                  : testResult?.error || 'Connection failed'}
+              </span>
+            </div>
+            {testStatus === 'success' && typeof testResult?.latency_ms === 'number' && (
+              <span
+                style={{
+                  fontFamily: 'var(--font-code)',
+                  fontWeight: 700,
+                  fontSize: 11,
+                  flexShrink: 0,
+                  marginLeft: 8,
+                }}
+              >
+                {testResult.latency_ms} ms
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Footer / Save Button Row */}
@@ -438,6 +554,28 @@ function ProviderRow({ provider, saved, onSave, onDelete }) {
               <XCircle size={13} /> Failed
             </span>
           )}
+
+          <button
+            type="button"
+            onClick={handleTest}
+            disabled={!canTest || testStatus === 'testing'}
+            className="btn btn-secondary btn-sm"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: '6px 12px',
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: canTest ? 'pointer' : 'not-allowed',
+              opacity: !canTest ? 0.5 : 1,
+            }}
+            title={canTest ? 'Test provider connectivity & authentication' : 'Enter an API key or base URL to test'}
+          >
+            {testStatus === 'testing' ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
+            <span>{testStatus === 'testing' ? 'Testing...' : 'Test Connection'}</span>
+          </button>
+
           <button
             type="button"
             onClick={handleSave}

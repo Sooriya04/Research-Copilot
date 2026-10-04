@@ -141,6 +141,12 @@ async def resolve_provider_credentials(
                 or os.getenv("grok_API", "")
                 or os.getenv("GROK_API", "")
             )
+        elif p_id == "openrouter":
+            resolved_key = settings.openrouter_api_key or os.getenv("OPENROUTER_API_KEY", "")
+        elif p_id == "openai":
+            resolved_key = settings.openai_api_key or os.getenv("OPENAI_API_KEY", "")
+        elif p_id == "nvidia":
+            resolved_key = getattr(settings, "nvidia_api_key", None) or os.getenv("NVIDIA_API_KEY", "")
         if resolved_key:
             key_source = "env"
 
@@ -148,8 +154,15 @@ async def resolve_provider_credentials(
     resolved_base_url = (explicit_base_url or "").strip()
     if not resolved_base_url and db_config.get("base_url"):
         resolved_base_url = db_config["base_url"]
-    if not resolved_base_url and p_id == "ollama":
-        resolved_base_url = settings.ollama_base_url or "http://localhost:11434"
+    if not resolved_base_url:
+        if p_id == "ollama":
+            resolved_base_url = settings.ollama_base_url or "http://localhost:11434"
+        elif p_id == "openrouter":
+            resolved_base_url = "https://openrouter.ai/api/v1"
+        elif p_id == "openai":
+            resolved_base_url = "https://api.openai.com/v1"
+        elif p_id == "nvidia":
+            resolved_base_url = "https://integrate.api.nvidia.com/v1"
 
     # 3. Resolve Model
     resolved_model = (explicit_model or "").strip()
@@ -162,6 +175,12 @@ async def resolve_provider_credentials(
             resolved_model = "qwen/qwen3.8-27b"
         elif p_id == "ollama":
             resolved_model = getattr(settings, "ollama_model", "phi4-mini")
+        elif p_id == "openrouter":
+            resolved_model = "anthropic/claude-3.5-sonnet"
+        elif p_id == "openai":
+            resolved_model = "gpt-4o"
+        elif p_id == "nvidia":
+            resolved_model = "meta/llama-3.3-70b-instruct"
 
     return {
         "provider_id": p_id,

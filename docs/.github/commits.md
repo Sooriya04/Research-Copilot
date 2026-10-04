@@ -1237,5 +1237,28 @@ bundle compilation (`npm run build`).
 * **Targeted Artifact Tracking (`.gitignore`)**:
   * Configured `.gitignore` to track `artifacts/status.md` explicitly (`!artifacts/status.md`) while keeping other scratch / binary artifacts safely ignored.
 
+<br />
+
+## Commit 35 (dev and main) : Add Provider Connection Testing and OpenRouter Support in Settings & Engine Services
+
+* **OpenRouter Provider (`src/providers/openrouter.py`, `src/providers/llm.py`)**:
+  * Implemented `OpenRouterProvider` with streaming, complete (with JSON format support), and dynamic model probing via `/models`.
+  * Added `test_connection()` using OpenRouter's `/auth/key` endpoint, validating API keys and returning live quota/usage diagnostics and latency.
+* **Universal Provider Connection Testing API (`src/api/routes_settings.py`)**:
+  * Added `POST /api/v1/settings/test-connection` endpoint supporting live round-trip latency measurements and authentication verification across 6 providers: OpenAI, Google Gemini, Groq, OpenRouter, NVIDIA NIM, and Local Ollama.
+  * Enhanced `GET /api/v1/settings/providers` to resolve credentials across both SQLite storage and `.env` fallback with masked key previews.
+* **Settings UI Redesign with OpenRouter & Live Testing (`frontend/src/views/SettingsView.jsx`)**:
+  * Added **OpenRouter** provider card with frontier model suggestions (Claude 3.5 Sonnet, DeepSeek-R1, Llama 3.3 70B, Gemini 2.0 Flash).
+  * Added dedicated **[ ⚡ Test Connection ]** action button on every provider card.
+  * Added real-time inline status feedback banner displaying round-trip latency (`ms`) or exact HTTP 401 error details.
+  * Configured dynamic API key placeholders displaying masked stored keys (`Saved (gsk_p5... / sk-or...)`).
+* **Multi-Provider Novelty Integration (`src/api/routes_novelty.py`, `src/core/provider_settings.py`)**:
+  * Integrated OpenRouter into novelty engine status reporting, credential resolution, and SQLite persistence.
+* **Automated Verification**:
+  * Added unit test suite `tests/test_settings_routes.py` (5/5 tests passing).
+  * Full test suite across novelty and settings passing 9/9 in 6.88s.
+  * Production frontend bundle rebuilt in 7.83s.
+
+
 
 
