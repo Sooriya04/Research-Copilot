@@ -14,6 +14,7 @@ from src.providers.gemini import GeminiFlashLiteProvider
 from src.providers.groq import GroqProvider
 from src.providers.llm import LocalOllamaProvider
 from src.providers.openrouter import OpenRouterProvider
+from src.providers.nvidia import NvidiaProvider
 
 from src.core.provider_settings import (
     resolve_provider_credentials,
@@ -31,7 +32,8 @@ class NoveltyStudioRequest(BaseModel):
     topic: Optional[str] = "Literature Synthesis"
     workspace_id: Optional[str] = None
     paper_ids: List[str] = Field(default_factory=list)
-    provider: str = Field(default="gemini", description="gemini | groq | ollama | all")
+    provider: str = Field(default="gemini", description="gemini | groq | ollama | openrouter | nvidia | all")
+    providers: Optional[List[str]] = Field(default=None, description="List of providers for multi-model synthesis")
     model: Optional[str] = None
     api_key: Optional[str] = None
     base_url: Optional[str] = None
@@ -65,6 +67,7 @@ async def get_providers_status():
     groq_creds = await resolve_provider_credentials("groq")
     ollama_creds = await resolve_provider_credentials("ollama")
     openrouter_creds = await resolve_provider_credentials("openrouter")
+    nvidia_creds = await resolve_provider_credentials("nvidia")
 
     # Probe Groq dynamic models if key is present
     groq_models = ["qwen/qwen3.8-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama-3.3-70b-versatile"]
@@ -142,6 +145,24 @@ async def get_providers_status():
                 ],
                 "badge": "Universal Frontier",
             },
+            "nvidia": {
+                "name": "NVIDIA NIM",
+                "configured": nvidia_creds["has_key"],
+                "has_key": nvidia_creds["has_key"],
+                "stored_in_db": nvidia_creds["stored_in_db"],
+                "key_source": nvidia_creds["key_source"],
+                "api_key_masked": nvidia_creds["api_key_masked"],
+                "default_model": nvidia_creds.get("model") or "meta/llama-3.3-70b-instruct",
+                "supported_models": [
+                    "meta/llama-3.3-70b-instruct",
+                    "nvidia/llama-3.1-nemotron-70b-instruct",
+                    "deepseek-ai/deepseek-r1",
+                    "mistralai/mixtral-8x22b-instruct-v0.1",
+                    "meta/llama-3.1-405b-instruct",
+                    "meta/llama-3.1-8b-instruct",
+                ],
+                "badge": "Enterprise NIM",
+            },
         },
         "system_time": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
@@ -182,7 +203,12 @@ async def save_provider_key_endpoint(req: SaveProviderKeyRequest):
             latency_ms = t_res.get("latency_ms")
         elif p_name == "openrouter":
             prov = OpenRouterProvider(api_key=req.api_key, model=req.model, base_url=req.base_url)
-            t_res = await prov.test_connection()
+            t_res = await prov.test_connection(model=req.model)
+            online = t_res.get("success", False)
+            latency_ms = t_res.get("latency_ms")
+        elif p_name == "nvidia":
+            prov = NvidiaProvider(api_key=req.api_key, model=req.model, base_url=req.base_url)
+            t_res = await prov.test_connection(model=req.model)
             online = t_res.get("success", False)
             latency_ms = t_res.get("latency_ms")
     except Exception as e:
@@ -246,6 +272,13 @@ async def test_provider_connection(req: ProviderTestRequest):
         res["key_source"] = creds["key_source"]
         res["stored_in_db"] = creds["stored_in_db"]
         return res
+    elif p_name == "nvidia":
+        provider = NvidiaProvider(api_key=creds["api_key"], model=target_model, base_url=creds["base_url"])
+        res = await provider.test_connection(model=target_model)
+        res["provider"] = "nvidia"
+        res["key_source"] = creds["key_source"]
+        res["stored_in_db"] = creds["stored_in_db"]
+        return res
     else:
         provider = GeminiFlashLiteProvider(api_key=creds["api_key"], model=target_model or "gemini-3.5-flash-lite")
         res = await provider.test_connection(model=target_model)
@@ -278,13 +311,14 @@ async def get_workspace_papers(workspace_id: Optional[str] = None):
 @router.post("/synthesize")
 async def synthesize_novelties_endpoint(req: NoveltyStudioRequest):
     """
-    Main Novelty Studio synthesis endpoint supporting Gemini, Groq, Ollama, or Multi-Model concurrent runs.
+    Main Novelty Studio synthesis endpoint supporting Gemini, Groq, Ollama, OpenRouter, NVIDIA, or Multi-Model concurrent runs.
     Returns synthesized proposals with live telemetry and execution timing.
     """
     start_time = time.perf_counter()
     logger.info(
-        "⚡ [NoveltyAPI] Received synthesis request: provider='%s', model='%s', papers_count=%d, topic='%s', force_refresh=%s",
+        "⚡ [NoveltyAPI] Received synthesis request: provider='%s', providers=%s, model='%s', papers_count=%d, topic='%s', force_refresh=%s",
         req.provider,
+        req.providers,
         req.model or "default",
         len(req.paper_ids),
         req.topic,
@@ -297,6 +331,7 @@ async def synthesize_novelties_endpoint(req: NoveltyStudioRequest):
             topic=req.topic,
             paper_ids=req.paper_ids,
             provider_name=req.provider,
+            providers=req.providers,
             model=req.model,
             api_key=req.api_key,
             base_url=req.base_url,

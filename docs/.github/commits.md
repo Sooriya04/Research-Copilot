@@ -1285,3 +1285,35 @@ bundle compilation (`npm run build`).
   * Verified live connection testing across active providers via `POST /api/v1/settings/test-connection`.
   * Backend and frontend services confirmed healthy on ports 8000 and 5173.
 
+<br />
+
+## Commit 37 (dev and main) : Multi-Model Selection Checkbox UI, NVIDIA NIM Provider Integration, and Sidebar Styling Fix
+
+* **Multi-Model Checkbox Selection Architecture (`frontend/src/views/NoveltyStudioView.jsx`)**:
+  * Replaced rigid single-choice radio buttons with a full multi-select checkbox UI, allowing researchers to pick any combination of providers (Google Gemini, Groq LPU, Local Ollama, OpenRouter, and NVIDIA NIM) to run simultaneously.
+  * Added 1-click preset selector chips:
+    * `⚡ Cloud 4`: Simultaneously selects Gemini, Groq, OpenRouter, and NVIDIA NIM.
+    * `💻 Local Only`: Selects Local Ollama for 100% private offline inference.
+    * `🌐 All 5 Engines`: Selects all configured engines concurrently.
+    * `Clear`: Resets selection to a single default provider.
+  * Added dynamic active selection chips displaying selected models, provider badges, remove buttons, and a selection counter badge (`N selected`).
+  * Updated tournament synthesis pipeline to fire concurrent requests to all checked models and aggregate generated proposals in real time.
+  * Updated side-by-side comparison view to dynamically render column cards for all 5 providers.
+
+* **NVIDIA NIM Provider Integration (`src/providers/nvidia.py`, `src/providers/factory.py`, `src/graph/novelty_engine.py`, `src/api/routes_novelty.py`)**:
+  * Built native `NvidiaProvider` supporting high-throughput GPU inference via NVIDIA NIM (`https://integrate.api.nvidia.com/v1`).
+  * Added token streaming, JSON object enforcement with automatic plain-text retry fallback, model catalog queries via `/models`, and round-trip latency connectivity testing.
+  * Registered `nvidia` into provider factory (`src/providers/factory.py`) and integrated with `GraphNoveltyEngine`.
+  * Exposed NVIDIA NIM in `GET /api/v1/novelty/providers-status`, `POST /api/v1/novelty/test-connection`, and `POST /api/v1/novelty/synthesize`.
+  * Added NVIDIA NIM configuration card to Novelty Studio settings drawer with model suggestions, custom API key input, and SQLite persistence.
+
+* **Sidebar Navigation Styling & Boundary Fix (`frontend/src/components/layout/Sidebar.jsx`, `frontend/src/styles/styles.css`)**:
+  * Fixed CSS layout bug where active navigation pills (e.g. Settings) overflowed past the right border of the sidebar into the main workspace.
+  * Added `box-sizing: border-box`, `max-width: 100%`, and boundary constraints to enforce clean alignment within the sidebar container.
+
+* **Automated Verification & Build**:
+  * Updated test suite `tests/test_novelty_routes.py` with NVIDIA provider tests.
+  * Verified 100% pass rate (10/10 tests passing in `tests/test_novelty_routes.py` and `tests/test_settings_routes.py`).
+  * Verified production frontend bundle rebuilt cleanly via Vite in `public_dist/`.
+
+

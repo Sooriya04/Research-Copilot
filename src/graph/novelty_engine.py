@@ -23,6 +23,7 @@ from src.providers.gemini import GeminiFlashLiteProvider
 from src.providers.groq import GroqProvider
 from src.providers.llm import LocalOllamaProvider
 from src.providers.openrouter import OpenRouterProvider
+from src.providers.nvidia import NvidiaProvider
 from src.core.provider_settings import resolve_provider_credentials
 from src.core.config import settings
 
@@ -196,6 +197,9 @@ class GraphNoveltyEngine:
         elif p_name == "openrouter":
             mdl = resolved_model or "anthropic/claude-3.5-sonnet"
             return OpenRouterProvider(api_key=resolved_key, model=mdl, base_url=resolved_base_url), "openrouter", mdl
+        elif p_name == "nvidia":
+            mdl = resolved_model or "meta/llama-3.3-70b-instruct"
+            return NvidiaProvider(api_key=resolved_key, model=mdl, base_url=resolved_base_url), "nvidia", mdl
         else:
             if not api_key and not model and self.provider:
                 return self.provider, "gemini", getattr(self.provider, "model", "gemini-3.5-flash-lite")
@@ -212,38 +216,50 @@ class GraphNoveltyEngine:
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         force_refresh: bool = False,
+        providers: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Synthesize grounded novel research hypotheses and architectures from the active knowledge graph."""
         await self.store._ensure_initialized()
 
-        # Handle 'all' multi-model concurrent firing
-        if (provider_name or "").lower() == "all":
+        # Handle multi-provider concurrent execution (custom selection or 'all')
+        target_providers: List[str] = []
+        if providers and isinstance(providers, list) and len(providers) > 0:
+            target_providers = [p.strip().lower() for p in providers if p and p.strip()]
+        elif "," in (provider_name or ""):
+            target_providers = [p.strip().lower() for p in provider_name.split(",") if p.strip()]
+        elif (provider_name or "").lower() == "all":
+            all_known = ["gemini", "groq", "ollama", "openrouter", "nvidia"]
+            target_providers = []
+            for candidate in all_known:
+                creds = await resolve_provider_credentials(candidate)
+                if creds.get("has_key") or candidate == "ollama":
+                    target_providers.append(candidate)
+            if not target_providers:
+                target_providers = ["gemini"]
+
+        if len(target_providers) > 1:
             import asyncio
-            openrouter_creds = await resolve_provider_credentials("openrouter")
-            providers_to_run = ["gemini", "groq", "ollama"]
-            if openrouter_creds.get("has_key") or api_key:
-                providers_to_run.append("openrouter")
             coros = [
                 self.synthesize_novelties(
                     workspace_id=workspace_id,
                     topic=topic,
                     paper_ids=paper_ids,
                     provider_name=p,
-                    api_key=api_key if p in ("gemini", "groq", "openrouter") else None,
-                    base_url=base_url if p == "ollama" else None,
+                    api_key=api_key if (p == provider_name) else None,
+                    base_url=base_url if (p == "ollama" and base_url) else None,
                     force_refresh=force_refresh,
                 )
-                for p in providers_to_run
+                for p in target_providers
             ]
             results = await asyncio.gather(*coros, return_exceptions=True)
             merged = []
             successful_providers = []
-            for p, r in zip(providers_to_run, results):
+            for p, r in zip(target_providers, results):
                 if isinstance(r, dict) and r.get("novelties"):
                     merged.extend(r["novelties"])
                     successful_providers.append(p)
                 elif isinstance(r, Exception):
-                    logger.warning("[GraphNoveltyEngine] Provider '%s' error during 'all' run: %s", p, r)
+                    logger.warning("[GraphNoveltyEngine] Provider '%s' error during multi-model run: %s", p, r)
 
             ws_key = workspace_id or (f"topic-{slugify_id(topic)}" if topic else "global")
             return {
@@ -252,12 +268,14 @@ class GraphNoveltyEngine:
                 "topic": topic or "Literature Synthesis",
                 "cached": False,
                 "llm_called": True,
-                "provider": "all",
+                "provider": "multi",
                 "providers_run": successful_providers,
                 "papers_count": len(paper_ids or []),
                 "gaps_count": len(merged),
                 "novelties": merged,
             }
+        elif len(target_providers) == 1:
+            provider_name = target_providers[0]
 
         # 1. Resolve paper IDs in scope
         target_pids = list(paper_ids) if paper_ids else []

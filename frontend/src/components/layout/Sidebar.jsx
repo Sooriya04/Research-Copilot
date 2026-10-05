@@ -175,12 +175,12 @@ export default function Sidebar() {
       </nav>
 
       {/* Footer */}
-      <div style={{ borderTop: '1px solid var(--border-subtle)', flexShrink: 0 }}>
+      <div style={{ borderTop: '1px solid var(--border-subtle)', flexShrink: 0, padding: '8px 12px 10px', display: 'flex', flexDirection: 'column', gap: 4 }}>
         {/* Settings nav item */}
         <NavLink
           to="/settings"
           className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-          style={{ margin: '8px 12px 4px', borderRadius: 'var(--radius-sm)' }}
+          style={{ width: '100%', boxSizing: 'border-box' }}
         >
           <div className="nav-item-left">
             <Settings size={15} />
@@ -189,8 +189,8 @@ export default function Sidebar() {
         </NavLink>
 
         {/* Status indicator */}
-        <div className="sidebar-footer" style={{ height: 40, padding: '0 16px', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-          <div className="system-status-indicator" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ height: 28, padding: '0 8px', display: 'flex', alignItems: 'center' }}>
+          <div className="system-status-indicator" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 0 }}>
             <div
               className="status-dot"
               id="mini-status-dot"

@@ -23,9 +23,29 @@ def test_get_providers_status(client):
     assert "gemini" in data["providers"]
     assert "groq" in data["providers"]
     assert "ollama" in data["providers"]
+    assert "openrouter" in data["providers"]
+    assert "nvidia" in data["providers"]
     assert data["providers"]["gemini"]["name"] == "Google Gemini"
     assert data["providers"]["groq"]["name"] == "Groq LPU"
     assert data["providers"]["ollama"]["name"] == "Local Ollama"
+    assert data["providers"]["nvidia"]["name"] == "NVIDIA NIM"
+
+
+def test_provider_test_connection_nvidia(client):
+    """Verify /api/v1/novelty/test-connection probes NVIDIA NIM endpoint."""
+    with patch("src.providers.nvidia.NvidiaProvider.test_connection", new_callable=AsyncMock) as mock_test:
+        mock_test.return_value = {
+            "success": True,
+            "latency_ms": 95.2,
+            "message": "Connected & verified NVIDIA NIM model 'meta/llama-3.3-70b-instruct'",
+            "model": "meta/llama-3.3-70b-instruct",
+        }
+        resp = client.post("/api/v1/novelty/test-connection", json={"provider": "nvidia", "api_key": "nvapi-test12345"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["provider"] == "nvidia"
+        assert data["latency_ms"] == 95.2
 
 
 def test_provider_test_connection_gemini(client):
