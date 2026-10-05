@@ -469,7 +469,10 @@ async def get_graph_elements(
     # Rule: non-topic, non-paper nodes are CONNECTION nodes between papers.
     # If multiple papers exist (>= 2), only include nodes that connect to >= 2 papers (avoids leaf dandelion starbursts).
     # Gaps are always preserved as research opportunities.
-    min_papers = 2 if len(paper_ids) >= 2 else 1
+    if scoped:
+        min_papers = 1
+    else:
+        min_papers = 2 if len(paper_ids) >= 2 else 1
 
     # Ensure every scoped paper connects to the primary topic/workspace anchor so none float detached
     primary_anchor = None
