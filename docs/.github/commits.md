@@ -1357,5 +1357,42 @@ bundle compilation (`npm run build`).
   * Verified 100% backend test pass rate (11/11 tests passing in `tests/test_novelty_routes.py` and `tests/test_settings_routes.py`).
   * Verified production frontend bundle rebuilt cleanly via Vite (`npm run build`) in 7.58s.
 
+<br />
+
+## Native PDF Reader Architecture, Papers With Code Resilience, Responsive Collapsible Sidebar, and TopHeader Modernization
+
+* **Native Default PDF Publication Reader Architecture (`frontend/src/views/PaperReaderView.jsx`, `frontend/src/views/LibraryReaderView.jsx`)**:
+  * Removed custom, heavy PDF sheet simulator and switched directly to the native default browser PDF rendering (`<object data={...} type="application/pdf"><iframe ... /></object>`).
+  * Features direct high-fidelity viewing via `/api/v1/pdf/proxy` inline streaming, preserving all native browser features (smooth text selection, zoom, print, native search, and pagination).
+  * Equipped `PaperReaderView.jsx` and `LibraryReaderView.jsx` with quick paper action toolbars: 1-click **Open In Tab**, **Download PDF**, paper metadata header, and fast paper switcher.
+  * Deleted custom `NativePaperReader.jsx` and obsolete reader wrappers for a lean, lightning-fast paper reading experience with zero lag.
+
+* **Papers With Code & Hugging Face Benchmark Resilience (`src/engines/paperswithcode.py`)**:
+  * Resolved critical crashes caused by Meta's Papers With Code domain sunsetting (302 redirects to Hugging Face HTML that broke `resp.json()` with `JSONDecodeError: Expecting value: line 1 column 1`).
+  * Upgraded `PapersWithCodeClient` with multi-source fallback resilience:
+    * **Hugging Face Paper & Artifacts API** (`https://huggingface.co/api/papers/{arxiv_id}` and `api/arxiv/{arxiv_id}/repos`): extracts real-time linked models, datasets, downloads, and empirical benchmark keywords.
+    * **CatalyzeX Code Index** (`catalyzex.com/api/code`): retrieves official public code repositories with GitHub stars.
+    * **Community Mirror Support**: queries `paperswithcode.co` without following HTML redirects.
+  * Harmonized graph benchmark endpoints (`/api/v1/graph/benchmarks` and `/api/v1/graph/sota/dataset/{id}`) for empirical benchmark evaluations, datasets, metrics, and official implementations.
+
+* **Responsive Collapsible Sidebar & Middle Activity Section (`frontend/src/components/layout/Sidebar.jsx`, `frontend/src/context/AppContext.jsx`, `frontend/src/styles/styles.css`, `frontend/src/App.jsx`)**:
+  * Populated the empty middle section of the sidebar:
+    * **Active Workspace Card**: displays current active workspace title (e.g. *Time Series Forecasting* or *Global Workspace*), paper count badge, and a 1-click **Switch** button.
+    * **Recent Papers List**: quick-access list of the 3–4 most recently viewed or imported publications with 1-click opening in Paper Reader.
+    * **Fixed Typo**: renamed `Founded Papers` to `Discovered Papers` (`/search-results`).
+  * Built dual-mode desktop navigation: full width (`240px`) and collapsible mini icon-rail (`64px`) with smooth transitions and persistent state in `localStorage` (`rc_sidebar_collapsed`).
+  * Added mobile drawer behavior (`<= 768px`) with blurred backdrop overlay (`.sidebar-backdrop`) that closes on click or route change.
+  * Added sidebar toggle button (`PanelLeft`) to `TopHeader.jsx` for easy one-click collapse/expand.
+  * Resolved `ReferenceError: selectedPaper is not defined` in `AppContext.jsx`.
+
+* **TopHeader Breadcrumb Repairs (`frontend/src/components/layout/TopHeader.jsx`, `frontend/src/styles/styles.css`)**:
+  * Replaced red `XCircle` with an interactive `.header-workspace-badge` featuring `<Layers size={13} />`, typography truncation, and subtle dismiss icon.
+  * Replaced plain text slash `/` with clean `<ChevronRight size={13} />` icon.
+  * Standardized view title mappings and resolved `ReferenceError: isLibraryRoute is not defined`.
+
+* **Automated Verification & Build Status**:
+  * Verified frontend production build cleanly compiled via Vite (`npm run build`) in `6.77s` with 0 errors.
+  * Verified backend test suite passed with 100% green status across novelty, litgraph, graph engines, and settings routes.
+
 
 

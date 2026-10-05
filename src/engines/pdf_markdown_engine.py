@@ -2,7 +2,7 @@ import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
 import pymupdf as fitz
-pass #import pymupdf4llm
+import pymupdf4llm
 from src.core.logger import logger
 
 # Base directory for extracted markdown and images

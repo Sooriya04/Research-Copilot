@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BookOpen, Loader2 } from 'lucide-react';
-import AnaraPaperReader from '../components/reader/AnaraPaperReader';
+import { BookOpen, ArrowLeft, ExternalLink, Download, Loader2, FileText } from 'lucide-react';
 
 function buildProxyPdfUrl(url) {
   if (!url) return null;
@@ -29,31 +28,12 @@ export default function LibraryReaderView() {
   const [paper, setPaper] = useState(() => {
     try {
       const saved = localStorage.getItem('rc_active_library_paper');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (
-          parsed &&
-          (parsed.sections?.some((s) => /\d[A-Za-z]/.test(s.title)) ||
-            (parsed.markdown &&
-              (parsed.markdown.includes('{muhammad.laiq') ||
-                !parsed.markdown.includes('/dump_extract/images/') ||
-                parsed.markdown.includes('**1 Introduction**') ||
-                parsed.markdown.includes('Laiq et al.'))))
-        ) {
-          delete parsed.markdown;
-          delete parsed.markdown_content;
-          delete parsed.body_markdown;
-          delete parsed.sections;
-        }
-        return parsed;
-      }
-      return null;
+      return saved ? JSON.parse(saved) : null;
     } catch {
       return null;
     }
   });
 
-  const [converting, setConverting] = useState(false);
   const [resolvingPdf, setResolvingPdf] = useState(false);
 
   // Background OA resolution if PDF url is missing
@@ -86,52 +66,6 @@ export default function LibraryReaderView() {
     }
   }, [paper?.id, paper?.arxiv_id, paper?.doi]);
 
-  // If paper lacks publication markdown with figures, fetch upgraded conversion
-  useEffect(() => {
-    if (!paper) return;
-    const isUpgraded = !!(
-      paper.markdown &&
-      (paper.figures?.length > 0 || paper.markdown.includes('/dump_extract/images/')) &&
-      !paper.markdown.includes('{muhammad.laiq') &&
-      !paper.markdown.includes('**1 Introduction**') &&
-      !paper.markdown.includes('Laiq et al.') &&
-      paper.sections?.length > 0 &&
-      !paper.sections.some((s) => /\d[A-Za-z]/.test(s.title))
-    );
-    if (!isUpgraded && (paper.arxiv_id || paper.url || paper.pdf_url || paper.title || paper.id)) {
-      const ident = paper.arxiv_id || paper.url || paper.pdf_url || paper.title || paper.id;
-      setConverting(true);
-      fetch('/api/v1/paper/import-url', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ identifier: ident }),
-      })
-        .then((res) => (res.ok ? res.json() : null))
-        .then((data) => {
-          if (data?.paper?.markdown) {
-            const updated = {
-              ...paper,
-              ...data.paper,
-              markdown: data.paper.markdown,
-              markdown_content: data.paper.markdown,
-              body_markdown: data.paper.body_markdown || data.paper.markdown,
-              figures: data.paper.figures || paper.figures,
-              sections: data.paper.sections || paper.sections,
-            };
-            setPaper(updated);
-            try {
-              localStorage.setItem('rc_active_library_paper', JSON.stringify(updated));
-              const savedList = JSON.parse(localStorage.getItem('rc_user_library_papers_v2') || '[]');
-              const updatedList = savedList.map((p) => (p.id === paper.id ? { ...p, ...updated } : p));
-              localStorage.setItem('rc_user_library_papers_v2', JSON.stringify(updatedList));
-            } catch {}
-          }
-        })
-        .catch((err) => console.warn('Library paper markdown conversion error:', err))
-        .finally(() => setConverting(false));
-    }
-  }, [paper?.id, paper?.markdown]);
-
   if (!paper) {
     return (
       <section
@@ -159,42 +93,160 @@ export default function LibraryReaderView() {
   }
 
   const pdfUrl = resolvePdf(paper);
-  const markdownContent = paper.markdown_content || paper.markdown || null;
 
   return (
-    <section className="view-panel active" style={{ padding: 0, height: '100%', overflow: 'hidden' }}>
-      {converting && (
-        <div
-          style={{
-            position: 'absolute',
-            top: 56,
-            left: '50%',
-            transform: 'translateX(-50%)',
-            zIndex: 100,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            background: 'var(--bg-card)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: 'var(--radius-sm)',
-            padding: '7px 14px',
-            fontSize: 12.5,
-            color: 'var(--accent-primary)',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
-          }}
-        >
-          <Loader2 size={13} className="animate-spin" />
-          <span>Extracting markdown with PyMuPDF4LLM…</span>
+    <section
+      className="view-panel active"
+      style={{
+        padding: 0,
+        height: '100%',
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+      }}
+    >
+      {/* Header bar */}
+      <div
+        style={{
+          padding: '8px 16px',
+          borderBottom: '1px solid var(--border-subtle)',
+          background: 'var(--bg-card)',
+          display: 'flex',
+          gap: 12,
+          alignItems: 'center',
+          flexShrink: 0,
+          justifyContent: 'space-between',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => navigate('/library')}
+            style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 8px', fontSize: 12, flexShrink: 0 }}
+          >
+            <ArrowLeft size={13} />
+            <span>Library</span>
+          </button>
+          <div style={{ minWidth: 0, overflow: 'hidden' }}>
+            <h2
+              style={{
+                fontSize: 13.5,
+                fontWeight: 600,
+                color: 'var(--text-primary)',
+                margin: 0,
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
+              title={paper.title || 'Untitled Document'}
+            >
+              {paper.title || 'Untitled Document'}
+            </h2>
+            {paper.authors && (
+              <p
+                style={{
+                  fontSize: 11.5,
+                  color: 'var(--text-muted)',
+                  margin: 0,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+              >
+                {Array.isArray(paper.authors) ? paper.authors.join(', ') : paper.authors}
+              </p>
+            )}
+          </div>
         </div>
-      )}
-      <AnaraPaperReader
-        paper={paper}
-        pdfUrl={pdfUrl}
-        markdownContent={markdownContent}
-        loadingPdf={resolvingPdf}
-        onBack={() => navigate('/library')}
-        backLabel="Library"
-      />
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          {pdfUrl && (
+            <>
+              <a
+                href={pdfUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn btn-secondary btn-sm"
+                style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12 }}
+              >
+                <ExternalLink size={13} />
+                <span>Open In Tab</span>
+              </a>
+              <a
+                href={pdfUrl}
+                download={paper.title ? `${paper.title.slice(0, 40)}.pdf` : 'paper.pdf'}
+                className="btn btn-secondary btn-sm"
+                style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12 }}
+              >
+                <Download size={13} />
+                <span>Download</span>
+              </a>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Default Native Browser PDF Viewer */}
+      <div style={{ flex: 1, position: 'relative', width: '100%', height: '100%', overflow: 'hidden', background: 'var(--bg-subtle)' }}>
+        {resolvingPdf ? (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: 28, textAlign: 'center' }}>
+            <Loader2 size={32} className="animate-spin" style={{ color: 'var(--accent-primary)', marginBottom: 14 }} />
+            <h4 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>
+              Locating Open-Access PDF Stream
+            </h4>
+            <p style={{ fontSize: 12.5, color: 'var(--text-muted)', maxWidth: 360, lineHeight: 1.5 }}>
+              Connecting to arXiv and academic repositories to stream publication...
+            </p>
+          </div>
+        ) : pdfUrl ? (
+          <object
+            data={pdfUrl}
+            type="application/pdf"
+            style={{ width: '100%', height: '100%', border: 'none', display: 'block' }}
+          >
+            <iframe
+              title="PDF Preview Frame"
+              src={pdfUrl}
+              style={{ width: '100%', height: '100%', border: 'none' }}
+            >
+              <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-secondary)' }}>
+                <p style={{ marginBottom: 12 }}>Unable to display inline PDF in this browser frame.</p>
+                <a
+                  href={pdfUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn btn-primary btn-sm"
+                >
+                  Open PDF Directly
+                </a>
+              </div>
+            </iframe>
+          </object>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: 24, textAlign: 'center' }}>
+            <FileText size={44} style={{ color: 'var(--text-muted)', marginBottom: 12 }} />
+            <h4 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>
+              Direct PDF Stream Unavailable
+            </h4>
+            <p style={{ fontSize: 12.5, color: 'var(--text-muted)', maxWidth: 400, lineHeight: 1.5, marginBottom: 16 }}>
+              Could not resolve an open-access PDF stream for this publication.
+            </p>
+            {paper.url && (
+              <a
+                href={paper.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn btn-primary btn-sm"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                <ExternalLink size={13} />
+                <span>Open Source Publication</span>
+              </a>
+            )}
+          </div>
+        )}
+      </div>
     </section>
   );
 }

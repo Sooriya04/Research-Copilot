@@ -91,6 +91,26 @@ export function AppProvider({ children }) {
   const [selectedPaper, setSelectedPaper] = useState(null);
   const [systemConnected, setSystemConnected] = useState(true);
 
+  // Responsive Sidebar States
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('rc_sidebar_collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
+  const toggleSidebar = () => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('rc_sidebar_collapsed', String(next));
+      } catch {}
+      return next;
+    });
+  };
+
   // Workspace Management State
   const [workspaces, setWorkspaces] = useState([]);
   const [activeWorkspace, setActiveWorkspace] = useState(() => {
@@ -732,6 +752,11 @@ export function AppProvider({ children }) {
         fetchWorkspaceMemories,
         addWorkspaceMemory,
         deleteWorkspaceMemory,
+        sidebarCollapsed,
+        setSidebarCollapsed,
+        toggleSidebar,
+        mobileSidebarOpen,
+        setMobileSidebarOpen,
       }}
     >
       {children}

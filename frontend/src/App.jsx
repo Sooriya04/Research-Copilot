@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { Routes, Route, useNavigate } from 'react-router-dom';
+import { useApp } from './context/AppContext';
 import Sidebar from './components/layout/Sidebar';
 import TopHeader from './components/layout/TopHeader';
 import CommandPaletteModal from './components/modals/CommandPaletteModal';
@@ -25,6 +26,7 @@ import NoveltyStudioView from './views/NoveltyStudioView';
 
 export default function App() {
   const navigate = useNavigate();
+  const { mobileSidebarOpen, setMobileSidebarOpen } = useApp();
 
   // Numeric shortcuts 1, 2, 3, 4
   useEffect(() => {
@@ -40,6 +42,12 @@ export default function App() {
 
   return (
     <div className="app-layout">
+      {mobileSidebarOpen && (
+        <div
+          className="sidebar-backdrop"
+          onClick={() => setMobileSidebarOpen(false)}
+        />
+      )}
       <Sidebar />
       <main className="main-content">
         <TopHeader />

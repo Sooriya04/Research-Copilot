@@ -1,20 +1,22 @@
 import React from 'react';
 import { useLocation } from 'react-router-dom';
-import { Search, Moon, Sun, RotateCw, XCircle } from 'lucide-react';
+import { Search, Moon, Sun, RotateCw, Layers, ChevronRight, X, ChevronDown, PanelLeft } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 
 const VIEW_TITLES = {
   '/': 'Overview',
   '/overview': 'Overview',
-  '/library': 'Library',
+  '/library': 'Research Library',
   '/library/reader': 'Paper Reader',
   '/library-reader': 'Paper Reader',
   '/create': 'Import Papers',
   '/chat': 'Research Chat',
-  '/workspaces': 'Research Workspaces Hub',
+  '/workspaces': 'Research Workspaces',
   '/search': 'Literature Search',
-  '/search-results': 'Founded Papers',
+  '/search-results': 'Discovered Papers',
   '/knowledge-graph': 'Knowledge Graph',
+  '/novelty': 'Novelty Studio',
+  '/novelty-studio': 'Novelty Studio',
   '/litgraph': 'LitGraph',
   '/pdf-inspector': 'Paper Reader',
   '/experiment-studio': 'Benchmarks & SOTA',
@@ -25,76 +27,84 @@ const VIEW_TITLES = {
 
 export default function TopHeader() {
   const location = useLocation();
-  const { theme, toggleTheme, openCmdPalette, activeWorkspace, openWorkspaceModal, deactivateWorkspace } = useApp();
+  const {
+    theme,
+    toggleTheme,
+    openCmdPalette,
+    activeWorkspace,
+    openWorkspaceModal,
+    deactivateWorkspace,
+    sidebarCollapsed,
+    toggleSidebar,
+    setMobileSidebarOpen,
+  } = useApp();
 
-  const currentTitle = VIEW_TITLES[location.pathname] || location.pathname.replace('/', '') || 'Workspace';
-  const wsTitle = activeWorkspace ? activeWorkspace.title : 'Research Workspace';
-
+  const currentTitle = VIEW_TITLES[location.pathname] || location.pathname.replace('/', '').replace(/-/g, ' ') || 'Workspace';
   const isLibraryRoute = location.pathname.startsWith('/library') || location.pathname.startsWith('/library-reader');
-  const isOverviewRoute = location.pathname === '/' || location.pathname === '/overview';
+
+  const handleSidebarToggle = () => {
+    if (window.innerWidth <= 768) {
+      setMobileSidebarOpen((v) => !v);
+    } else {
+      toggleSidebar();
+    }
+  };
 
   return (
     <header className="top-header">
       <div className="header-left">
-        {isLibraryRoute ? (
-          <>
-            <span style={{ color: 'var(--text-muted)' }}>Research Library</span>
-            {(location.pathname === '/library/reader' || location.pathname === '/library-reader') && (
-              <>
-                <span style={{ margin: '0 6px', color: 'var(--text-muted)' }}>/</span>
-                <strong id="header-view-title" style={{ color: 'var(--text-primary)' }}>Paper Reader</strong>
-              </>
-            )}
-          </>
-        ) : isOverviewRoute ? (
-          <>
-            <span style={{ color: 'var(--text-muted)' }}>Research Copilot</span>
-            <span style={{ margin: '0 6px', color: 'var(--text-muted)' }}>/</span>
-            <strong id="header-view-title" style={{ color: 'var(--text-primary)' }}>Overview</strong>
-          </>
-        ) : location.pathname === '/settings' ? (
-          <>
-            <span style={{ color: 'var(--text-muted)' }}>Research Copilot</span>
-            <span style={{ margin: '0 6px', color: 'var(--text-muted)' }}>/</span>
-            <strong id="header-view-title" style={{ color: 'var(--text-primary)' }}>Settings</strong>
-          </>
-        ) : (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span
-              onClick={() => openWorkspaceModal()}
-              style={{ cursor: 'pointer', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-              title="Click to switch or create workspace"
-            >
-              {wsTitle}
+        <button
+          type="button"
+          className="header-btn sidebar-toggle-btn"
+          onClick={handleSidebarToggle}
+          title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          style={{ marginRight: 8, padding: '5px 7px', display: 'flex', alignItems: 'center' }}
+          id="btn-sidebar-toggle"
+        >
+          <PanelLeft size={15} />
+        </button>
+
+        <div className="header-breadcrumbs">
+          {/* Workspace Context Badge */}
+          <div
+            className={`header-workspace-badge ${activeWorkspace ? 'active' : 'default'}`}
+            onClick={() => openWorkspaceModal()}
+            title={activeWorkspace ? `Active Workspace: ${activeWorkspace.title} • Click to switch` : 'Click to select or create a workspace'}
+          >
+            <Layers
+              size={13}
+              style={{
+                color: activeWorkspace ? 'var(--accent-primary, #3b82f6)' : 'var(--text-muted)',
+                flexShrink: 0,
+              }}
+            />
+            <span className="workspace-badge-title">
+              {activeWorkspace ? activeWorkspace.title : 'Global Workspace'}
             </span>
-            {activeWorkspace && (
+            {activeWorkspace ? (
               <button
                 type="button"
+                className="workspace-badge-deactivate"
                 onClick={(e) => {
                   e.stopPropagation();
                   deactivateWorkspace();
                 }}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  padding: 0,
-                  cursor: 'pointer',
-                  color: 'var(--text-muted)',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  opacity: 0.7,
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
-                onMouseLeave={(e) => (e.currentTarget.style.opacity = '0.7')}
-                title="Deactivate workspace (switch to global)"
+                title="Deactivate workspace (switch to global view)"
               >
-                <XCircle size={13} style={{ color: 'var(--accent-rose, #f43f5e)' }} />
+                <X size={11} />
               </button>
+            ) : (
+              <ChevronDown size={11} style={{ color: 'var(--text-muted)', opacity: 0.7 }} />
             )}
-            <span style={{ margin: '0 4px', color: 'var(--text-muted)' }}>/</span>
-            <strong id="header-view-title">{currentTitle}</strong>
           </div>
-        )}
+
+          <ChevronRight size={13} className="header-breadcrumb-separator" />
+
+          {/* Current Page Title */}
+          <strong id="header-view-title" className="header-current-title">
+            {currentTitle}
+          </strong>
+        </div>
       </div>
 
       {!isLibraryRoute && (
