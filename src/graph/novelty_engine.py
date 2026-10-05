@@ -95,10 +95,80 @@ class GraphNoveltyEngine:
                         );
                         """
                     )
+                    await db.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS novelty_proposals (
+                            id TEXT PRIMARY KEY,
+                            workspace_id TEXT,
+                            topic TEXT,
+                            title TEXT NOT NULL,
+                            mechanism TEXT,
+                            engine TEXT,
+                            model_name TEXT,
+                            pitch TEXT,
+                            novelty_statement TEXT,
+                            grounded_paper_ids TEXT,
+                            grounded_paper_titles TEXT,
+                            mathematical_formulation TEXT,
+                            testable_hypothesis TEXT,
+                            target_datasets TEXT,
+                            baselines_to_beat TEXT,
+                            expected_metrics TEXT,
+                            confidence_score REAL DEFAULT 0.85,
+                            is_custom INTEGER DEFAULT 0,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        );
+                        """
+                    )
+                    # Backfill from graph_novelty_cache if novelty_proposals is empty
+                    async with db.execute("SELECT COUNT(*) FROM novelty_proposals") as cur:
+                        row = await cur.fetchone()
+                        if row and row[0] == 0:
+                            async with db.execute("SELECT workspace_id, novelties_json FROM graph_novelty_cache") as c2:
+                                rows = await c2.fetchall()
+                                for ws_id, n_json in rows:
+                                    try:
+                                        items = json.loads(n_json)
+                                        if isinstance(items, list):
+                                            for it in items:
+                                                if isinstance(it, dict) and it.get("title"):
+                                                    n_id = it.get("id") or f"nov-{slugify_id(it.get('title'))}"
+                                                    await db.execute(
+                                                        """
+                                                        INSERT OR IGNORE INTO novelty_proposals
+                                                        (id, workspace_id, title, mechanism, engine, model_name, pitch,
+                                                         novelty_statement, grounded_paper_ids, grounded_paper_titles,
+                                                         mathematical_formulation, testable_hypothesis, target_datasets,
+                                                         baselines_to_beat, expected_metrics, confidence_score, is_custom)
+                                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                                        """,
+                                                        (
+                                                            n_id,
+                                                            ws_id,
+                                                            it.get("title"),
+                                                            it.get("mechanism", "recombination"),
+                                                            it.get("engine", "gemini"),
+                                                            it.get("model_name"),
+                                                            it.get("pitch", ""),
+                                                            it.get("novelty_statement", ""),
+                                                            json.dumps(it.get("grounded_paper_ids", [])),
+                                                            json.dumps(it.get("grounded_paper_titles", [])),
+                                                            it.get("mathematical_formulation", ""),
+                                                            it.get("testable_hypothesis", ""),
+                                                            json.dumps(it.get("target_datasets", [])),
+                                                            json.dumps(it.get("baselines_to_beat", [])),
+                                                            json.dumps(it.get("expected_metrics", [])),
+                                                            float(it.get("confidence_score") or 0.85),
+                                                            0,
+                                                        )
+                                                    )
+                                    except Exception:
+                                        pass
                     await db.commit()
                 self._table_initialized = True
             except Exception as e:
-                logger.warning("[GraphNoveltyEngine] Failed initializing SQLite cache table: %s", e)
+                logger.warning("[GraphNoveltyEngine] Failed initializing SQLite cache/proposals tables: %s", e)
 
     @staticmethod
     def compute_paper_hash(paper_ids: List[str], provider: str = "gemini", model: str = "") -> str:
@@ -168,6 +238,157 @@ class GraphNoveltyEngine:
                 await db.commit()
         except Exception as e:
             logger.warning("[GraphNoveltyEngine] Cache write error: %s", e)
+
+    async def save_proposal(
+        self,
+        proposal: Dict[str, Any],
+        workspace_id: Optional[str] = None,
+        topic: Optional[str] = None,
+        is_custom: bool = False,
+    ) -> Dict[str, Any]:
+        """Save a proposal (synthesized or user-created) into novelty_proposals table."""
+        await self._ensure_cache_table()
+        import time as _t
+        n_id = proposal.get("id") or f"{'custom-' if is_custom else 'nov-'}{slugify_id(proposal.get('title', 'proposal'))[:30]}-{int(_t.time())}"
+        proposal["id"] = n_id
+        if is_custom:
+            proposal["is_custom"] = True
+            if not proposal.get("engine"):
+                proposal["engine"] = "custom"
+            if not proposal.get("model_name"):
+                proposal["model_name"] = "user-authored"
+
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute(
+                    """
+                    INSERT INTO novelty_proposals
+                    (id, workspace_id, topic, title, mechanism, engine, model_name, pitch,
+                     novelty_statement, grounded_paper_ids, grounded_paper_titles,
+                     mathematical_formulation, testable_hypothesis, target_datasets,
+                     baselines_to_beat, expected_metrics, confidence_score, is_custom, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(id) DO UPDATE SET
+                        title = excluded.title,
+                        mechanism = excluded.mechanism,
+                        pitch = excluded.pitch,
+                        novelty_statement = excluded.novelty_statement,
+                        mathematical_formulation = excluded.mathematical_formulation,
+                        testable_hypothesis = excluded.testable_hypothesis,
+                        target_datasets = excluded.target_datasets,
+                        baselines_to_beat = excluded.baselines_to_beat,
+                        expected_metrics = excluded.expected_metrics,
+                        confidence_score = excluded.confidence_score,
+                        updated_at = CURRENT_TIMESTAMP;
+                    """,
+                    (
+                        n_id,
+                        workspace_id or "global",
+                        topic or "Literature Synthesis",
+                        proposal.get("title", "Untitled Proposal"),
+                        proposal.get("mechanism", "recombination"),
+                        proposal.get("engine", "custom" if is_custom else "gemini"),
+                        proposal.get("model_name", "user-authored" if is_custom else "default"),
+                        proposal.get("pitch", ""),
+                        proposal.get("novelty_statement", ""),
+                        json.dumps(proposal.get("grounded_paper_ids", [])),
+                        json.dumps(proposal.get("grounded_paper_titles", [])),
+                        proposal.get("mathematical_formulation", ""),
+                        proposal.get("testable_hypothesis", ""),
+                        json.dumps(proposal.get("target_datasets", [])),
+                        json.dumps(proposal.get("baselines_to_beat", [])),
+                        json.dumps(proposal.get("expected_metrics", [])),
+                        float(proposal.get("confidence_score", 0.85) or 0.85),
+                        1 if (is_custom or proposal.get("is_custom")) else 0,
+                    ),
+                )
+                await db.commit()
+        except Exception as e:
+            logger.warning("[GraphNoveltyEngine] Error saving proposal to DB: %s", e)
+        return proposal
+
+    async def get_saved_proposals(
+        self,
+        workspace_id: Optional[str] = None,
+        topic: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """Retrieve all saved proposals for a workspace/topic ordered by most recent."""
+        await self._ensure_cache_table()
+        proposals = []
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                db.row_factory = aiosqlite.Row
+                query = "SELECT * FROM novelty_proposals WHERE 1=1"
+                params: List[Any] = []
+                if workspace_id and workspace_id != "global":
+                    query += " AND (workspace_id = ? OR workspace_id = 'global')"
+                    params.append(workspace_id)
+                query += " ORDER BY created_at DESC LIMIT ?"
+                params.append(limit)
+
+                async with db.execute(query, params) as cursor:
+                    rows = await cursor.fetchall()
+                    for r in rows:
+                        def parse_json_field(val):
+                            if not val:
+                                return []
+                            try:
+                                return json.loads(val)
+                            except Exception:
+                                return []
+
+                        proposals.append({
+                            "id": r["id"],
+                            "workspace_id": r["workspace_id"],
+                            "topic": r["topic"],
+                            "title": r["title"],
+                            "mechanism": r["mechanism"] or "recombination",
+                            "engine": r["engine"] or "gemini",
+                            "model_name": r["model_name"],
+                            "pitch": r["pitch"] or "",
+                            "novelty_statement": r["novelty_statement"] or "",
+                            "grounded_paper_ids": parse_json_field(r["grounded_paper_ids"]),
+                            "grounded_paper_titles": parse_json_field(r["grounded_paper_titles"]),
+                            "mathematical_formulation": r["mathematical_formulation"] or "",
+                            "testable_hypothesis": r["testable_hypothesis"] or "",
+                            "target_datasets": parse_json_field(r["target_datasets"]),
+                            "baselines_to_beat": parse_json_field(r["baselines_to_beat"]),
+                            "expected_metrics": parse_json_field(r["expected_metrics"]),
+                            "confidence_score": float(r["confidence_score"] or 0.85),
+                            "is_custom": bool(r["is_custom"]),
+                            "created_at": str(r["created_at"]),
+                        })
+        except Exception as e:
+            logger.warning("[GraphNoveltyEngine] Error reading saved proposals: %s", e)
+        return proposals
+
+    async def delete_saved_proposal(self, proposal_id: str) -> bool:
+        """Delete a proposal by ID from novelty_proposals table."""
+        await self._ensure_cache_table()
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute("DELETE FROM novelty_proposals WHERE id = ?", (proposal_id,))
+                await db.commit()
+                return True
+        except Exception as e:
+            logger.warning("[GraphNoveltyEngine] Error deleting proposal %s: %s", proposal_id, e)
+            return False
+
+    async def clear_all_proposals(self, workspace_id: Optional[str] = None) -> int:
+        """Clear proposals for a workspace."""
+        await self._ensure_cache_table()
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                if workspace_id and workspace_id != "global":
+                    res = await db.execute("DELETE FROM novelty_proposals WHERE workspace_id = ?", (workspace_id,))
+                else:
+                    res = await db.execute("DELETE FROM novelty_proposals")
+                await db.commit()
+                return res.rowcount
+        except Exception as e:
+            logger.warning("[GraphNoveltyEngine] Error clearing proposals: %s", e)
+            return 0
 
     async def resolve_provider(
         self,
@@ -262,6 +483,8 @@ class GraphNoveltyEngine:
                     logger.warning("[GraphNoveltyEngine] Provider '%s' error during multi-model run: %s", p, r)
 
             ws_key = workspace_id or (f"topic-{slugify_id(topic)}" if topic else "global")
+            for item in merged:
+                await self.save_proposal(item, workspace_id=ws_key, topic=topic)
             return {
                 "status": "multi_synthesized",
                 "workspace_id": ws_key,
@@ -503,9 +726,11 @@ Return JSON with this EXACT structure:
             logger.info("[GraphNoveltyEngine] Generating deterministic heuristic novelty proposals from graph topology.")
             novelties_dicts = self._generate_heuristic_novelties(topic or "Literature Synthesis", paper_records, detected_gaps)
 
-        # 6. Save to SQLite Cache
+        # 6. Save to SQLite Cache & Persistent Proposals Table
         if ws_key and target_pids and novelties_dicts:
             await self.save_cached_novelties(ws_key, target_pids, novelties_dicts, provider=eng_name, model=model_str)
+            for item in novelties_dicts:
+                await self.save_proposal(item, workspace_id=ws_key, topic=topic)
 
         return {
             "status": "synthesized",

@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
+import MathRenderer from '../components/common/MathRenderer';
 
 function wrapLabel(text, maxChars = 20) {
   if (!text) return 'Paper';
@@ -2330,13 +2331,13 @@ export default function KnowledgeGraphView() {
                                 background: 'var(--bg-card)',
                                 border: '1px solid var(--border-subtle)',
                                 borderRadius: 4,
-                                fontFamily: 'monospace',
-                                fontSize: 10.5,
-                                color: 'var(--text-muted)',
                                 overflowX: 'auto',
                               }}
                             >
-                              {nov.mathematical_formulation}
+                              <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', fontWeight: 700, marginBottom: 2 }}>
+                                Formulation
+                              </div>
+                              <MathRenderer equation={nov.mathematical_formulation} block style={{ margin: 0, padding: 0 }} />
                             </div>
                           )}
 

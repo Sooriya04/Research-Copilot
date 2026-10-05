@@ -19,6 +19,7 @@ import {
   MessageSquare,
   Network,
   Columns3,
+  LayoutGrid,
   SlidersHorizontal,
   ChevronDown,
   ChevronUp,
@@ -36,6 +37,7 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
+import MathRenderer from '../components/common/MathRenderer';
 
 export default function NoveltyStudioView() {
   const navigate = useNavigate();
@@ -91,14 +93,39 @@ export default function NoveltyStudioView() {
   const [testingConnection, setTestingConnection] = useState(false);
   const [testResult, setTestResult] = useState(null);
 
-  // Synthesis state & results
+  // Synthesis state & results (persisted in localStorage and SQLite)
   const [synthesizing, setSynthesizing] = useState(false);
   const [forceRefresh, setForceRefresh] = useState(false);
-  const [noveltyResults, setNoveltyResults] = useState([]);
+  const [noveltyResults, setNoveltyResults] = useState(() => {
+    try {
+      const wsKey = activeWorkspace?.id ? `rc_ws_${activeWorkspace.id}_novelty_results` : 'rc_novelty_results';
+      const saved = localStorage.getItem(wsKey) || localStorage.getItem('rc_novelty_results');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
   const [lastTelemetry, setLastTelemetry] = useState(null);
   const [telemetryLogs, setTelemetryLogs] = useState([]);
   const [errorMsg, setErrorMsg] = useState(null);
   const [toastMsg, setToastMsg] = useState(null);
+
+  // Custom Novelty Authoring Modal state
+  const [showCustomModal, setShowCustomModal] = useState(false);
+  const [customForm, setCustomForm] = useState({
+    title: '',
+    mechanism: 'recombination',
+    pitch: '',
+    novelty_statement: '',
+    mathematical_formulation: '',
+    testable_hypothesis: '',
+    target_datasets: '',
+    baselines_to_beat: '',
+    expected_metrics: '',
+    grounded_paper_ids: [],
+    confidence_score: 0.9,
+  });
+  const [creatingCustom, setCreatingCustom] = useState(false);
 
   // Filter & View Mode
   const [mechanismFilter, setMechanismFilter] = useState('all');
@@ -108,12 +135,60 @@ export default function NoveltyStudioView() {
   const [addedCandidateIds, setAddedCandidateIds] = useState(new Set());
   const [addingId, setAddingId] = useState(null);
 
+  // Responsive Masonry Column state
+  const [autoColumnCount, setAutoColumnCount] = useState(() => {
+    if (typeof window === 'undefined') return 3;
+    const width = window.innerWidth;
+    if (width < 768) return 1;
+    if (width < 1280) return 2;
+    if (width < 1800) return 3;
+    return 4;
+  });
+  const [customColumnCount, setCustomColumnCount] = useState(null);
+  const activeColumnCount = customColumnCount || autoColumnCount;
+
+  useEffect(() => {
+    const handleResize = () => {
+      const width = window.innerWidth;
+      if (width < 768) setAutoColumnCount(1);
+      else if (width < 1280) setAutoColumnCount(2);
+      else if (width < 1800) setAutoColumnCount(3);
+      else setAutoColumnCount(4);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   const isDark = theme === 'dark';
 
-  // 1. Fetch Providers Status & Workspace Papers on mount
+  // Persist noveltyResults to localStorage whenever they change
   useEffect(() => {
+    try {
+      if (noveltyResults && noveltyResults.length > 0) {
+        const wsKey = activeWorkspace?.id ? `rc_ws_${activeWorkspace.id}_novelty_results` : 'rc_novelty_results';
+        localStorage.setItem(wsKey, JSON.stringify(noveltyResults));
+        localStorage.setItem('rc_novelty_results', JSON.stringify(noveltyResults));
+      }
+    } catch (e) {
+      console.warn('Failed saving novelty results to localStorage:', e);
+    }
+  }, [noveltyResults, activeWorkspace?.id]);
+
+  // 1. Fetch Providers Status, Workspace Papers, and Saved Proposals on mount or workspace switch
+  useEffect(() => {
+    try {
+      const wsKey = activeWorkspace?.id ? `rc_ws_${activeWorkspace.id}_novelty_results` : 'rc_novelty_results';
+      const saved = localStorage.getItem(wsKey) || localStorage.getItem('rc_novelty_results');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setNoveltyResults(parsed);
+        }
+      }
+    } catch {}
     fetchProvidersStatus();
     fetchWorkspacePapers();
+    fetchSavedProposals();
   }, [activeWorkspace?.id]);
 
   const addTelemetryLog = (msg) => {
@@ -207,6 +282,141 @@ export default function NoveltyStudioView() {
       console.error('Failed fetching workspace papers:', err);
     } finally {
       setLoadingPapers(false);
+    }
+  };
+
+  const fetchSavedProposals = async () => {
+    try {
+      const wsKey = activeWorkspace?.id || 'global';
+      const res = await fetch(`/api/v1/novelty/proposals?workspace_id=${encodeURIComponent(wsKey)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.proposals && Array.isArray(data.proposals) && data.proposals.length > 0) {
+          setNoveltyResults((prev) => {
+            const idMap = new Map();
+            for (const p of data.proposals) {
+              idMap.set(p.id, p);
+            }
+            for (const p of prev || []) {
+              if (!idMap.has(p.id)) {
+                idMap.set(p.id, p);
+              }
+            }
+            const merged = Array.from(idMap.values());
+            try {
+              const wsKey = activeWorkspace?.id ? `rc_ws_${activeWorkspace.id}_novelty_results` : 'rc_novelty_results';
+              localStorage.setItem(wsKey, JSON.stringify(merged));
+              localStorage.setItem('rc_novelty_results', JSON.stringify(merged));
+            } catch {}
+            return merged;
+          });
+          addTelemetryLog(`Loaded ${data.proposals.length} saved novelty proposals from SQLite.`);
+        }
+      }
+    } catch (err) {
+      console.warn('Could not fetch saved proposals:', err);
+    }
+  };
+
+  const handleCreateCustomNovelty = async (e) => {
+    if (e) e.preventDefault();
+    if (!customForm.title.trim()) {
+      setErrorMsg('Please enter a proposal title.');
+      return;
+    }
+
+    setCreatingCustom(true);
+    setErrorMsg(null);
+    try {
+      const activeTopic = (topic || searchQuery || activeWorkspace?.title || 'Literature Synthesis').trim();
+      const payload = {
+        workspace_id: activeWorkspace?.id || null,
+        topic: activeTopic,
+        title: customForm.title.trim(),
+        mechanism: customForm.mechanism || 'recombination',
+        pitch: customForm.pitch.trim() || 'Custom user-authored scientific novelty proposal.',
+        novelty_statement: customForm.novelty_statement.trim() || customForm.title.trim(),
+        mathematical_formulation: customForm.mathematical_formulation.trim() || 'Formulation defined by researcher.',
+        testable_hypothesis: customForm.testable_hypothesis.trim() || 'Empirical validation across target benchmarks.',
+        target_datasets: customForm.target_datasets
+          ? customForm.target_datasets.split(',').map((s) => s.trim()).filter(Boolean)
+          : [],
+        baselines_to_beat: customForm.baselines_to_beat
+          ? customForm.baselines_to_beat.split(',').map((s) => s.trim()).filter(Boolean)
+          : [],
+        expected_metrics: customForm.expected_metrics
+          ? customForm.expected_metrics.split(',').map((s) => s.trim()).filter(Boolean)
+          : ['MSE', 'MAE'],
+        grounded_paper_ids: customForm.grounded_paper_ids || [],
+        grounded_paper_titles: (customForm.grounded_paper_ids || []).map((id) => {
+          const p = availablePapers.find((ap) => ap.id === id);
+          return p ? p.title : id;
+        }),
+        confidence_score: parseFloat(customForm.confidence_score) || 0.9,
+      };
+
+      const res = await fetch('/api/v1/novelty/custom', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) {
+        const created = await res.json();
+        setNoveltyResults((prev) => [created, ...(prev || [])]);
+        setToastMsg(`✨ Successfully added your novelty: "${created.title}"`);
+        addTelemetryLog(`User authored novelty created: "${created.title}" (id=${created.id})`);
+        setShowCustomModal(false);
+        setCustomForm({
+          title: '',
+          mechanism: 'recombination',
+          pitch: '',
+          novelty_statement: '',
+          mathematical_formulation: '',
+          testable_hypothesis: '',
+          target_datasets: '',
+          baselines_to_beat: '',
+          expected_metrics: '',
+          grounded_paper_ids: [],
+          confidence_score: 0.9,
+        });
+      } else {
+        const errJson = await res.json().catch(() => ({ detail: 'Failed creating proposal' }));
+        setErrorMsg(errJson.detail || 'Failed creating proposal');
+      }
+    } catch (err) {
+      setErrorMsg(`Failed creating custom proposal: ${err.message}`);
+    } finally {
+      setCreatingCustom(false);
+    }
+  };
+
+  const handleDeleteProposal = async (id, e) => {
+    if (e) e.stopPropagation();
+    if (!window.confirm('Delete this novelty proposal from your deck?')) return;
+    try {
+      await fetch(`/api/v1/novelty/proposals/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      setNoveltyResults((prev) => prev.filter((p) => p.id !== id));
+      setToastMsg('Proposal removed from deck.');
+      addTelemetryLog(`Deleted proposal ${id}.`);
+    } catch (err) {
+      console.warn('Failed deleting proposal:', err);
+    }
+  };
+
+  const handleClearAllProposals = async () => {
+    if (!window.confirm('Clear all novelty proposals from this workspace deck?')) return;
+    try {
+      const wsKey = activeWorkspace?.id || 'global';
+      await fetch(`/api/v1/novelty/proposals?workspace_id=${encodeURIComponent(wsKey)}`, { method: 'DELETE' });
+      setNoveltyResults([]);
+      const storageKey = activeWorkspace?.id ? `rc_ws_${activeWorkspace.id}_novelty_results` : 'rc_novelty_results';
+      localStorage.removeItem(storageKey);
+      localStorage.removeItem('rc_novelty_results');
+      setToastMsg('Deck cleared.');
+      addTelemetryLog('Cleared all proposals from deck.');
+    } catch (err) {
+      console.warn('Failed clearing deck:', err);
     }
   };
 
@@ -383,23 +593,41 @@ ${nov.mathematical_formulation || 'N/A'}
 
   // Filtered Novelty list
   const filteredNovelties = useMemo(() => {
-    return noveltyResults.filter((n) => {
+    return (noveltyResults || []).filter((n) => {
       const matchMech = mechanismFilter === 'all' || (n.mechanism || '').toLowerCase() === mechanismFilter.toLowerCase();
-      const matchProv = providerFilter === 'all' || (n.engine || '').toLowerCase() === providerFilter.toLowerCase();
+      const matchProv =
+        providerFilter === 'all' ||
+        (providerFilter === 'custom' && (n.is_custom || (n.engine || '').toLowerCase() === 'custom')) ||
+        (n.engine || '').toLowerCase() === providerFilter.toLowerCase();
       return matchMech && matchProv;
     });
   }, [noveltyResults, mechanismFilter, providerFilter]);
 
   // Grouped for side-by-side comparison mode
   const comparisonByEngine = useMemo(() => {
-    const groups = { gemini: [], groq: [], ollama: [], openrouter: [], nvidia: [], heuristic: [] };
-    noveltyResults.forEach((n) => {
+    const groups = { gemini: [], groq: [], ollama: [], openrouter: [], nvidia: [], custom: [], heuristic: [] };
+    (noveltyResults || []).forEach((n) => {
       const eng = (n.engine || 'gemini').toLowerCase();
-      if (groups[eng]) groups[eng].push(n);
-      else groups.heuristic.push(n);
+      if (n.is_custom || eng === 'custom') {
+        groups.custom.push(n);
+      } else if (groups[eng]) {
+        groups[eng].push(n);
+      } else {
+        groups.heuristic.push(n);
+      }
     });
     return groups;
   }, [noveltyResults]);
+
+  // Masonry column grouping: Distributes cards across columns to avoid uneven row gaps
+  const masonryColumns = useMemo(() => {
+    const count = Math.max(1, activeColumnCount);
+    const cols = Array.from({ length: count }, () => []);
+    (filteredNovelties || []).forEach((nov, idx) => {
+      cols[idx % count].push(nov);
+    });
+    return cols;
+  }, [filteredNovelties, activeColumnCount]);
 
   return (
     <div className="view-panel active" style={{ padding: '24px 32px', maxWidth: 1440, margin: '0 auto' }}>
@@ -461,6 +689,28 @@ ${nov.mathematical_formulation || 'N/A'}
           >
             <Network size={13} />
             <span>Graph Canvas</span>
+          </button>
+
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => setShowCustomModal(true)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.15) 0%, rgba(168, 85, 247, 0.15) 100%)',
+              color: '#8b5cf6',
+              border: '1px solid rgba(139, 92, 246, 0.35)',
+              fontWeight: 600,
+              padding: '6px 14px',
+              borderRadius: 'var(--radius-sm, 6px)',
+              cursor: 'pointer',
+            }}
+            title="Create and add your own custom novelty proposal"
+          >
+            <Plus size={14} />
+            <span>Add Custom Novelty</span>
           </button>
 
           <button
@@ -1700,6 +1950,7 @@ ${nov.mathematical_formulation || 'N/A'}
             style={{ fontSize: 11.5, padding: '4px 8px' }}
           >
             <option value="all">All Engines</option>
+            <option value="custom">✨ User Authored</option>
             <option value="gemini">Google Gemini</option>
             <option value="groq">Groq LPU</option>
             <option value="ollama">Local Ollama</option>
@@ -1709,14 +1960,91 @@ ${nov.mathematical_formulation || 'N/A'}
           </select>
         </div>
 
-        <div style={{ display: 'flex', gap: 6 }}>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => setShowCustomModal(true)}
+            style={{
+              fontSize: 11.5,
+              padding: '4px 10px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              background: 'rgba(139, 92, 246, 0.12)',
+              color: '#8b5cf6',
+              border: '1px solid rgba(139, 92, 246, 0.3)',
+              fontWeight: 600,
+            }}
+            title="Author and save your own custom novelty proposal"
+          >
+            <Plus size={12} />
+            <span>Add Custom</span>
+          </button>
+
           <button
             className={`btn btn-sm ${viewMode === 'cards' ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => setViewMode('cards')}
-            style={{ fontSize: 11.5, padding: '4px 10px' }}
+            style={{ fontSize: 11.5, padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 5 }}
+            title="Dynamic masonry grid layout based on card height"
           >
-            Card Grid
+            <LayoutGrid size={12} />
+            <span>Masonry Grid</span>
           </button>
+
+          {viewMode === 'cards' && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                background: 'var(--bg-secondary)',
+                borderRadius: 4,
+                padding: '2px 4px',
+                border: '1px solid var(--border-subtle)',
+                gap: 2,
+              }}
+            >
+              <span style={{ fontSize: 10, color: 'var(--text-muted)', padding: '0 3px' }}>Cols:</span>
+              {[2, 3, 4].map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => setCustomColumnCount(c)}
+                  style={{
+                    fontSize: 10,
+                    padding: '1px 5px',
+                    borderRadius: 3,
+                    border: 'none',
+                    background: activeColumnCount === c && customColumnCount === c ? 'var(--accent-primary)' : 'transparent',
+                    color: activeColumnCount === c && customColumnCount === c ? '#fff' : 'var(--text-secondary)',
+                    cursor: 'pointer',
+                    fontWeight: activeColumnCount === c && customColumnCount === c ? 700 : 400,
+                  }}
+                  title={`Force ${c} columns`}
+                >
+                  {c}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => setCustomColumnCount(null)}
+                style={{
+                  fontSize: 10,
+                  padding: '1px 5px',
+                  borderRadius: 3,
+                  border: 'none',
+                  background: customColumnCount === null ? 'var(--bg-card)' : 'transparent',
+                  color: customColumnCount === null ? 'var(--text-primary)' : 'var(--text-muted)',
+                  cursor: 'pointer',
+                  fontWeight: customColumnCount === null ? 700 : 400,
+                }}
+                title={`Auto (${autoColumnCount} cols on current screen)`}
+              >
+                Auto
+              </button>
+            </div>
+          )}
+
           <button
             className={`btn btn-sm ${viewMode === 'compare' ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => setViewMode('compare')}
@@ -1725,6 +2053,18 @@ ${nov.mathematical_formulation || 'N/A'}
             <Columns3 size={12} />
             <span>Multi-Model Compare</span>
           </button>
+
+          {noveltyResults.length > 0 && (
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={handleClearAllProposals}
+              style={{ fontSize: 11.5, padding: '4px 8px', color: '#ef4444' }}
+              title="Clear all proposals from deck"
+            >
+              <Trash2 size={12} />
+            </button>
+          )}
         </div>
       </div>
 
@@ -1748,24 +2088,43 @@ ${nov.mathematical_formulation || 'N/A'}
           <p style={{ fontSize: 12.5, maxWidth: 440, margin: '0 auto 16px', lineHeight: 1.45 }}>
             Select your target LLM engines and click <strong>Fire Synthesis</strong> to formulate publication-grade hypotheses from this workspace.
           </p>
-          <button
-            className="btn btn-primary"
-            onClick={handleSynthesize}
-            style={{
-              background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-              border: 'none',
-              fontWeight: 600,
-              padding: '8px 20px',
-            }}
-          >
-            <Sparkles size={14} style={{ marginRight: 6 }} />
-            Fire Novelty Synthesis
-          </button>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+            <button
+              className="btn btn-primary"
+              onClick={handleSynthesize}
+              style={{
+                background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                border: 'none',
+                fontWeight: 600,
+                padding: '8px 20px',
+              }}
+            >
+              <Sparkles size={14} style={{ marginRight: 6 }} />
+              Fire Novelty Synthesis
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => setShowCustomModal(true)}
+              style={{
+                fontWeight: 600,
+                padding: '8px 18px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                borderColor: 'rgba(139, 92, 246, 0.4)',
+                color: '#8b5cf6',
+              }}
+            >
+              <Plus size={14} />
+              Add Your Own Novelty
+            </button>
+          </div>
         </div>
       ) : viewMode === 'compare' ? (
         /* Side-by-side Multi-Model Comparison View */
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16, alignItems: 'flex-start' }}>
-          {['gemini', 'groq', 'ollama', 'openrouter', 'nvidia'].map((eng) => {
+          {['gemini', 'groq', 'ollama', 'openrouter', 'nvidia', ...(comparisonByEngine.custom?.length > 0 ? ['custom'] : [])].map((eng) => {
             const list = comparisonByEngine[eng] || [];
             return (
               <div key={eng} className="card" style={{ padding: 16 }}>
@@ -1776,6 +2135,7 @@ ${nov.mathematical_formulation || 'N/A'}
                     {eng === 'ollama' && <Server size={15} style={{ color: '#10b981' }} />}
                     {eng === 'openrouter' && <Layers size={15} style={{ color: '#8b5cf6' }} />}
                     {eng === 'nvidia' && <Cpu size={15} style={{ color: '#76b900' }} />}
+                    {eng === 'custom' && <Sparkles size={15} style={{ color: '#a855f7' }} />}
                     <strong style={{ fontSize: 13.5, textTransform: 'capitalize' }}>
                       {eng === 'gemini'
                         ? 'Google Gemini'
@@ -1785,7 +2145,9 @@ ${nov.mathematical_formulation || 'N/A'}
                         ? 'Local Ollama'
                         : eng === 'openrouter'
                         ? 'OpenRouter'
-                        : 'NVIDIA NIM'}
+                        : eng === 'nvidia'
+                        ? 'NVIDIA NIM'
+                        : 'User Authored'}
                     </strong>
                   </div>
                   <span className="badge badge-neutral" style={{ fontSize: 10.5 }}>
@@ -1809,6 +2171,7 @@ ${nov.mathematical_formulation || 'N/A'}
                         copied={copiedId === nov.id}
                         onAddToGraph={handleAddToGraph}
                         onCopy={handleCopyProposal}
+                        onDelete={handleDeleteProposal}
                         onDiscussInChat={(n) => {
                           navigate('/chat', {
                             state: {
@@ -1825,26 +2188,40 @@ ${nov.mathematical_formulation || 'N/A'}
           })}
         </div>
       ) : (
-        /* Regular Card Grid View */
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(420px, 1fr))', gap: 16 }}>
-          {filteredNovelties.map((nov) => (
-            <NoveltyCardItem
-              key={nov.id}
-              novelty={nov}
-              isDark={isDark}
-              isAdded={addedCandidateIds.has(nov.id)}
-              isAdding={addingId === nov.id}
-              copied={copiedId === nov.id}
-              onAddToGraph={handleAddToGraph}
-              onCopy={handleCopyProposal}
-              onDiscussInChat={(n) => {
-                navigate('/chat', {
-                  state: {
-                    initialPrompt: `Let's discuss and formalize this research novelty proposal:\n\n**${n.title}**\n\n- **Mechanism**: ${n.mechanism}\n- **Engine**: ${n.engine}\n- **Testable Hypothesis**: ${n.testable_hypothesis}\n- **Mathematical Formulation**: ${n.mathematical_formulation || 'N/A'}\n- **Target Benchmarks**: ${(n.target_datasets || []).join(', ') || 'N/A'}\n\nPlease help me construct an experimental verification protocol.`,
-                  },
-                });
+        /* Dynamic Masonry Multi-Column View based on natural card height */
+        <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+          {masonryColumns.map((colItems, colIdx) => (
+            <div
+              key={colIdx}
+              style={{
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 16,
+                minWidth: 0,
               }}
-            />
+            >
+              {colItems.map((nov) => (
+                <NoveltyCardItem
+                  key={nov.id}
+                  novelty={nov}
+                  isDark={isDark}
+                  isAdded={addedCandidateIds.has(nov.id)}
+                  isAdding={addingId === nov.id}
+                  copied={copiedId === nov.id}
+                  onAddToGraph={handleAddToGraph}
+                  onCopy={handleCopyProposal}
+                  onDelete={handleDeleteProposal}
+                  onDiscussInChat={(n) => {
+                    navigate('/chat', {
+                      state: {
+                        initialPrompt: `Let's discuss and formalize this research novelty proposal:\n\n**${n.title}**\n\n- **Mechanism**: ${n.mechanism}\n- **Engine**: ${n.engine}\n- **Testable Hypothesis**: ${n.testable_hypothesis}\n- **Mathematical Formulation**: ${n.mathematical_formulation || 'N/A'}\n- **Target Benchmarks**: ${(n.target_datasets || []).join(', ') || 'N/A'}\n\nPlease help me construct an experimental verification protocol.`,
+                      },
+                    });
+                  }}
+                />
+              ))}
+            </div>
           ))}
         </div>
       )}
@@ -1887,12 +2264,295 @@ ${nov.mathematical_formulation || 'N/A'}
           )}
         </div>
       </div>
+
+      {/* 9. Custom Novelty Creation Modal */}
+      {showCustomModal && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.75)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: 20,
+          }}
+          onClick={() => setShowCustomModal(false)}
+        >
+          <div
+            className="card"
+            style={{
+              maxWidth: 720,
+              width: '100%',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              padding: '24px 28px',
+              borderRadius: 'var(--radius-md, 10px)',
+              background: 'var(--bg-card)',
+              border: '1px solid var(--border-default)',
+              boxShadow: '0 20px 40px rgba(0,0,0,0.5)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                  <Sparkles size={18} style={{ color: '#a855f7' }} />
+                  <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
+                    Add Custom Research Novelty
+                  </h2>
+                </div>
+                <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', margin: 0 }}>
+                  Author your own scientific hypothesis. It will be stored in SQLite, anchored to literature, and injected into the Knowledge Graph.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCustomModal(false)}
+                style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 4 }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateCustomNovelty}>
+              {/* Proposal Title */}
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', display: 'block', marginBottom: 4 }}>
+                  Proposal Title *
+                </label>
+                <input
+                  type="text"
+                  className="input"
+                  required
+                  placeholder="e.g. Spectral Attention-Gated State Space ODE for Non-Stationary Series"
+                  value={customForm.title}
+                  onChange={(e) => setCustomForm({ ...customForm, title: e.target.value })}
+                  style={{ width: '100%', fontSize: 13, padding: '8px 12px' }}
+                />
+              </div>
+
+              {/* Mechanism & Confidence */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', display: 'block', marginBottom: 4 }}>
+                    Innovation Mechanism
+                  </label>
+                  <select
+                    className="input"
+                    value={customForm.mechanism}
+                    onChange={(e) => setCustomForm({ ...customForm, mechanism: e.target.value })}
+                    style={{ width: '100%', fontSize: 12, padding: '7px 10px' }}
+                  >
+                    <option value="recombination">⚡ Orthogonal Recombination</option>
+                    <option value="contradiction_resolution">⚖️ Tension Resolution</option>
+                    <option value="limitation_inversion">🛡️ Limitation Inversion</option>
+                    <option value="gap_realization">🎯 Gap Realization</option>
+                    <option value="empirical_extension">🔬 Empirical Extension</option>
+                    <option value="custom">✨ Novel Paradigm</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', display: 'block', marginBottom: 4 }}>
+                    Confidence Score: {Math.round(customForm.confidence_score * 100)}%
+                  </label>
+                  <input
+                    type="range"
+                    min="0.5"
+                    max="1.0"
+                    step="0.05"
+                    value={customForm.confidence_score}
+                    onChange={(e) => setCustomForm({ ...customForm, confidence_score: parseFloat(e.target.value) })}
+                    style={{ width: '100%', marginTop: 8 }}
+                  />
+                </div>
+              </div>
+
+              {/* 1-Sentence Pitch */}
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', display: 'block', marginBottom: 4 }}>
+                  1-Sentence Elevator Pitch
+                </label>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="e.g. Unifies continuous-time neural ODE dynamics with frequency-domain attenuation gates."
+                  value={customForm.pitch}
+                  onChange={(e) => setCustomForm({ ...customForm, pitch: e.target.value })}
+                  style={{ width: '100%', fontSize: 12, padding: '7px 10px' }}
+                />
+              </div>
+
+              {/* Core Novelty Statement */}
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', display: 'block', marginBottom: 4 }}>
+                  Core Scientific Novelty & Architecture
+                </label>
+                <textarea
+                  className="input"
+                  rows={2}
+                  placeholder="Describe the architectural innovation, inductive biases, or algorithmic differentiation..."
+                  value={customForm.novelty_statement}
+                  onChange={(e) => setCustomForm({ ...customForm, novelty_statement: e.target.value })}
+                  style={{ width: '100%', fontSize: 12, padding: '7px 10px', resize: 'vertical' }}
+                />
+              </div>
+
+              {/* Mathematical Formulation */}
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', display: 'block', marginBottom: 4 }}>
+                  Mathematical Formulation / Core Equations
+                </label>
+                <textarea
+                  className="input"
+                  rows={2}
+                  placeholder="e.g. \hat{y} = r_L y_L + r_T y_T + r_{LLM} y_{LLM} or r_{c,h} = \operatorname{softmax}(Wz_{c,h}+b)"
+                  value={customForm.mathematical_formulation}
+                  onChange={(e) => setCustomForm({ ...customForm, mathematical_formulation: e.target.value })}
+                  style={{ width: '100%', fontSize: 11.5, fontFamily: 'monospace', padding: '7px 10px', resize: 'vertical' }}
+                />
+                {customForm.mathematical_formulation.trim() && (
+                  <div style={{ marginTop: 6, padding: '6px 10px', background: 'var(--bg-card)', borderRadius: 4, border: '1px solid var(--border-subtle)', overflowX: 'auto' }}>
+                    <div style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600, marginBottom: 2 }}>Dynamic LaTeX Preview:</div>
+                    <MathRenderer equation={customForm.mathematical_formulation} block style={{ margin: 0, padding: 0 }} />
+                  </div>
+                )}
+              </div>
+
+              {/* Testable Hypothesis */}
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', display: 'block', marginBottom: 4 }}>
+                  Testable Scientific Hypothesis
+                </label>
+                <textarea
+                  className="input"
+                  rows={2}
+                  placeholder="e.g. Spectral gating will reduce long-horizon forecasting MSE by >= 12% across non-stationary benchmarks."
+                  value={customForm.testable_hypothesis}
+                  onChange={(e) => setCustomForm({ ...customForm, testable_hypothesis: e.target.value })}
+                  style={{ width: '100%', fontSize: 12, padding: '7px 10px', resize: 'vertical' }}
+                />
+              </div>
+
+              {/* Datasets & Baselines */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', display: 'block', marginBottom: 4 }}>
+                    Target Datasets (comma-separated)
+                  </label>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="e.g. ETTh1, Weather, Electricity"
+                    value={customForm.target_datasets}
+                    onChange={(e) => setCustomForm({ ...customForm, target_datasets: e.target.value })}
+                    style={{ width: '100%', fontSize: 12, padding: '7px 10px' }}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', display: 'block', marginBottom: 4 }}>
+                    Baselines to Beat (comma-separated)
+                  </label>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="e.g. PatchTST, TimesNet, DLinear"
+                    value={customForm.baselines_to_beat}
+                    onChange={(e) => setCustomForm({ ...customForm, baselines_to_beat: e.target.value })}
+                    style={{ width: '100%', fontSize: 12, padding: '7px 10px' }}
+                  />
+                </div>
+              </div>
+
+              {/* Grounding Foundation Papers */}
+              {availablePapers.length > 0 && (
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', display: 'block', marginBottom: 6 }}>
+                    Anchor to Staged Literature Papers (Click to link):
+                  </label>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 110, overflowY: 'auto', padding: 4 }}>
+                    {availablePapers.map((p) => {
+                      const isSelected = customForm.grounded_paper_ids.includes(p.id);
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => {
+                            const cur = customForm.grounded_paper_ids;
+                            const next = isSelected ? cur.filter((id) => id !== p.id) : [...cur, p.id];
+                            setCustomForm({ ...customForm, grounded_paper_ids: next });
+                          }}
+                          style={{
+                            fontSize: 11,
+                            padding: '3px 8px',
+                            borderRadius: 4,
+                            border: isSelected ? '1px solid #10b981' : '1px solid var(--border-subtle)',
+                            background: isSelected ? 'rgba(16, 185, 129, 0.12)' : 'var(--bg-secondary)',
+                            color: isSelected ? '#10b981' : 'var(--text-secondary)',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 4,
+                            maxWidth: 240,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {isSelected ? <Check size={11} /> : <Plus size={11} />}
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.title}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setShowCustomModal(false)}
+                  disabled={creatingCustom}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary btn-sm"
+                  disabled={creatingCustom || !customForm.title.trim()}
+                  style={{
+                    background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
+                    borderColor: '#7c3aed',
+                    fontWeight: 600,
+                    padding: '6px 16px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                >
+                  {creatingCustom ? <RotateCw size={13} className="animate-spin" /> : <Sparkles size={13} />}
+                  <span>Save & Add to Deck</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 // Subcomponent: Individual Novelty Card Item
-function NoveltyCardItem({ novelty, isDark, isAdded, isAdding, copied, onAddToGraph, onCopy, onDiscussInChat }) {
+function NoveltyCardItem({ novelty, isDark, isAdded, isAdding, copied, onAddToGraph, onCopy, onDiscussInChat, onDelete }) {
   const mech = (novelty.mechanism || '').toLowerCase();
   let badgeBg = 'var(--bg-secondary)';
   let badgeColor = 'var(--accent-primary)';
@@ -1934,6 +2594,9 @@ function NoveltyCardItem({ novelty, isDark, isAdded, isAdding, copied, onAddToGr
   } else if (eng === 'heuristic') {
     engineBadge = 'Heuristic';
     engineColor = '#64748b';
+  } else if (eng === 'custom' || novelty.is_custom) {
+    engineBadge = '✨ User Authored';
+    engineColor = '#a855f7';
   }
 
   return (
@@ -2023,13 +2686,18 @@ function NoveltyCardItem({ novelty, isDark, isAdded, isAdding, copied, onAddToGr
             background: isDark ? '#09090b' : '#f1f5f9',
             border: '1px solid var(--border-subtle)',
             borderRadius: 4,
-            fontFamily: 'monospace',
-            fontSize: 11,
-            color: 'var(--text-secondary)',
             overflowX: 'auto',
+            fontSize: 11.5,
+            lineHeight: 1.55,
+            color: 'var(--text-secondary)',
           }}
         >
-          {novelty.mathematical_formulation}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 }}>
+            <span style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', fontWeight: 700 }}>
+              Formulation
+            </span>
+          </div>
+          <MathRenderer equation={novelty.mathematical_formulation} block style={{ margin: 0, padding: 0 }} />
         </div>
       )}
 
@@ -2117,6 +2785,18 @@ function NoveltyCardItem({ novelty, isDark, isAdded, isAdding, copied, onAddToGr
         >
           {copied ? <Check size={12} style={{ color: '#10b981' }} /> : <Copy size={12} />}
         </button>
+
+        {onDelete && (
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={(e) => onDelete(novelty.id, e)}
+            style={{ fontSize: 11, padding: '4px 8px', display: 'flex', alignItems: 'center', color: '#ef4444' }}
+            title="Delete this proposal from deck"
+          >
+            <Trash2 size={12} />
+          </button>
+        )}
       </div>
     </div>
   );

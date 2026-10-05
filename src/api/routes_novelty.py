@@ -60,6 +60,23 @@ class AddNoveltyToGraphRequest(BaseModel):
     novelty: Dict[str, Any]
 
 
+class CreateCustomNoveltyRequest(BaseModel):
+    workspace_id: Optional[str] = None
+    topic: Optional[str] = "Literature Synthesis"
+    title: str = Field(..., min_length=2, description="Proposal Title")
+    mechanism: Optional[str] = Field(default="recombination")
+    pitch: Optional[str] = Field(default="")
+    novelty_statement: Optional[str] = Field(default="")
+    mathematical_formulation: Optional[str] = Field(default="")
+    testable_hypothesis: Optional[str] = Field(default="")
+    target_datasets: List[str] = Field(default_factory=list)
+    baselines_to_beat: List[str] = Field(default_factory=list)
+    expected_metrics: List[str] = Field(default_factory=list)
+    grounded_paper_ids: List[str] = Field(default_factory=list)
+    grounded_paper_titles: List[str] = Field(default_factory=list)
+    confidence_score: Optional[float] = Field(default=0.88, ge=0.0, le=1.0)
+
+
 @router.get("/providers-status")
 async def get_providers_status():
     """Returns live connection and configuration status for Gemini, Groq, and Ollama with SQLite DB persistence indicators."""
@@ -388,3 +405,71 @@ async def add_novelty_to_graph_endpoint(req: AddNoveltyToGraphRequest):
     except Exception as e:
         logger.error("[NoveltyAPI] Failed to add candidate node to graph: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/proposals")
+async def get_saved_proposals_endpoint(
+    workspace_id: Optional[str] = None,
+    topic: Optional[str] = None,
+    limit: int = 100,
+):
+    """
+    Retrieve all saved/cached novelty proposals from persistent SQLite storage.
+    Enables instant restoration upon page refresh or view switching.
+    """
+    try:
+        proposals = await _novelty_engine.get_saved_proposals(
+            workspace_id=workspace_id or "global",
+            topic=topic,
+            limit=limit,
+        )
+        return {"proposals": proposals, "count": len(proposals)}
+    except Exception as e:
+        logger.error("[NoveltyAPI] Failed fetching saved proposals: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/custom")
+async def create_custom_proposal_endpoint(req: CreateCustomNoveltyRequest):
+    """
+    Allow users to author their own custom scientific novelty proposals.
+    Persists to SQLite and formats it as a first-class novelty card.
+    """
+    try:
+        proposal_dict = req.model_dump()
+        saved = await _novelty_engine.save_proposal(
+            proposal=proposal_dict,
+            workspace_id=req.workspace_id or "global",
+            topic=req.topic,
+            is_custom=True,
+        )
+        logger.info("✨ [NoveltyAPI] Created custom user novelty: '%s' (id=%s)", saved.get("title"), saved.get("id"))
+        return saved
+    except Exception as e:
+        logger.error("[NoveltyAPI] Failed creating custom proposal: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/proposals/{proposal_id}")
+async def delete_saved_proposal_endpoint(proposal_id: str):
+    """Delete a single saved or custom novelty proposal."""
+    try:
+        success = await _novelty_engine.delete_saved_proposal(proposal_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Proposal not found or could not be deleted")
+        return {"status": "deleted", "id": proposal_id}
+    except Exception as e:
+        logger.error("[NoveltyAPI] Failed deleting proposal '%s': %s", proposal_id, e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/proposals")
+async def clear_proposals_endpoint(workspace_id: Optional[str] = None):
+    """Clear all saved novelty proposals for a workspace or globally."""
+    try:
+        deleted_count = await _novelty_engine.clear_all_proposals(workspace_id=workspace_id)
+        return {"status": "cleared", "deleted_count": deleted_count}
+    except Exception as e:
+        logger.error("[NoveltyAPI] Failed clearing proposals: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+

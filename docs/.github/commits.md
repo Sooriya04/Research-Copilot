@@ -1316,4 +1316,46 @@ bundle compilation (`npm run build`).
   * Verified 100% pass rate (10/10 tests passing in `tests/test_novelty_routes.py` and `tests/test_settings_routes.py`).
   * Verified production frontend bundle rebuilt cleanly via Vite in `public_dist/`.
 
+<br />
+
+## Commit 38 (dev and main) : Persistent Novelties, Custom Novelty Authoring, Masonry Layout & KaTeX MathRenderer with Mixed-Text Spacing
+
+* **Novelty Persistence & SQLite Database Synchronization (`src/api/routes_novelty.py`, `src/graph/novelty_engine.py`, `frontend/src/views/NoveltyStudioView.jsx`)**:
+  * Resolved critical state loss where novelty proposals disappeared upon page refresh or navigation away from Novelty Studio.
+  * Created relational SQLite table `novelty_proposals` in `data/research_copilot.db` tracking `id`, `workspace_id`, `topic`, `engine`, `title`, `mechanism`, `testable_hypothesis`, `mathematical_formulation`, `target_datasets`, `baseline_methods`, `metrics`, `confidence`, and `source_type`.
+  * Deployed REST endpoints:
+    * `GET /api/v1/novelty/proposals`: Retrieves all cached and generated proposals with topic filtering.
+    * `POST /api/v1/novelty/custom`: Saves researcher-authored custom novelties directly to the database.
+    * `DELETE /api/v1/novelty/proposals/{id}`: Deletes a specific proposal by ID.
+    * `DELETE /api/v1/novelty/proposals`: Clears proposals for a workspace/topic.
+  * Implemented seamless two-way hydration in `NoveltyStudioView.jsx`: combines SQLite database queries with LocalStorage fallbacks on mount.
+
+* **Researcher Custom Novelty Creation Studio (`frontend/src/views/NoveltyStudioView.jsx`)**:
+  * Added an interactive **"Author Custom Novelty"** modal allowing researchers to define their own research directions, hypotheses, formulas, target benchmarks, and baseline comparisons.
+  * Added visual `✨ User Authored` badge, distinctive blue highlight styling, and full integration into the graph expansion drawer.
+
+* **Dynamic Multi-Column Masonry Grid Architecture (`frontend/src/views/NoveltyStudioView.jsx`)**:
+  * Replaced rigid CSS grid with a responsive greedy Masonry column distributor that calculates item heights and balances uneven proposal cards across columns.
+  * Added user-controllable column switcher (`[Cols: 2 | 3 | 4 | Auto]`) with responsive screen-width fallbacks.
+  * Resolved undefined reference bug (`ReferenceError: addedCandidateIds is not defined`) during candidate batch tracking.
+
+* **Dynamic KaTeX Mathematics Renderer (`frontend/src/components/common/MathRenderer.jsx`)**:
+  * Built a reusable `<MathRenderer equation={...} />` component using native KaTeX without static or hardcoded HTML.
+  * Fully supports both display block mode (`displayMode: true`) with horizontal overflow handling and inline mode (`inline={true}`).
+  * Preserves raw LaTeX strings in the DOM via `data-latex` and `title` attributes for citation fidelity and auditing.
+  * Added full support for complex mathematical notation: subscripts, superscripts, fractions, matrices, Greek letters, summations, integrals, vectors, `\mathbb{R}`, `\operatorname`, `\text`, etc.
+  * Integrated across `NoveltyStudioView.jsx`, `KnowledgeGraphView.jsx`, and added a live interactive LaTeX preview inside the custom novelty modal.
+
+* **Mixed Prose, Delimiter Parsing, and "LetXbe" Spacing Normalization (`frontend/src/components/common/MathRenderer.jsx`, `frontend/src/styles/styles.css`)**:
+  * Fixed red KaTeX parse error where mixed English prose and inline LaTeX equations (e.g. `Let $X \in \mathbb{R}^{L \times V}$ be...`) were mistakenly passed to KaTeX as a single equation.
+  * Built an intelligent delimiter tokenizer recognizing `$ ... $`, `$$ ... $$`, `\[ ... \]`, `\( ... \)`, and `\begin{...} ... \end{...}` environments, separating prose text from KaTeX math spans.
+  * Fixed word-collision bug ("LetXbe") where LaTeX math mode stripped whitespace between English words and math variables.
+  * Added boundary normalization (`normalizeMathBoundaries`) to automatically inject spaces when words touch delimiters (e.g. `Let$X` $\rightarrow$ `Let $X$`, `$X$be` $\rightarrow$ `$X$ be`).
+  * Styled `.katex-inline-wrapper` with punctuation-aware margins (`no-mr` when preceding commas/periods, `no-ml` for opening parens) for academic typography.
+
+* **Automated Verification & Build Status**:
+  * Verified 100% backend test pass rate (11/11 tests passing in `tests/test_novelty_routes.py` and `tests/test_settings_routes.py`).
+  * Verified production frontend bundle rebuilt cleanly via Vite (`npm run build`) in 7.58s.
+
+
 

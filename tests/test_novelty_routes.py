@@ -149,3 +149,43 @@ def test_save_and_remove_provider_key_sqlite(client):
     del_resp = client.delete("/api/v1/novelty/remove-provider-key/groq")
     assert del_resp.status_code == 200
     assert del_resp.json()["success"] is True
+
+
+def test_saved_proposals_persistence_and_custom_creation(client):
+    """Verify creating custom proposals, listing saved proposals, and deleting proposals."""
+    # 1. Create a custom proposal
+    custom_body = {
+        "title": "Quantum-Inspired Attentive Diffusion",
+        "mechanism": "recombination",
+        "pitch": "Recombines diffusion state space with quantum harmonic priors.",
+        "novelty_statement": "Novel continuous formulation with closed-form attention.",
+        "mathematical_formulation": "Psi(x) = exp(-x^2 / 2)",
+        "testable_hypothesis": "Reduces sampling steps by 4x.",
+        "target_datasets": ["ETT", "Weather"],
+        "baselines_to_beat": ["PatchTST"],
+        "expected_metrics": ["MSE"],
+        "confidence_score": 0.92,
+    }
+    create_resp = client.post("/api/v1/novelty/custom", json=custom_body)
+    assert create_resp.status_code == 200
+    created = create_resp.json()
+    assert created["title"] == "Quantum-Inspired Attentive Diffusion"
+    assert created["is_custom"] is True
+    assert "id" in created
+    p_id = created["id"]
+
+    # 2. Get saved proposals
+    list_resp = client.get("/api/v1/novelty/proposals")
+    assert list_resp.status_code == 200
+    props = list_resp.json()["proposals"]
+    assert any(p["id"] == p_id for p in props)
+
+    # 3. Delete proposal
+    del_p_resp = client.delete(f"/api/v1/novelty/proposals/{p_id}")
+    assert del_p_resp.status_code == 200
+    assert del_p_resp.json()["status"] == "deleted"
+
+    # 4. Verify gone
+    list_resp2 = client.get("/api/v1/novelty/proposals")
+    assert not any(p["id"] == p_id for p in list_resp2.json()["proposals"])
+

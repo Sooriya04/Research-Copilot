@@ -1553,6 +1553,21 @@ body {
   text-align: center;
 }
 
+.katex-inline-wrapper {
+  display: inline-block;
+  vertical-align: baseline;
+  margin: 0 0.22em;
+  padding: 0 1px;
+}
+
+.katex-inline-wrapper.no-mr {
+  margin-right: 0 !important;
+}
+
+.katex-inline-wrapper.no-ml {
+  margin-left: 0 !important;
+}
+
 /* --------------------------------------------------------------------------
    9. Research Chat Assistant Styling
    -------------------------------------------------------------------------- */
