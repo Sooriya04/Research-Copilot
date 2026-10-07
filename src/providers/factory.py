@@ -6,11 +6,15 @@ from src.providers.groq import GroqProvider
 
 def get_llm_provider(provider_name: str = "") -> BaseLLMProvider:
     """Factory to instantiate the configured LLM provider."""
-    name = (provider_name or settings.default_llm_provider).lower()
+    name = (provider_name or settings.default_llm_provider or "ollama").lower()
     if name == "ollama":
         return LocalOllamaProvider()
     elif name == "nvidia":
         return NvidiaProvider()
     elif name == "groq":
         return GroqProvider()
-    return OpenRouterProvider()
+    elif name == "openrouter":
+        if settings.openrouter_api_key:
+            return OpenRouterProvider()
+        return LocalOllamaProvider()
+    return LocalOllamaProvider()

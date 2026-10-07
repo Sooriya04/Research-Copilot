@@ -84,16 +84,26 @@ class LocalOllamaProvider(BaseLLMProvider):
             pass
         return ["phi4-mini", "llama3", "mistral", "qwen2.5", "deepseek-r1"]
 
+    def _resolve_model(self, model: Optional[str] = None) -> str:
+        """Resolve model name; map cloud model requests to local model default."""
+        if not model:
+            return self.default_model
+        cloud_prefixes = ("gemini", "gpt", "claude", "openrouter", "deepseek-ai", "meta-llama", "anthropic")
+        if any(model.lower().startswith(p) or f"/{p}" in model.lower() for p in cloud_prefixes):
+            return self.default_model
+        return model
+
     async def complete(
         self,
         messages: List[ChatMessage],
         model: Optional[str] = None,
         temperature: float = 0.7,
-        json_mode: bool = True,
+        json_mode: bool = False,
     ) -> str:
+        target_model = self._resolve_model(model)
         payload = {
-            "model": model or self.default_model,
-            "messages": [m.dict() for m in messages],
+            "model": target_model,
+            "messages": [m.dict() if hasattr(m, "dict") else dict(m) for m in messages],
             "stream": False,
             "options": {"temperature": temperature},
         }
@@ -111,9 +121,10 @@ class LocalOllamaProvider(BaseLLMProvider):
     async def stream_chat(
         self, messages: List[ChatMessage], model: Optional[str] = None, temperature: float = 0.7
     ) -> AsyncGenerator[str, None]:
+        target_model = self._resolve_model(model)
         payload = {
-            "model": model or self.default_model,
-            "messages": [m.dict() for m in messages],
+            "model": target_model,
+            "messages": [m.dict() if hasattr(m, "dict") else dict(m) for m in messages],
             "stream": True,
             "options": {"temperature": temperature},
         }

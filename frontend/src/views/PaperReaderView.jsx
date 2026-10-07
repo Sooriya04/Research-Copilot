@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import PaperReaderSidebar from '../components/reader/PaperReaderSidebar';
+import { EvidenceHighlightBanner } from '../components/reader/EvidenceDrawer';
 
 function extractArxivId(idStr) {
   if (!idStr) return null;
@@ -124,6 +125,15 @@ export default function PaperReaderView() {
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [copiedBibtex, setCopiedBibtex] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [activeHighlight, setActiveHighlight] = useState(null); // { page, section, quote, confidence, type }
+
+  const handleHighlightEvidence = (evidence) => {
+    if (!evidence) return;
+    setActiveHighlight(evidence);
+    if (evidence.page) {
+      setCurrentPage(Number(evidence.page) || 1);
+    }
+  };
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -775,6 +785,18 @@ export default function PaperReaderView() {
 
         {/* ── 3. Subtle Gray Reading Canvas with Clean White Document Surface ── */}
         <div className="reader-canvas">
+          {activeHighlight && (
+            <EvidenceHighlightBanner
+              highlight={activeHighlight}
+              onBackToAnswer={() => {
+                setSidebarOpen(true);
+                const el = document.querySelector('.reader-assistant-panel');
+                el?.scrollIntoView({ behavior: 'smooth' });
+              }}
+              onDismiss={() => setActiveHighlight(null)}
+            />
+          )}
+
           <div
             className="reader-document-sheet"
             style={{
@@ -881,7 +903,11 @@ export default function PaperReaderView() {
           paper={currentDoc}
           onClose={() => setSidebarOpen(false)}
           onJumpToPage={(p) => setCurrentPage(p)}
-          onClearContext={() => setCurrentDoc(null)}
+          onClearContext={() => {
+            setCurrentDoc(null);
+            setActiveHighlight(null);
+          }}
+          onHighlightEvidence={handleHighlightEvidence}
         />
       )}
     </div>

@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     crossref_base_url: str = "https://api.crossref.org"
     
     # LLM Provider Configuration
-    default_llm_provider: str = "openrouter"
+    default_llm_provider: str = "ollama"
     openrouter_api_key: Optional[str] = None
     openai_api_key: Optional[str] = None
     anthropic_api_key: Optional[str] = None

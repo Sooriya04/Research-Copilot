@@ -2683,8 +2683,9 @@ body.dark-theme .reader-center-panel {
   overflow-y: auto;
   overflow-x: auto;
   display: flex;
-  justify-content: center;
-  align-items: flex-start;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
   padding: 24px 20px 48px;
   background: #f1f5f9;
 }
@@ -3455,4 +3456,935 @@ body.dark-theme .copilot-composer-textarea {
   text-align: center;
   user-select: none;
 }
+
+/* ==========================================================================
+   TASK 3 — Evidence & Citation UX Design System
+   ========================================================================== */
+
+/* 1. Citation Chips */
+.citation-chip-wrapper {
+  position: relative;
+  display: inline-flex;
+  vertical-align: baseline;
+  margin: 0 2px;
+}
+
+.citation-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  font-family: var(--font-code, monospace);
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.22);
+  color: var(--accent-violet, #6366f1);
+  cursor: pointer;
+  transition: all 0.12s ease;
+  line-height: 1.35;
+  user-select: none;
+}
+
+.citation-chip:hover {
+  background: var(--accent-violet, #6366f1);
+  color: #ffffff;
+  border-color: var(--accent-violet, #6366f1);
+  transform: translateY(-0.5px);
+  box-shadow: 0 2px 4px rgba(99, 102, 241, 0.2);
+}
+
+.citation-chip-icon {
+  display: inline-flex;
+  align-items: center;
+}
+
+.citation-type-table {
+  background: rgba(16, 185, 129, 0.08);
+  border-color: rgba(16, 185, 129, 0.25);
+  color: #059669;
+}
+.citation-type-table:hover {
+  background: #059669;
+  border-color: #059669;
+  color: #ffffff;
+}
+
+.citation-type-figure {
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.25);
+  color: #d97706;
+}
+.citation-type-figure:hover {
+  background: #d97706;
+  border-color: #d97706;
+  color: #ffffff;
+}
+
+.citation-type-equation {
+  background: rgba(168, 85, 247, 0.08);
+  border-color: rgba(168, 85, 247, 0.25);
+  color: #9333ea;
+}
+.citation-type-equation:hover {
+  background: #9333ea;
+  border-color: #9333ea;
+  color: #ffffff;
+}
+
+.citation-type-reference {
+  background: rgba(59, 130, 246, 0.08);
+  border-color: rgba(59, 130, 246, 0.25);
+  color: #2563eb;
+}
+.citation-type-reference:hover {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+}
+
+/* 2. Lightweight Hover Popover Preview */
+.citation-hover-popover {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 240px;
+  background: var(--bg-card, #ffffff);
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  border-radius: 7px;
+  box-shadow: 0 10px 25px -4px rgba(0, 0, 0, 0.12), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  padding: 8px 10px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  animation: fadeInQuick 0.12s ease-out;
+}
+
+[data-theme='dark'] .citation-hover-popover,
+body.dark-theme .citation-hover-popover {
+  background: #18181b;
+  border-color: #27272a;
+}
+
+.citation-popover-header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary, #09090b);
+}
+
+[data-theme='dark'] .citation-popover-header,
+body.dark-theme .citation-popover-header {
+  color: #fafafa;
+}
+
+.citation-popover-type-icon {
+  color: var(--accent-violet, #6366f1);
+  display: inline-flex;
+}
+
+.citation-popover-location {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.citation-popover-quote {
+  font-family: 'Newsreader', 'Georgia', serif;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-secondary, #475569);
+  font-style: italic;
+  background: var(--bg-subtle, #f8fafc);
+  border-left: 2px solid var(--accent-violet, #6366f1);
+  padding: 4px 7px;
+  border-radius: 0 4px 4px 0;
+}
+
+[data-theme='dark'] .citation-popover-quote,
+body.dark-theme .citation-popover-quote {
+  background: #27272a;
+  color: #d4d4d8;
+}
+
+.citation-popover-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.citation-popover-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  background: var(--accent-violet, #6366f1);
+  color: #ffffff;
+  border: none;
+  cursor: pointer;
+  transition: opacity 0.12s ease;
+}
+
+.citation-popover-btn:hover {
+  opacity: 0.9;
+}
+
+.citation-popover-btn.secondary {
+  background: transparent;
+  color: var(--text-muted, #71717a);
+  border: 1px solid var(--border-subtle, #e2e8f0);
+}
+
+.citation-popover-btn.secondary:hover {
+  background: var(--bg-subtle, #f4f4f5);
+  color: var(--text-primary, #09090b);
+}
+
+/* 3. Evidence Inspection Modal */
+.evidence-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.4);
+  backdrop-filter: blur(2px);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.evidence-modal-card {
+  width: 100%;
+  max-width: 480px;
+  background: var(--bg-card, #ffffff);
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  border-radius: 10px;
+  box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  animation: fadeInQuick 0.12s ease-out;
+}
+
+[data-theme='dark'] .evidence-modal-card,
+body.dark-theme .evidence-modal-card {
+  background: #18181b;
+  border-color: #27272a;
+}
+
+.evidence-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border-subtle, #e2e8f0);
+  padding-bottom: 8px;
+}
+
+.evidence-modal-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.evidence-modal-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent-violet, #6366f1);
+}
+
+.evidence-modal-meta {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary, #09090b);
+}
+
+[data-theme='dark'] .evidence-modal-meta,
+body.dark-theme .evidence-modal-meta {
+  color: #fafafa;
+}
+
+.evidence-modal-close-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted, #71717a);
+  padding: 2px;
+  border-radius: 4px;
+}
+
+.evidence-modal-close-btn:hover {
+  background: var(--bg-subtle, #f4f4f5);
+  color: var(--text-primary, #09090b);
+}
+
+.evidence-confidence-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.evidence-confidence-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  border-radius: 4px;
+  padding: 2px 7px;
+}
+
+.evidence-confidence-tag.direct {
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  color: #059669;
+}
+
+.evidence-confidence-tag.inferred {
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  color: #2563eb;
+}
+
+.evidence-confidence-tag.unsupported {
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  color: #d97706;
+}
+
+.evidence-paper-passage-container {
+  background: #fdfbf7;
+  border: 1px solid #fed7aa;
+  border-left: 3px solid #f97316;
+  border-radius: 6px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+[data-theme='dark'] .evidence-paper-passage-container,
+body.dark-theme .evidence-paper-passage-container {
+  background: #1c1917;
+  border-color: #44403c;
+  border-left-color: #f97316;
+}
+
+.evidence-passage-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #c2410c;
+}
+
+[data-theme='dark'] .evidence-passage-label,
+body.dark-theme .evidence-passage-label {
+  color: #fb923c;
+}
+
+.evidence-passage-sublabel {
+  font-size: 9.5px;
+  font-weight: 500;
+  color: var(--text-muted, #78716c);
+}
+
+.evidence-passage-quote {
+  margin: 0;
+  font-family: 'Newsreader', 'Georgia', serif;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #292524;
+}
+
+[data-theme='dark'] .evidence-passage-quote,
+body.dark-theme .evidence-passage-quote {
+  color: #e7e5e4;
+}
+
+.evidence-modal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-top: 1px solid var(--border-subtle, #e2e8f0);
+  padding-top: 10px;
+}
+
+.evidence-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.evidence-action-btn.primary {
+  background: var(--accent-violet, #6366f1);
+  color: #ffffff;
+  border: none;
+}
+
+.evidence-action-btn.primary:hover {
+  background: #4f46e5;
+}
+
+.evidence-action-btn.secondary {
+  background: transparent;
+  color: var(--text-secondary, #3f3f46);
+  border: 1px solid var(--border-subtle, #e2e8f0);
+}
+
+.evidence-action-btn.secondary:hover {
+  background: var(--bg-subtle, #f4f4f5);
+  color: var(--text-primary, #09090b);
+}
+
+/* 4. Multi-Source Evidence Drawer */
+.evidence-drawer-overlay {
+  position: absolute;
+  inset: 0;
+  background: var(--bg-card, #ffffff);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: fadeInQuick 0.15s ease-out;
+}
+
+[data-theme='dark'] .evidence-drawer-overlay,
+body.dark-theme .evidence-drawer-overlay {
+  background: #18181b;
+}
+
+.evidence-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-subtle, #e2e8f0);
+  background: var(--bg-subtle, #f8fafc);
+  flex-shrink: 0;
+}
+
+.evidence-drawer-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.evidence-drawer-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--text-primary, #09090b);
+  margin: 0;
+}
+
+.evidence-drawer-count {
+  font-size: 11px;
+  color: var(--text-muted, #71717a);
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.18);
+  padding: 1px 6px;
+  border-radius: 10px;
+}
+
+.evidence-drawer-back-btn,
+.evidence-drawer-close-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  border-radius: 5px;
+  padding: 3px 7px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted, #71717a);
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.evidence-drawer-back-btn:hover,
+.evidence-drawer-close-btn:hover {
+  background: var(--bg-subtle, #f4f4f5);
+  color: var(--text-primary, #09090b);
+}
+
+.evidence-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.evidence-source-card {
+  background: var(--bg-card, #ffffff);
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: all 0.12s ease;
+}
+
+.evidence-source-card:hover {
+  border-color: var(--accent-violet, #6366f1);
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.08);
+}
+
+.evidence-source-card.active-highlight {
+  border-color: var(--accent-violet, #6366f1);
+  background: rgba(99, 102, 241, 0.02);
+}
+
+.evidence-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.evidence-card-location {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-primary, #09090b);
+}
+
+[data-theme='dark'] .evidence-card-location,
+body.dark-theme .evidence-card-location {
+  color: #fafafa;
+}
+
+.evidence-card-type-icon {
+  color: var(--accent-violet, #6366f1);
+}
+
+.evidence-confidence-pill {
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.evidence-confidence-pill.direct {
+  background: rgba(16, 185, 129, 0.08);
+  color: #059669;
+}
+
+.evidence-confidence-pill.inferred {
+  background: rgba(59, 130, 246, 0.08);
+  color: #2563eb;
+}
+
+.evidence-confidence-pill.unsupported {
+  background: rgba(245, 158, 11, 0.08);
+  color: #d97706;
+}
+
+.evidence-card-passage {
+  font-family: 'Newsreader', 'Georgia', serif;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary, #3f3f46);
+  font-style: italic;
+  background: var(--bg-subtle, #f8fafc);
+  border-left: 2px solid var(--accent-violet, #6366f1);
+  padding: 6px 9px;
+  border-radius: 0 5px 5px 0;
+}
+
+[data-theme='dark'] .evidence-card-passage,
+body.dark-theme .evidence-card-passage {
+  background: #27272a;
+  color: #d4d4d8;
+}
+
+.evidence-card-bottom {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.evidence-card-open-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: none;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-violet, #6366f1);
+  cursor: pointer;
+  padding: 2px 0;
+  transition: opacity 0.12s ease;
+}
+
+.evidence-card-open-btn:hover {
+  text-decoration: underline;
+}
+
+/* 5. Paper Reader Highlighting Banner */
+.evidence-reader-highlight-banner {
+  margin-bottom: 12px;
+  width: 100%;
+  max-width: 840px;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-left: 4px solid #f59e0b;
+  border-radius: 6px;
+  padding: 8px 14px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.1);
+  animation: fadeInQuick 0.15s ease-out;
+  box-sizing: border-box;
+}
+
+[data-theme='dark'] .evidence-reader-highlight-banner,
+body.dark-theme .evidence-reader-highlight-banner {
+  background: #1c1917;
+  border-color: #451a03;
+  border-left-color: #f59e0b;
+}
+
+.highlight-banner-left {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+
+.highlight-banner-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.highlight-pin-icon {
+  font-size: 12px;
+}
+
+.highlight-banner-title {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #92400e;
+}
+
+[data-theme='dark'] .highlight-banner-title,
+body.dark-theme .highlight-banner-title {
+  color: #fbbf24;
+}
+
+.highlight-confidence-tag {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.highlight-confidence-tag.direct {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.highlight-confidence-tag.inferred {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.highlight-banner-quote {
+  font-family: 'Newsreader', 'Georgia', serif;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #451a03;
+  font-style: italic;
+}
+
+[data-theme='dark'] .highlight-banner-quote,
+body.dark-theme .highlight-banner-quote {
+  color: #fef3c7;
+}
+
+.highlight-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.highlight-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  background: #f59e0b;
+  color: #ffffff;
+  border: none;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.highlight-back-btn:hover {
+  background: #d97706;
+}
+
+.highlight-dismiss-btn {
+  background: transparent;
+  border: none;
+  color: #92400e;
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 4px;
+}
+
+[data-theme='dark'] .highlight-dismiss-btn,
+body.dark-theme .highlight-dismiss-btn {
+  color: #fbbf24;
+}
+
+/* 6. Context from Page Block in User Message */
+.research-context-quote-block {
+  margin-bottom: 6px;
+  border-left: 2px solid var(--accent-violet, #6366f1);
+  padding: 4px 8px;
+  background: rgba(99, 102, 241, 0.05);
+  border-radius: 0 4px 4px 0;
+  font-size: 11px;
+}
+
+.research-context-quote-header {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent-violet, #6366f1);
+  margin-bottom: 2px;
+}
+
+.research-context-quote-text {
+  margin: 0;
+  font-family: 'Newsreader', 'Georgia', serif;
+  font-style: italic;
+  line-height: 1.4;
+  color: var(--text-secondary, #3f3f46);
+}
+
+[data-theme='dark'] .research-context-quote-text,
+body.dark-theme .research-context-quote-text {
+  color: #d4d4d8;
+}
+
+/* 7. Missing Evidence Box */
+.missing-evidence-box {
+  background: rgba(245, 158, 11, 0.06);
+  border: 1px solid rgba(245, 158, 11, 0.22);
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.missing-evidence-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.missing-evidence-text {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #b45309;
+}
+
+[data-theme='dark'] .missing-evidence-text,
+body.dark-theme .missing-evidence-text {
+  color: #f59e0b;
+}
+
+.missing-evidence-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.missing-evidence-web-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  border: 1px dashed rgba(245, 158, 11, 0.4);
+  border-radius: 5px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #b45309;
+  cursor: pointer;
+  width: fit-content;
+  transition: all 0.12s ease;
+}
+
+.missing-evidence-web-btn:hover {
+  background: rgba(245, 158, 11, 0.12);
+  border-style: solid;
+}
+
+.missing-evidence-hint {
+  font-size: 10px;
+  color: var(--text-muted, #71717a);
+  font-style: italic;
+}
+
+/* 8. Attach Excerpt Popover */
+.attach-excerpt-popover-card {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 10px;
+  width: 290px;
+  background: var(--bg-card, #ffffff);
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  border-radius: 8px;
+  box-shadow: 0 10px 25px -4px rgba(0, 0, 0, 0.15);
+  padding: 10px 12px;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: fadeInQuick 0.12s ease-out;
+}
+
+[data-theme='dark'] .attach-excerpt-popover-card,
+body.dark-theme .attach-excerpt-popover-card {
+  background: #18181b;
+  border-color: #27272a;
+}
+
+.attach-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border-subtle, #e2e8f0);
+  padding-bottom: 5px;
+}
+
+.attach-input,
+.attach-textarea {
+  background: var(--bg-subtle, #f4f4f5);
+  border: 1px solid var(--border-subtle, #e4e4e7);
+  border-radius: 5px;
+  padding: 4px 7px;
+  font-size: 11.5px;
+  color: var(--text-primary, #09090b);
+  outline: none;
+  font-family: inherit;
+}
+
+[data-theme='dark'] .attach-input,
+[data-theme='dark'] .attach-textarea,
+body.dark-theme .attach-input,
+body.dark-theme .attach-textarea {
+  background: #27272a;
+  border-color: #3f3f46;
+  color: #fafafa;
+}
+
+.attach-input:focus,
+.attach-textarea:focus {
+  border-color: var(--accent-violet, #6366f1);
+}
+
+.attach-submit-btn {
+  background: var(--accent-violet, #6366f1);
+  color: #ffffff;
+  border: none;
+  border-radius: 5px;
+  padding: 5px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.attach-submit-btn:hover:not(:disabled) {
+  background: #4f46e5;
+}
+
+.attach-submit-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Citations & Evidence Bar below Assistant message */
+.research-citations-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border-subtle, #e2e8f0);
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.research-citations-chips-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.inspect-sources-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--accent-violet, #6366f1);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: all 0.12s ease;
+}
+
+.inspect-sources-btn:hover {
+  background: rgba(99, 102, 241, 0.08);
+}
+
 

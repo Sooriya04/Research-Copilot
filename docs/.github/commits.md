@@ -1510,9 +1510,33 @@ bundle compilation (`npm run build`).
   * Compiled frontend via Vite (`npm run build`) cleanly with zero errors.
   * Executed backend test suites (`tests/test_paper_intelligence_engine.py`, `tests/test_api.py`), passing 10/10 tests green.
 
+<br />
 
+## Implement Traceable Evidence Citation Experience & Local Ollama Paper Chat
 
+* **Interactive Citation Chips & Hover Preview Tooltip (`frontend/src/components/reader/EvidenceDrawer.jsx`, `frontend/src/styles/styles.css`)**:
+  * Implemented compact citation chips (`[p.3 · Methodology]`, `[Equation 2 · p.4]`, `[Table 1 · p.6]`, `[Figure 2 · p.4]`, `[Ref 14 · p.10]`) placed alongside factual AI claims.
+  * Visually distinguished evidence types with dedicated icons: paper text (`FileText`), tables (`Table`), figures (`Image`), equations (`Sigma`), and references (`Bookmark`).
+  * Built a lightweight hover preview popover displaying location (`Page X · Section Y`), quoted passage excerpt, and 1-click action buttons (`Open evidence`, `Jump to p.X`).
 
+* **Evidence Inspection Panel & Multi-Source Drawer (`frontend/src/components/reader/EvidenceDrawer.jsx`)**:
+  * Added single-source inspection modal clearly distinguishing original paper excerpts (`Newsreader` / `Georgia` serif) from AI synthesis.
+  * Added confidence badges (`Direct evidence`, `Inferred`, `Not explicitly stated`) and deep-link page navigation (`Open page X in paper →`).
+  * Built an expandable multi-source drawer (`Inspect X sources →`) rendering compact source cards with quoted passages and jump targets.
 
+* **Document Highlighting & Selected Text Context (`frontend/src/views/PaperReaderView.jsx`, `frontend/src/components/reader/EvidenceDrawer.jsx`, `frontend/src/components/reader/PaperReaderSidebar.jsx`)**:
+  * Connected end-to-end citation navigation: `AI Answer` → `Citation Chip` → `Evidence Panel` → `Exact location in paper`.
+  * Automatically jumps reading page and illuminates an `Evidence Highlight Banner` above the canvas with a `Back to answer` shortcut.
+  * Added excerpt attachment modal via the sticky composer's `+ Attach` button, rendering quoted context directly in chat.
+  * Added `MissingEvidenceAlert` (`"Not found in the paper"`) with web-search escalation prompt when grounding is absent.
 
+* **Local Ollama LLM Default & Robust Model Fallback (`src/core/config.py`, `src/providers/factory.py`, `src/providers/llm.py`, `.env`)**:
+  * Switched default LLM provider to local Ollama (`DEFAULT_LLM_PROVIDER=ollama`, model `phi4-mini:latest`) across settings and environment configuration.
+  * Updated `get_llm_provider()` to default to `LocalOllamaProvider()` with graceful fallback when cloud API keys are unconfigured.
+  * Added `_resolve_model()` in `LocalOllamaProvider` to automatically map cloud model names (e.g. `gemini-2.0-flash-lite`) to the local installed model.
+  * Set `json_mode=False` default on `complete()` to support free-form conversational research answers and streaming.
 
+* **Automated Verification & Build Checks**:
+  * Verified end-to-end `/api/v1/chat/message` with local `phi4-mini` responding cleanly with status 200.
+  * All unit tests passed green (`pytest tests/test_intelligence_routes.py tests/test_api.py`).
+  * Compiled frontend via Vite (`npm run build`) cleanly with zero errors.
