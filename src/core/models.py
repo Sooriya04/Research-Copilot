@@ -164,3 +164,34 @@ class PaperChunkModel(Base):
     created_at = Column(DateTime, default=utcnow)
 
     paper = relationship("PaperDocumentModel", back_populates="chunks")
+
+
+class GraphEntityModel(Base):
+    """Knowledge graph entities extracted from research papers."""
+    __tablename__ = "graph_entities"
+
+    id = Column(String, primary_key=True, index=True)
+    paper_id = Column(String, ForeignKey("papers.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String, nullable=False, index=True)
+    entity_type = Column(String, nullable=False, index=True)
+    description = Column(Text, default="")
+    source_chunk_id = Column(String, nullable=True, index=True)
+    page_number = Column(Integer, default=1, index=True)
+    metadata_json = Column(JSON, default=dict)
+    created_at = Column(DateTime, default=utcnow)
+
+
+class GraphRelationshipModel(Base):
+    """Directed knowledge graph relationships linking paper research entities."""
+    __tablename__ = "graph_relationships"
+
+    id = Column(String, primary_key=True, index=True)
+    paper_id = Column(String, ForeignKey("papers.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_entity_id = Column(String, ForeignKey("graph_entities.id", ondelete="CASCADE"), nullable=False, index=True)
+    relationship = Column(String, nullable=False, index=True)
+    target_entity_id = Column(String, ForeignKey("graph_entities.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_chunk_id = Column(String, nullable=True, index=True)
+    page_number = Column(Integer, default=1, index=True)
+    confidence = Column(Float, default=1.0)
+    metadata_json = Column(JSON, default=dict)
+    created_at = Column(DateTime, default=utcnow)

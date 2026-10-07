@@ -21,11 +21,25 @@ STRICT GUIDELINES:
         question: str,
         retrieved_chunks: List[Dict[str, Any]],
         paper_title: Optional[str] = None,
+        graph_evidence: Optional[Dict[str, Any]] = None,
     ) -> List[ChatMessage]:
         title = paper_title or "Research Paper"
         sys_msg = self.SYSTEM_TEMPLATE.format(paper_title=title, page="X", section="Section")
 
-        if not retrieved_chunks:
+        graph_section = ""
+        if graph_evidence and graph_evidence.get("relationships"):
+            rel_lines = ["--- KNOWLEDGE GRAPH EVIDENCE ---"]
+            for r in graph_evidence["relationships"][:8]:
+                src = r.get("source_name") or r.get("source")
+                tgt = r.get("target_name") or r.get("target")
+                rel = r.get("label") or r.get("relationship")
+                page = r.get("page", 1)
+                c_id = r.get("source_chunk_id", "")
+                chunk_str = f", chunk {c_id}" if c_id else ""
+                rel_lines.append(f"• {src} --[{rel}]--> {tgt} [p.{page}{chunk_str}]")
+            graph_section = "\n".join(rel_lines) + "\n\n"
+
+        if not retrieved_chunks and not graph_section:
             user_prompt = (
                 f"Question: {question}\n\n"
                 f"[No relevant context was found in the paper for this query.]"
@@ -49,6 +63,7 @@ STRICT GUIDELINES:
         formatted_sources = "\n".join(context_blocks)
         user_prompt = (
             f"Question: {question}\n\n"
+            f"{graph_section}"
             f"Retrieved Paper Evidence:\n"
             f"{formatted_sources}\n\n"
             f"Please provide an accurate, grounded answer with [p.X] citations."

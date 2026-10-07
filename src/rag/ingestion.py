@@ -171,7 +171,32 @@ class PaperIngestionService:
         await db.commit()
         await db.refresh(paper_doc)
 
-        # 6. Invalidate active Redis cache to prevent stale context
+        # 6. Extract and persist paper knowledge graph (entities & relationships)
+        try:
+            from src.rag.graph_extractor import PaperGraphExtractor
+            from src.rag.graph_store import PaperGraphStore
+            extractor = PaperGraphExtractor()
+            store = PaperGraphStore()
+            raw_chunks_dict = [
+                {
+                    "chunk_id": c.chunk_id,
+                    "content": c.content,
+                    "page_number": c.page_number,
+                    "section": c.section,
+                }
+                for c in chunks
+            ]
+            entities, relationships = extractor.extract_graph(
+                paper_id=paper_id,
+                paper_title=title,
+                chunks=raw_chunks_dict,
+                authors=authors,
+            )
+            await store.save_graph(paper_id=paper_id, entities=entities, relationships=relationships, db=db)
+        except Exception as e:
+            logger.warning("[PaperIngestion] Graph extraction note: %s", e)
+
+        # 7. Invalidate active Redis cache to prevent stale context
         try:
             from src.rag.active_cache import get_active_paper_cache
             cache = get_active_paper_cache()

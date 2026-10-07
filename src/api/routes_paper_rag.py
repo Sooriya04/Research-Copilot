@@ -9,11 +9,13 @@ from src.core.models import PaperChunkModel, PaperDocumentModel
 from src.rag.active_cache import get_active_paper_cache
 from src.rag.ingestion import PaperIngestionService
 from src.rag.service import CitationItem, PaperRAGResponse, PaperRAGService
+from src.rag.graph_store import PaperGraphStore
 
 router = APIRouter(tags=["Paper RAG Pipeline"])
 rag_service = PaperRAGService()
 ingestion_service = PaperIngestionService()
 active_cache = get_active_paper_cache()
+graph_store = PaperGraphStore()
 
 
 class PaperChatRequest(BaseModel):
@@ -243,3 +245,14 @@ async def get_active_paper_endpoint():
     """Retrieve currently active paper ID."""
     active_id = await active_cache.get_active_paper_id()
     return {"active_paper_id": active_id}
+
+
+@router.get("/api/v1/papers/{paper_id}/graph")
+@router.get("/papers/{paper_id}/graph")
+async def get_paper_graph_endpoint(
+    paper_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Retrieve the paper knowledge graph (nodes and edges) for interactive visualization."""
+    return await graph_store.get_graph(paper_id, db)
+

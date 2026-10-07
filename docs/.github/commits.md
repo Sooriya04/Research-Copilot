@@ -1609,3 +1609,36 @@ bundle compilation (`npm run build`).
   * Added test suite verifying cache hit/miss, activation, invalidation, TTL expiration, fallback resilience, paper isolation, and latency reporting.
   * Executed 23/23 tests passing green across entire application test suite.
   * Built frontend bundle cleanly via Vite.
+
+<br />
+
+## Implement GraphRAG Knowledge Graph Extraction, Relational Retrieval & Query Routing
+
+* **Knowledge Graph Extraction Engine (`src/rag/graph_extractor.py`)**:
+  * Implemented `PaperGraphExtractor` extracting structured scientific entities (`paper`, `author`, `method`, `model`, `dataset`, `metric`, `baseline`, `task`, `equation`) and explicit relationships (`proposes`, `authored_by`, `evaluates_on`, `uses`, `measured_by`, `compares_against`).
+  * Enforced strict provenance tracking: every entity and edge preserves `source_chunk_id` and `page_number` for grounded attribution.
+  * Added `EntityNormalizer` with conservative canonical mapping to merge lexical variants (e.g., `GPT 4` -> `GPT-4`, `llama 3` -> `LLaMA-3`, `f1 score` -> `F1-Score`, `auc-pr` -> `AUC-PR`) without over-merging.
+
+* **SQLite Relational Graph Schema & Redis Caching (`src/core/models.py`, `src/rag/graph_store.py`)**:
+  * Added `GraphEntityModel` (`graph_entities` table) and `GraphRelationshipModel` (`graph_relationships` table) with foreign keys and compound indexes on `paper_id`.
+  * Implemented `PaperGraphStore` providing SQLite persistence as source of truth and fast in-memory Redis caching (`paper:{paper_id}:graph:entities`, `paper:{paper_id}:graph:relationships`).
+  * Automated graph generation and cache eviction during paper ingestion in `PaperIngestionService.ingest_document()`.
+
+* **Graph Retrieval & Subgraph Traversal (`src/rag/graph_retriever.py`)**:
+  * Built `PaperGraphRetriever` identifying seed entities and intent types (`datasets`, `metrics`, `models`, `methods`, `baselines`, `authors`) from user questions.
+  * Implemented multi-hop edge traversal to collect connected subgraphs and map edges back to supporting chunks and page numbers.
+  * Implemented resilient fallback: gracefully recovers when graph relationships are sparse by falling back to text chunks.
+
+* **Deterministic Query Routing & Graph-Aware Context Assembly (`src/rag/query_router.py`, `src/rag/context_builder.py`, `src/rag/service.py`)**:
+  * Built `QueryRouter` classifying user questions into `graph` (relational/structural queries), `hybrid` (factual/text queries), or `both`.
+  * Enhanced `ContextBuilder` to inject formatted knowledge graph facts into prompt context (`--- KNOWLEDGE GRAPH EVIDENCE ---`) alongside chunk sources.
+  * Orchestrated multi-source retrieval in `PaperRAGService.answer_question()`: merges graph evidence chunks with hybrid vector/BM25 chunks, deduplicating chunks and tracking `graph_latency_ms`.
+
+* **Graph Visualization Endpoints (`src/api/routes_paper_rag.py`)**:
+  * Added `GET /api/v1/papers/{paper_id}/graph` and `GET /papers/{paper_id}/graph` returning formatted nodes and edges (`{ "nodes": [...], "edges": [...] }`) for interactive UI graph rendering.
+
+* **Comprehensive Test Suite & Quality Verification (`tests/test_graph_rag.py`)**:
+  * Built 7 unit and integration tests verifying entity normalization, extraction provenance, SQLite & Redis persistence, subgraph traversal, query routing, citations in chat, and paper isolation.
+  * Verified 16/16 RAG and cache tests passing green across backend test suites.
+  * Verified frontend builds cleanly with Vite without regression.
+
