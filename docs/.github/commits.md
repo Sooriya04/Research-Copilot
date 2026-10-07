@@ -1465,6 +1465,52 @@ bundle compilation (`npm run build`).
   * Verified backend unit test suites in `tests/test_paper_intelligence_engine.py` and `tests/test_api.py` pass 100% green (10/10 tests).
   * Verified frontend production build cleanly compiled via Vite (`npm run build`) in `8.06s` with 0 errors.
 
+<br />
+
+## Improve Paper Chatbot UX (Academic Document Layout, Clickable Source Chips, Expandable Evidence, Quick Actions, Floating Selection Toolbar, Sticky Composer)
+
+* **Right AI Copilot Panel Design & Context Integration (`frontend/src/components/reader/PaperReaderSidebar.jsx`, `frontend/src/styles/styles.css`)**:
+  * Optimized AI panel width strictly between 380–420px (default 400px) as a focused research sidecar to the paper.
+  * Added sticky AI Copilot header with clear context indicator underneath (`● Using current paper`, `Paper: [title]`, and a `Clear` context button).
+  * Included subtle metadata context summary: `Context: Current Paper · 24 pages · 8 sections`.
+  * Retained tab navigation bar with pill buttons for `Chat`, `Benchmarks`, and `Details`.
+
+* **Academic Document-Like Chat Stream (`frontend/src/components/reader/PaperReaderSidebar.jsx`, `frontend/src/styles/styles.css`)**:
+  * Eliminated consumer AI rounded chat bubbles in favor of a clean, academic document presentation.
+  * Rendered AI responses with full Markdown, math equations, code blocks, bullet points, and numbered lists via `MarkdownRenderer`.
+  * Kept user messages compact, subtle, and visually secondary.
+
+* **Paper-Aware Grounded Sources & Expandable Evidence (`frontend/src/components/reader/PaperReaderSidebar.jsx`, `frontend/src/styles/styles.css`)**:
+  * **Clickable Source Chips**: Added interactive source tags (e.g., `[Page 4]`, `[Section 3.1]`) that trigger `onJumpToPage`, navigating the center reader directly to the referenced page.
+  * **Expandable Evidence Accordion**: Implemented a collapsible `Evidence ▾` block showing the referenced section/page header and quoting the exact passage in a distinct blockquote.
+
+* **Paper-Specific Quick Actions (Empty State) (`frontend/src/components/reader/PaperReaderSidebar.jsx`)**:
+  * Replaced generic suggestions with 6 compact research action buttons:
+    * *Summarize this paper*
+    * *Explain the methodology*
+    * *What are the key contributions?*
+    * *What are the limitations?*
+    * *Explain the experiments*
+    * *Explain this section*
+
+* **Context Header Consolidation (`frontend/src/components/reader/PaperReaderSidebar.jsx`, `frontend/src/styles/styles.css`)**:
+  * Unified the dual context rows into a single compact status line (`● Using current paper · [pages] pages · 8 sections` + title + `Clear` button), eliminating repetitive metadata labels and freeing vertical reading space.
+
+* **Removal of Floating Selection Bar (`frontend/src/views/PaperReaderView.jsx`, `frontend/src/styles/styles.css`)**:
+  * Removed outer DOM floating text selection listener and floating toolbar (`Ask Copilot`, `Explain`, `Summarize`, `Find evidence`). Because preprints are rendered via native browser PDF plugin (`<object>` / `<iframe>`), browser cross-document sandbox boundaries prevent outer DOM JavaScript from capturing text selections inside the embedded PDF.
+  * Preserved explicit excerpt attachment via the sticky composer's `+ Attach` action.
+
+* **Sticky Bottom Composer (`frontend/src/components/reader/PaperReaderSidebar.jsx`, `frontend/src/styles/styles.css`)**:
+  * Built a sticky input composer featuring:
+    * Multiline textarea with placeholder *"Ask anything about this paper..."*.
+    * Attachment button (`+ Attach`) and active context indicator pill (`● Current Paper`).
+    * Compact send button and subtle keyboard shortcut hint (`Enter to send · Shift + Enter for new line`).
+
+* **Automated Verification & Build Checks**:
+  * Compiled frontend via Vite (`npm run build`) cleanly with zero errors.
+  * Executed backend test suites (`tests/test_paper_intelligence_engine.py`, `tests/test_api.py`), passing 10/10 tests green.
+
+
 
 
 

@@ -880,6 +880,8 @@ export default function PaperReaderView() {
         <PaperReaderSidebar
           paper={currentDoc}
           onClose={() => setSidebarOpen(false)}
+          onJumpToPage={(p) => setCurrentPage(p)}
+          onClearContext={() => setCurrentDoc(null)}
         />
       )}
     </div>
