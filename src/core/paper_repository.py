@@ -1,5 +1,6 @@
-from typing import Optional
-from sqlalchemy import delete, select
+import re
+from typing import Any, Dict, List, Optional, Tuple
+from sqlalchemy import delete, select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from src.core.canonical_models import (
@@ -263,4 +264,171 @@ class PaperRepository:
             benchmarks=benchmarks,
             code_repositories=code_repositories,
             summary=summary
+        )
+
+    @staticmethod
+    async def get_benchmarks_and_repos(
+        db: AsyncSession,
+        arxiv_id: Optional[str] = None,
+        doi: Optional[str] = None,
+        paper_id: Optional[str] = None,
+    ) -> Optional[Tuple[List[BenchmarkEvidence], List[CodeRepository]]]:
+        """Fetch cached benchmarks and repositories from SQLite by arXiv ID (e.g. 2310.06625), DOI, or paper ID."""
+        if not arxiv_id and not doi and not paper_id:
+            return None
+
+        clean_arxiv = arxiv_id.strip() if arxiv_id else None
+        if clean_arxiv:
+            ar_match = re.search(r"(\d{4}\.\d{4,5})", clean_arxiv)
+            if ar_match:
+                clean_arxiv = ar_match.group(1)
+            elif clean_arxiv.lower().startswith("arxiv:"):
+                clean_arxiv = clean_arxiv[6:].strip()
+        clean_doi = doi.strip() if doi else None
+        clean_pid = paper_id.strip() if paper_id else None
+
+        stmt = (
+            select(NormalizedPaperModel)
+            .options(
+                selectinload(NormalizedPaperModel.benchmarks),
+                selectinload(NormalizedPaperModel.code_repositories),
+            )
+        )
+
+        conditions = []
+        if clean_arxiv:
+            conditions.extend([
+                NormalizedPaperModel.arxiv_id == clean_arxiv,
+                NormalizedPaperModel.canonical_id == clean_arxiv,
+                NormalizedPaperModel.canonical_id == f"arxiv:{clean_arxiv}",
+            ])
+        if clean_doi:
+            conditions.extend([
+                NormalizedPaperModel.doi == clean_doi,
+                NormalizedPaperModel.canonical_id == clean_doi,
+                NormalizedPaperModel.canonical_id == f"doi:{clean_doi}",
+            ])
+        if clean_pid:
+            conditions.append(NormalizedPaperModel.canonical_id == clean_pid)
+
+        if conditions:
+            stmt = stmt.where(or_(*conditions))
+
+        result = await db.execute(stmt)
+        record = result.scalars().first()
+        if not record:
+            return None
+
+        if not record.benchmarks and not record.code_repositories:
+            return None
+
+        benchmarks = [
+            BenchmarkEvidence(
+                source=b.source,
+                task=b.task,
+                dataset=b.dataset,
+                metric=b.metric,
+                value=b.value,
+                model=b.model,
+                split=b.split,
+                paper_title=record.title,
+                repository_url=b.repository_url,
+            )
+            for b in (record.benchmarks or [])
+        ]
+        repositories = [
+            CodeRepository(
+                url=r.url,
+                is_official=r.is_official,
+                framework=r.framework,
+                stars=r.stars,
+                license=r.license,
+            )
+            for r in (record.code_repositories or [])
+        ]
+        return benchmarks, repositories
+
+    @staticmethod
+    async def save_benchmarks_and_repos(
+        db: AsyncSession,
+        benchmarks: List[BenchmarkEvidence],
+        repositories: List[CodeRepository],
+        arxiv_id: Optional[str] = None,
+        doi: Optional[str] = None,
+        paper_id: Optional[str] = None,
+        title: Optional[str] = None,
+    ) -> None:
+        """Upsert benchmarks and repositories into SQLite keyed by arXiv ID (e.g. 2310.06625) or DOI."""
+        clean_arxiv = arxiv_id.strip() if arxiv_id else None
+        if clean_arxiv:
+            ar_match = re.search(r"(\d{4}\.\d{4,5})", clean_arxiv)
+            if ar_match:
+                clean_arxiv = ar_match.group(1)
+            elif clean_arxiv.lower().startswith("arxiv:"):
+                clean_arxiv = clean_arxiv[6:].strip()
+        clean_doi = doi.strip() if doi else None
+
+        canonical_key = clean_arxiv or clean_doi or paper_id or "unknown-paper"
+
+        # Check existing paper record
+        stmt = select(NormalizedPaperModel).where(
+            (NormalizedPaperModel.canonical_id == canonical_key)
+            | (NormalizedPaperModel.arxiv_id == (clean_arxiv or ""))
+            | (NormalizedPaperModel.doi == (clean_doi or ""))
+        )
+        result = await db.execute(stmt)
+        paper_rec = result.scalars().first()
+
+        if not paper_rec:
+            paper_rec = NormalizedPaperModel(
+                canonical_id=canonical_key,
+                arxiv_id=clean_arxiv,
+                doi=clean_doi,
+                title=title or canonical_key,
+            )
+            db.add(paper_rec)
+            await db.flush()
+        else:
+            if clean_arxiv and not paper_rec.arxiv_id:
+                paper_rec.arxiv_id = clean_arxiv
+            if clean_doi and not paper_rec.doi:
+                paper_rec.doi = clean_doi
+            if title and (not paper_rec.title or paper_rec.title == paper_rec.canonical_id):
+                paper_rec.title = title
+
+        # Replace existing child records
+        await db.execute(delete(BenchmarkModel).where(BenchmarkModel.paper_id == paper_rec.canonical_id))
+        await db.execute(delete(CodeRepositoryModel).where(CodeRepositoryModel.paper_id == paper_rec.canonical_id))
+
+        for b in benchmarks:
+            db.add(BenchmarkModel(
+                paper_id=paper_rec.canonical_id,
+                source=b.source or "paperswithcode",
+                task=b.task,
+                dataset=b.dataset,
+                metric=b.metric,
+                value=b.value,
+                model=b.model,
+                split=b.split or "test",
+                repository_url=b.repository_url,
+            ))
+
+        for r in repositories:
+            db.add(CodeRepositoryModel(
+                paper_id=paper_rec.canonical_id,
+                url=r.url,
+                is_official=r.is_official,
+                framework=r.framework,
+                stars=r.stars,
+                license=r.license,
+            ))
+
+        await db.commit()
+        logger.info(
+            "[PaperRepository] Persisted %d benchmarks and %d repos to SQLite for '%s' (arxiv: %s, doi: %s)",
+            len(benchmarks),
+            len(repositories),
+            paper_rec.canonical_id,
+            clean_arxiv,
+            clean_doi,
         )

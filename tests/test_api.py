@@ -64,3 +64,48 @@ async def test_workbench_workspaces_crud():
         assert del_resp.json()["status"] == "deleted"
 
 
+@pytest.mark.asyncio
+async def test_graph_benchmarks_sqlite_caching():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Pre-seed through repository or test cache hit
+        from src.core.database import get_db_session
+        from src.core.paper_repository import PaperRepository
+        from src.core.canonical_models import BenchmarkEvidence, CodeRepository
+
+        async with get_db_session() as db:
+            await PaperRepository.save_benchmarks_and_repos(
+                db=db,
+                benchmarks=[
+                    BenchmarkEvidence(
+                        source="paperswithcode",
+                        task="Time Series Forecasting",
+                        dataset="Weather",
+                        metric="MSE",
+                        value="0.174",
+                        model="iTransformer",
+                    )
+                ],
+                repositories=[
+                    CodeRepository(
+                        url="https://github.com/thuml/iTransformer",
+                        is_official=True,
+                        framework="pytorch",
+                    )
+                ],
+                arxiv_id="2310.06625",
+                title="iTransformer",
+            )
+
+        resp = await client.get("/api/v1/graph/benchmarks", params={"arxiv_id": "2310.06625"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["cached"] is True
+        assert data["source"] == "sqlite"
+        assert data["arxiv_id"] == "2310.06625"
+        assert len(data["benchmarks"]) == 1
+        assert data["benchmarks"][0]["dataset"] == "Weather"
+        assert len(data["repositories"]) == 1
+
+
+

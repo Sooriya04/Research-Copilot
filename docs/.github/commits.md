@@ -1394,5 +1394,39 @@ bundle compilation (`npm run build`).
   * Verified frontend production build cleanly compiled via Vite (`npm run build`) in `6.77s` with 0 errors.
   * Verified backend test suite passed with 100% green status across novelty, litgraph, graph engines, and settings routes.
 
+<br />
+
+## Native PDF Reader with Research Copilot Drawer, SQLite Benchmark Caching by arXiv ID and DOI, and Clean Navigation
+
+* **Complete Removal of PDF-to-Markdown Pipeline & Disk Extraction (`src/engines/pdf_markdown_engine.py`, `src/api/routes_paper_intelligence.py`, `src/api/app.py`, `frontend/vite.config.js`)**:
+  * Permanently deleted `src/engines/pdf_markdown_engine.py` and `tests/test_pdf_markdown_anara.py`, completely eliminating heavy PyMuPDF4LLM conversions that previously blocked requests for 40+ seconds.
+  * Removed the `dump_extract/` filesystem directory, deleted `/dump_extract` static file endpoints from `src/api/app.py`, and removed its Vite proxy configuration.
+  * Refactored `/api/v1/paper/import-url` and `/api/v1/paper/upload` in `src/api/routes_paper_intelligence.py` into lightweight, sub-second resolvers that extract metadata in memory and immediately return the direct PDF URL for native browser viewing.
+
+* **Restored Paper Copilot & Benchmarks Side Drawer (`frontend/src/components/reader/PaperReaderSidebar.jsx`, `frontend/src/views/PaperReaderView.jsx`, `frontend/src/views/LibraryReaderView.jsx`)**:
+  * Re-introduced the research assistant side drawer alongside the native browser PDF reader without any markdown conversion dependencies:
+    * **Chat (Ask AI Copilot)**: Conversational assistant grounded on the current paper's title, abstract, and workspace context, complete with 1-click prompt shortcuts.
+    * **Benchmarks & Code**: Queries `/api/v1/graph/benchmarks` to render official GitHub repositories (with star counts, frameworks, and badges) and empirical benchmark evaluations (tasks, metrics, datasets, SOTA values).
+    * **Details**: Full abstract, authors, publication metadata, external links, and 1-click BibTeX copy.
+  * Added a header toggle button (`Copilot & Benchmarks` / `Hide Copilot`) to show or hide the drawer on demand across both `PaperReaderView` and `LibraryReaderView`.
+
+* **SQLite Benchmark & Repository Storage by arXiv ID and DOI (`src/core/paper_repository.py`, `src/api/routes_graph.py`, `frontend/src/components/reader/PaperReaderSidebar.jsx`)**:
+  * Implemented `PaperRepository.get_benchmarks_and_repos` and `PaperRepository.save_benchmarks_and_repos` for persistent storage of empirical research evidence in SQLite.
+  * Extracted and normalized canonical arXiv IDs via regex pattern `(\d{4}\.\d{4,5})` (e.g. `2310.06625`), stripping version suffixes and URI prefixes, while also supporting digital object identifiers (DOIs).
+  * Automatically creates or links to `NormalizedPaperModel`, persisting `BenchmarkModel` records (source, task, dataset, metric, value, model, split) and `CodeRepositoryModel` records (url, official status, framework, stars, license).
+  * Updated `GET /api/v1/graph/benchmarks` to query SQLite cache first, immediately returning stored benchmarks and repository lists (`"cached": true, "source": "sqlite"`). On a cache miss, fetches live data from Papers With Code / Hugging Face and caches into SQLite.
+  * Synchronized `PaperReaderSidebar.jsx` `BenchmarksTab` to extract clean arXiv IDs (e.g. `2310.06625`) and DOIs and pass them as query params.
+
+* **Sidebar Streamlining & Clutter Removal (`frontend/src/components/layout/Sidebar.jsx`)**:
+  * Removed the middle section containing the active workspace card and recent papers list.
+  * Removed the shortcut numbers (`1`, `2`, `3`) from sidebar navigation items for a clean, uncluttered interface.
+
+* **Automated Verification & Unit Tests (`tests/test_paper_repository.py`, `tests/test_api.py`)**:
+  * Added `test_benchmark_persistence_by_arxiv_id` in `tests/test_paper_repository.py` to verify saving and querying benchmarks using clean `2310.06625` and prefixed `arxiv:2310.06625v1` identifiers.
+  * Added `test_graph_benchmarks_sqlite_caching` in `tests/test_api.py` validating the `/api/v1/graph/benchmarks` route and SQLite cache hit flow.
+  * Verified frontend Vite build cleanly compiled (`npm run build`) in 8.83s with 0 errors.
+  * Verified backend test suites passed 100% green across all 11 unit tests.
+
+
 
 

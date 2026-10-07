@@ -1,3 +1,5 @@
+import logging
+import re
 import uuid
 from typing import Any, Dict, List, Optional, Union
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -6,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.canonical_models import PaperSummarizeRequest
 from src.core.database import get_db
+from src.core.paper_repository import PaperRepository
 from src.core.models import GraphRunModel, SessionModel
 from src.core.schemas import GraphRunRequest, GraphRunResponse, PaperIntelligence, ResearchGraphState
 from src.engines.paper_enricher import PaperEnricher
@@ -20,6 +23,7 @@ from src.graph.synthesizer import GraphSynthesizer
 from src.graph.novelty_engine import GraphNoveltyEngine
 
 router = APIRouter(prefix="/api/v1/graph", tags=["Research Loop & Graph Engine"])
+logger = logging.getLogger(__name__)
 
 # Shared graph store & gap engine
 graph_store = ResearchGraphStore()
@@ -681,24 +685,91 @@ def _get_pwc():
 
 @router.get("/benchmarks", summary="Get benchmark results & code repos for a paper")
 async def get_paper_benchmarks(
-    arxiv_id: Optional[str] = Query(None, description="arXiv ID, e.g. 2408.06195"),
-    title: Optional[str] = Query(None, description="Paper title (fallback if no arXiv ID)"),
+    arxiv_id: Optional[str] = Query(None, description="arXiv ID, e.g. 2310.06625"),
+    doi: Optional[str] = Query(None, description="Paper DOI, e.g. 10.1145/..."),
+    paper_id: Optional[str] = Query(None, description="Paper canonical ID"),
+    title: Optional[str] = Query(None, description="Paper title (fallback if no ID)"),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Fetches benchmark evaluation tables and linked code repos from Papers With Code."""
-    if not arxiv_id and not title:
-        raise HTTPException(status_code=400, detail="Provide arxiv_id or title.")
+    """Fetches benchmark evaluation tables and linked code repos, cached/persisted in SQLite by arXiv ID (e.g. 2310.06625) or DOI."""
+    if not arxiv_id and not doi and not paper_id and not title:
+        raise HTTPException(status_code=400, detail="Provide arxiv_id, doi, paper_id, or title.")
+
+    # Normalize arxiv_id to canonical format e.g. 2310.06625
+    clean_arxiv = None
+    if arxiv_id:
+        ar_match = re.search(r"(\d{4}\.\d{4,5})", arxiv_id)
+        if ar_match:
+            clean_arxiv = ar_match.group(1)
+        else:
+            clean_arxiv = arxiv_id.strip()
+            if clean_arxiv.lower().startswith("arxiv:"):
+                clean_arxiv = clean_arxiv[6:].strip()
+    elif paper_id:
+        ar_match = re.search(r"(\d{4}\.\d{4,5})", paper_id)
+        if ar_match:
+            clean_arxiv = ar_match.group(1)
+
+    clean_doi = doi.strip() if doi else None
+
+    # 1. Query cached benchmarks & repos from SQLite
+    try:
+        cached = await PaperRepository.get_benchmarks_and_repos(
+            db,
+            arxiv_id=clean_arxiv,
+            doi=clean_doi,
+            paper_id=paper_id or clean_arxiv or clean_doi,
+        )
+        if cached is not None:
+            cached_benchmarks, cached_repos = cached
+            return {
+                "arxiv_id": clean_arxiv or arxiv_id,
+                "doi": clean_doi,
+                "paper_id": paper_id,
+                "title": title,
+                "benchmark_count": len(cached_benchmarks),
+                "repo_count": len(cached_repos),
+                "benchmarks": [b.model_dump() for b in cached_benchmarks],
+                "repositories": [r.model_dump() for r in cached_repos],
+                "cached": True,
+                "source": "sqlite",
+            }
+    except Exception as exc:
+        logger.warning("[Benchmarks] SQLite read error: %s", exc)
+
+    # 2. Fetch live from Papers With Code
     pwc = _get_pwc()
+    query_arxiv = clean_arxiv or arxiv_id
     benchmarks, repos = await asyncio.gather(
-        pwc.get_paper_benchmarks(arxiv_id=arxiv_id, title=title),
-        pwc.get_code_repositories(arxiv_id=arxiv_id, title=title),
+        pwc.get_paper_benchmarks(arxiv_id=query_arxiv, title=title),
+        pwc.get_code_repositories(arxiv_id=query_arxiv, title=title),
     )
+
+    # 3. Save into SQLite keyed by clean arXiv ID (e.g. 2310.06625) or DOI
+    try:
+        await PaperRepository.save_benchmarks_and_repos(
+            db=db,
+            benchmarks=benchmarks,
+            repositories=repos,
+            arxiv_id=clean_arxiv,
+            doi=clean_doi,
+            paper_id=clean_arxiv or clean_doi or paper_id,
+            title=title,
+        )
+    except Exception as exc:
+        logger.warning("[Benchmarks] Failed to save benchmarks to SQLite: %s", exc)
+
     return {
-        "arxiv_id": arxiv_id,
+        "arxiv_id": clean_arxiv or arxiv_id,
+        "doi": clean_doi,
+        "paper_id": paper_id,
         "title": title,
         "benchmark_count": len(benchmarks),
         "repo_count": len(repos),
         "benchmarks": [b.model_dump() for b in benchmarks],
         "repositories": [r.model_dump() for r in repos],
+        "cached": False,
+        "source": "paperswithcode",
     }
 
 

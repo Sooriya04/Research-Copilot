@@ -16,10 +16,6 @@ export default defineConfig({
         target: 'http://localhost:8000',
         changeOrigin: true,
       },
-      '/dump_extract': {
-        target: 'http://localhost:8000',
-        changeOrigin: true,
-      },
     },
   },
   build: {

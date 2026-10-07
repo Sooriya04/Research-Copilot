@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -13,12 +13,6 @@ import {
   Settings,
   Lightbulb,
   PanelLeftClose,
-  PanelLeftOpen,
-  Clock,
-  Layers,
-  ChevronRight,
-  Plus,
-  ExternalLink,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 
@@ -27,47 +21,11 @@ export default function Sidebar() {
   const navigate = useNavigate();
   const {
     systemConnected,
-    activeWorkspace,
-    openWorkspaceModal,
-    setActiveReaderPaper,
     sidebarCollapsed,
     toggleSidebar,
     mobileSidebarOpen,
     setMobileSidebarOpen,
   } = useApp();
-
-  // Load recently viewed or library papers from localStorage
-  const [recentPapers, setRecentPapers] = useState([]);
-
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem('rc_user_library_papers_v2');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setRecentPapers(parsed.slice(0, 4));
-          return;
-        }
-      }
-      // Fallback: active reader paper
-      const activeP = localStorage.getItem('rc_active_reader_paper');
-      if (activeP) {
-        const parsed = JSON.parse(activeP);
-        if (parsed?.title) {
-          setRecentPapers([parsed]);
-        }
-      }
-    } catch {
-      setRecentPapers([]);
-    }
-  }, [location.pathname]);
-
-  const handleOpenPaper = (paper) => {
-    if (!paper) return;
-    setActiveReaderPaper(paper);
-    if (mobileSidebarOpen) setMobileSidebarOpen(false);
-    navigate('/pdf-inspector');
-  };
 
   const isWorkspaceRoute = [
     '/workspaces',
@@ -145,7 +103,6 @@ export default function Sidebar() {
             <LayoutDashboard size={15} />
             <span>Overview</span>
           </div>
-          <span className="nav-shortcut">1</span>
         </NavLink>
 
         {/* 2. Workspace & Tools Tree */}
@@ -160,7 +117,6 @@ export default function Sidebar() {
               <FolderKanban size={15} />
               <span>Workspaces</span>
             </div>
-            <span className="nav-shortcut">2</span>
           </NavLink>
 
           {/* Sub-tree: Shown when expanded and on a workspace route */}
@@ -256,98 +212,7 @@ export default function Sidebar() {
             <Library size={15} />
             <span>Library</span>
           </div>
-          <span className="nav-shortcut">3</span>
         </NavLink>
-
-        {/* ── Middle Section (Active Workspace + Recent Papers) ── */}
-        {!sidebarCollapsed && (
-          <div className="sidebar-middle-section">
-            {/* Active Workspace Card */}
-            <div className="sidebar-workspace-card">
-              <div className="sidebar-ws-header">
-                <span className="sidebar-section-label">ACTIVE WORKSPACE</span>
-                <button
-                  type="button"
-                  className="sidebar-ws-switch-btn"
-                  onClick={openWorkspaceModal}
-                  title="Switch workspace"
-                >
-                  Switch
-                </button>
-              </div>
-              <div
-                className="sidebar-ws-body"
-                onClick={openWorkspaceModal}
-                title="Click to switch or manage workspace"
-              >
-                <div className="sidebar-ws-icon">
-                  <Layers size={13} style={{ color: activeWorkspace ? 'var(--accent-primary)' : 'var(--text-muted)' }} />
-                </div>
-                <div className="sidebar-ws-details">
-                  <span className="sidebar-ws-title">
-                    {activeWorkspace ? activeWorkspace.title : 'Global Workspace'}
-                  </span>
-                  <span className="sidebar-ws-meta">
-                    {activeWorkspace?.papers?.length != null
-                      ? `${activeWorkspace.papers.length} ${activeWorkspace.papers.length === 1 ? 'paper' : 'papers'}`
-                      : 'All literature'}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Recent Papers List */}
-            <div className="sidebar-recent-papers">
-              <div className="sidebar-section-header">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                  <Clock size={11} style={{ color: 'var(--text-muted)' }} />
-                  <span className="sidebar-section-label">RECENT PAPERS</span>
-                </div>
-                <NavLink
-                  to="/library"
-                  className="sidebar-section-link"
-                  onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
-                >
-                  View all
-                </NavLink>
-              </div>
-
-              {recentPapers.length > 0 ? (
-                <div className="sidebar-recent-list">
-                  {recentPapers.map((p, idx) => (
-                    <div
-                      key={p.id || idx}
-                      className="sidebar-recent-item"
-                      onClick={() => handleOpenPaper(p)}
-                      title={p.title || 'View in Reader'}
-                    >
-                      <FileText size={12} className="sidebar-recent-icon" />
-                      <div className="sidebar-recent-info">
-                        <span className="sidebar-recent-title">
-                          {p.title || 'Untitled Paper'}
-                        </span>
-                        {p.year && <span className="sidebar-recent-year">{p.year}</span>}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="sidebar-empty-recent">
-                  <p style={{ margin: 0, fontSize: 11.5, color: 'var(--text-muted)' }}>
-                    No papers viewed yet.
-                  </p>
-                  <NavLink
-                    to="/search"
-                    className="sidebar-quick-action-link"
-                    onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
-                  >
-                    <Plus size={11} /> Search & Import
-                  </NavLink>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
       </nav>
 
       {/* ── Sidebar Footer ── */}

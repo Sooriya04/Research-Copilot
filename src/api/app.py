@@ -76,46 +76,8 @@ def create_app() -> FastAPI:
     app.include_router(settings_router)
     app.include_router(novelty_router)
 
-    # Static Assets for Extracted Markdown & Images
-    project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-    dump_dir = os.path.join(project_root, "dump_extract")
-    os.makedirs(dump_dir, exist_ok=True)
-    images_dir = os.path.join(dump_dir, "images")
-    os.makedirs(images_dir, exist_ok=True)
-    os.makedirs(os.path.join(dump_dir, "markdown"), exist_ok=True)
-
-    @app.get("/dump_extract/images/{image_name:path}", tags=["Images"])
-    async def get_extracted_image_endpoint(image_name: str):
-        """Serve extracted images with intelligent filename-matching fallback."""
-        direct_path = os.path.join(images_dir, image_name)
-        if os.path.isfile(direct_path):
-            return FileResponse(direct_path)
-
-        clean_target = os.path.basename(image_name)
-        all_files = os.listdir(images_dir) if os.path.exists(images_dir) else []
-        for fn in all_files:
-            if fn.lower() == clean_target.lower():
-                return FileResponse(os.path.join(images_dir, fn))
-
-        import re
-        suffix_m = re.search(r"(\d{4}-\d{2}\.[a-zA-Z]+|p\d+-\d+\.[a-zA-Z]+)$", clean_target)
-        if suffix_m:
-            suffix = suffix_m.group(1)
-            for fn in all_files:
-                if fn.endswith(suffix):
-                    return FileResponse(os.path.join(images_dir, fn))
-
-        if clean_target.startswith("-"):
-            for fn in all_files:
-                if fn.endswith(clean_target):
-                    return FileResponse(os.path.join(images_dir, fn))
-
-        from fastapi import HTTPException
-        raise HTTPException(status_code=404, detail="Image not found")
-
-    app.mount("/dump_extract", StaticFiles(directory=dump_dir), name="dump_extract")
-
     # Static Assets & React SPA Frontend Serving
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
     dist_dir = os.path.join(project_root, "public_dist")
     assets_dir = os.path.join(dist_dir, "assets")
 
@@ -124,7 +86,7 @@ def create_app() -> FastAPI:
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa_frontend(full_path: str, request: Request):
-        if full_path.startswith("api/") or full_path.startswith("dump_extract/"):
+        if full_path.startswith("api/"):
             return None
         dist_index = os.path.join(dist_dir, "index.html")
         if os.path.exists(dist_index):

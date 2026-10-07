@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BookOpen, ArrowLeft, ExternalLink, Download, Loader2, FileText } from 'lucide-react';
+import { BookOpen, ArrowLeft, ExternalLink, Download, Loader2, FileText, MessageSquare } from 'lucide-react';
+import PaperReaderSidebar from '../components/reader/PaperReaderSidebar';
 
 function buildProxyPdfUrl(url) {
   if (!url) return null;
@@ -35,6 +36,7 @@ export default function LibraryReaderView() {
   });
 
   const [resolvingPdf, setResolvingPdf] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   // Background OA resolution if PDF url is missing
   useEffect(() => {
@@ -184,67 +186,89 @@ export default function LibraryReaderView() {
               </a>
             </>
           )}
+
+          <button
+            type="button"
+            className={`btn ${sidebarOpen ? 'btn-primary' : 'btn-secondary'} btn-sm`}
+            onClick={() => setSidebarOpen((v) => !v)}
+            style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12 }}
+            title={sidebarOpen ? 'Hide Copilot Drawer' : 'Open Copilot Drawer'}
+          >
+            <MessageSquare size={13} />
+            <span>{sidebarOpen ? 'Hide Copilot' : 'Copilot & Benchmarks'}</span>
+          </button>
         </div>
       </div>
 
-      {/* Default Native Browser PDF Viewer */}
-      <div style={{ flex: 1, position: 'relative', width: '100%', height: '100%', overflow: 'hidden', background: 'var(--bg-subtle)' }}>
-        {resolvingPdf ? (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: 28, textAlign: 'center' }}>
-            <Loader2 size={32} className="animate-spin" style={{ color: 'var(--accent-primary)', marginBottom: 14 }} />
-            <h4 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>
-              Locating Open-Access PDF Stream
-            </h4>
-            <p style={{ fontSize: 12.5, color: 'var(--text-muted)', maxWidth: 360, lineHeight: 1.5 }}>
-              Connecting to arXiv and academic repositories to stream publication...
-            </p>
-          </div>
-        ) : pdfUrl ? (
-          <object
-            data={pdfUrl}
-            type="application/pdf"
-            style={{ width: '100%', height: '100%', border: 'none', display: 'block' }}
-          >
-            <iframe
-              title="PDF Preview Frame"
-              src={pdfUrl}
-              style={{ width: '100%', height: '100%', border: 'none' }}
+      {/* Main Container: Native PDF on Left, Copilot Sidebar on Right */}
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
+        {/* Default Native Browser PDF Viewer */}
+        <div style={{ flex: 1, position: 'relative', width: '100%', height: '100%', overflow: 'hidden', background: 'var(--bg-subtle)' }}>
+          {resolvingPdf ? (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: 28, textAlign: 'center' }}>
+              <Loader2 size={32} className="animate-spin" style={{ color: 'var(--accent-primary)', marginBottom: 14 }} />
+              <h4 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>
+                Locating Open-Access PDF Stream
+              </h4>
+              <p style={{ fontSize: 12.5, color: 'var(--text-muted)', maxWidth: 360, lineHeight: 1.5 }}>
+                Connecting to arXiv and academic repositories to stream publication...
+              </p>
+            </div>
+          ) : pdfUrl ? (
+            <object
+              data={pdfUrl}
+              type="application/pdf"
+              style={{ width: '100%', height: '100%', border: 'none', display: 'block' }}
             >
-              <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-secondary)' }}>
-                <p style={{ marginBottom: 12 }}>Unable to display inline PDF in this browser frame.</p>
+              <iframe
+                title="PDF Preview Frame"
+                src={pdfUrl}
+                style={{ width: '100%', height: '100%', border: 'none' }}
+              >
+                <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-secondary)' }}>
+                  <p style={{ marginBottom: 12 }}>Unable to display inline PDF in this browser frame.</p>
+                  <a
+                    href={pdfUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn btn-primary btn-sm"
+                  >
+                    Open PDF Directly
+                  </a>
+                </div>
+              </iframe>
+            </object>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: 24, textAlign: 'center' }}>
+              <FileText size={44} style={{ color: 'var(--text-muted)', marginBottom: 12 }} />
+              <h4 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>
+                Direct PDF Stream Unavailable
+              </h4>
+              <p style={{ fontSize: 12.5, color: 'var(--text-muted)', maxWidth: 400, lineHeight: 1.5, marginBottom: 16 }}>
+                Could not resolve an open-access PDF stream for this publication.
+              </p>
+              {paper.url && (
                 <a
-                  href={pdfUrl}
+                  href={paper.url}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="btn btn-primary btn-sm"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
                 >
-                  Open PDF Directly
+                  <ExternalLink size={13} />
+                  <span>Open Source Publication</span>
                 </a>
-              </div>
-            </iframe>
-          </object>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: 24, textAlign: 'center' }}>
-            <FileText size={44} style={{ color: 'var(--text-muted)', marginBottom: 12 }} />
-            <h4 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>
-              Direct PDF Stream Unavailable
-            </h4>
-            <p style={{ fontSize: 12.5, color: 'var(--text-muted)', maxWidth: 400, lineHeight: 1.5, marginBottom: 16 }}>
-              Could not resolve an open-access PDF stream for this publication.
-            </p>
-            {paper.url && (
-              <a
-                href={paper.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn btn-primary btn-sm"
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-              >
-                <ExternalLink size={13} />
-                <span>Open Source Publication</span>
-              </a>
-            )}
-          </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Right Copilot Drawer (Chat, Benchmarks & Details) */}
+        {sidebarOpen && (
+          <PaperReaderSidebar
+            paper={paper}
+            onClose={() => setSidebarOpen(false)}
+          />
         )}
       </div>
     </section>

@@ -9,11 +9,9 @@ from src.core.logger import logger
 from src.engines.canonical_resolver import CanonicalPaperResolver
 from src.engines.paper_intelligence_engine import PaperIntelligenceEngine
 from src.engines.pdf_extractor import PDFExtractor
-from src.engines.pdf_markdown_engine import PDFMarkdownEngine
 
 router = APIRouter(prefix="/api/v1/paper", tags=["Paper Intelligence Engine"])
 engine = PaperIntelligenceEngine()
-markdown_engine = PDFMarkdownEngine()
 pdf_extractor = PDFExtractor()
 resolver = CanonicalPaperResolver()
 
@@ -43,7 +41,7 @@ async def upload_pdf_endpoint(
     file: UploadFile = File(...),
     topic: Optional[str] = Form(None),
 ):
-    """Upload a research PDF file and extract full publication-grade Markdown, embedded figures, and sections."""
+    """Upload a research PDF file for native browser viewing and research analysis."""
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only PDF files are supported.")
 
@@ -52,7 +50,25 @@ async def upload_pdf_endpoint(
         if len(content_bytes) < 100:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty or corrupted.")
 
-        parsed = markdown_engine.convert_pdf_to_markdown(content_bytes, filename=file.filename)
+        title = file.filename.replace(".pdf", "").replace("_", " ").title()
+        total_pages = 1
+        abstract = ""
+        try:
+            import pymupdf as fitz
+            doc = fitz.open(stream=content_bytes, filetype="pdf")
+            total_pages = len(doc)
+            meta_title = doc.metadata.get("title")
+            if meta_title and len(meta_title.strip()) > 3:
+                title = meta_title.strip()
+            if total_pages > 0:
+                p0 = doc[0].get_text("text")
+                if "Abstract" in p0:
+                    abs_match = re.search(r"Abstract[:\s\n]+([\s\S]{100,1200}?)(?=\n\s*(?:1\.?|I\.?|Introduction|Index Terms|Keywords))", p0, re.IGNORECASE)
+                    if abs_match:
+                        abstract = re.sub(r"\s+", " ", abs_match.group(1).strip())
+        except Exception as doc_err:
+            logger.warning("[PaperUpload] Fast metadata extraction note: %s", doc_err)
+
         clean_slug = re.sub(r"[^a-z0-9]+", "-", file.filename.lower())[:25]
         paper_id = f"upload-{clean_slug}"
 
@@ -60,23 +76,19 @@ async def upload_pdf_endpoint(
             "status": "success",
             "paper": {
                 "id": paper_id,
-                "title": parsed["title"],
-                "authors": parsed["authors"],
-                "affiliations": parsed.get("affiliations", []),
-                "year": parsed["year"],
-                "abstract": parsed["abstract"],
-                "markdown": parsed["markdown"],
-                "body_markdown": parsed.get("body_markdown", parsed["markdown"]),
-                "sections": parsed["sections"],
-                "figures": parsed["figures"],
-                "total_pages": parsed["total_pages"],
+                "title": title,
+                "authors": ["Uploaded File Author(s)"],
+                "affiliations": [],
+                "year": 2024,
+                "abstract": abstract,
+                "total_pages": total_pages,
                 "source": "Uploaded File",
                 "pdf_url": None,
             }
         }
     except Exception as e:
         logger.error("[PaperUpload] Upload failed: %s", e)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"PDF parsing error: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"PDF upload error: {e}")
 
 
 def extract_clean_arxiv_id(s: str) -> Optional[str]:
@@ -85,10 +97,7 @@ def extract_clean_arxiv_id(s: str) -> Optional[str]:
     raw = s.strip()
     if raw.startswith("import-"):
         raw = raw[len("import-"):]
-    # Replace hyphen with dot in arxiv ID format: 2409-15877 -> 2409.15877, 2609-15877 -> 2409.15877
     raw = re.sub(r"(\d{4})-(\d{4,5})", r"\1.\2", raw)
-    if "2609.15877" in raw:
-        raw = raw.replace("2609.15877", "2409.15877")
     match = re.search(r"(\d{4}\.\d{4,5}(?:v\d+)?|[a-z\-]+(?:\.[a-z]{2})?/\d{7})", raw, re.IGNORECASE)
     if match:
         return match.group(1)
@@ -97,50 +106,12 @@ def extract_clean_arxiv_id(s: str) -> Optional[str]:
 
 @router.post("/import-url")
 async def import_paper_from_url_endpoint(req: ImportPaperUrlRequest):
-    """Import research paper via arXiv ID (e.g. '2310.07240'), DOI (e.g. '10.1145/...'), or direct PDF URL, converting into full Markdown."""
+    """Import research paper via arXiv ID (e.g. '2310.07240'), DOI (e.g. '10.1145/...'), or direct PDF URL for native PDF reading."""
     target_ident = req.identifier.strip()
     if not target_ident:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Identifier cannot be empty.")
 
-    # 0. Check if local matching extracted markdown exists
-    target_lower = target_ident.lower()
-    if any(k in target_lower for k in ("ericsson", "2609", "2409", "agentic")):
-        import os
-        local_md_path = os.path.join("dump_extract", "markdown", "temp_ericsson.md")
-        if os.path.exists(local_md_path):
-            try:
-                with open(local_md_path, "r", encoding="utf-8") as f_md:
-                    md_text = f_md.read()
-                if len(md_text) > 500:
-                    body_md, secs = markdown_engine._extract_sections_and_body(md_text, "")
-                    return {
-                        "status": "success",
-                        "paper": {
-                            "id": "import-2409-15877",
-                            "title": "Using Agentic AI for contextualized and multifaceted code review at Ericsson",
-                            "authors": ["Muhammad Laiq", "Ricardo Britto", "Muhammad Usman", "Nishrith Saini", "Deepika Badampudi"],
-                            "affiliations": ["Blekinge Institute of Technology, Sweden", "Ericsson AB, Sweden"],
-                            "year": 2024,
-                            "abstract": "Conducting effective code reviews is increasingly challenging due to the growing complexity of software systems and the accelerated code generation by AI coding agents. LLM-based approaches for code reviews have shown promising results in identifying defects and improving code quality. However, existing approaches rarely consider project-specific contextualized knowledge, and few have been evaluated in industrial settings.",
-                            "markdown": md_text,
-                            "body_markdown": body_md,
-                            "sections": secs,
-                            "figures": [
-                                {"figure_id": "fig-1", "page": 6, "caption": "Fig. 1. Overview of the proposed framework", "url": "/dump_extract/images/temp_ericsson-0006-02.png"},
-                                {"figure_id": "fig-2", "page": 9, "caption": "Fig. 2. Code review orchestration workflow", "url": "/dump_extract/images/temp_ericsson-0009-02.png"},
-                            ],
-                            "total_pages": 18,
-                            "source": "arXiv",
-                            "pdf_url": "https://arxiv.org/pdf/2409.15877.pdf",
-                            "arxiv_id": "2409.15877",
-                            "url": "https://arxiv.org/abs/2409.15877",
-                        }
-                    }
-            except Exception as ex:
-                logger.warning("[PaperImport] Local markdown fallback exception: %s", ex)
-
     try:
-        pdf_bytes = None
         pdf_url = None
         title = target_ident
         authors = []
@@ -152,9 +123,7 @@ async def import_paper_from_url_endpoint(req: ImportPaperUrlRequest):
         if arxiv_id or "arxiv.org" in target_ident.lower():
             clean_id = arxiv_id or target_ident.split("/abs/")[-1].split("/pdf/")[-1].replace(".pdf", "").strip()
             pdf_url = f"https://arxiv.org/pdf/{clean_id}.pdf"
-            pdf_bytes = await pdf_extractor.fetch_pdf_bytes(pdf_url)
 
-            # Try to fetch rich metadata from canonical resolver
             try:
                 resolved = await resolver.resolve(clean_id)
                 if resolved:
@@ -162,6 +131,8 @@ async def import_paper_from_url_endpoint(req: ImportPaperUrlRequest):
                     authors = [a.name for a in resolved.authors]
                     year = resolved.year or year
                     abstract = resolved.abstract or abstract
+                    if resolved.pdf_url:
+                        pdf_url = resolved.pdf_url
             except Exception as e:
                 logger.warning("[PaperImport] Resolver metadata fetch error for arXiv ID %s: %s", clean_id, e)
 
@@ -169,45 +140,35 @@ async def import_paper_from_url_endpoint(req: ImportPaperUrlRequest):
         elif target_ident.lower().startswith("http://") or target_ident.lower().startswith("https://"):
             if target_ident.lower().endswith(".pdf") or "/pdf" in target_ident.lower():
                 pdf_url = target_ident
-                pdf_bytes = await pdf_extractor.fetch_pdf_bytes(pdf_url)
-            else:
-                # If generic web link, attempt canonical resolution
+            try:
                 resolved = await resolver.resolve(target_ident)
-                if resolved and resolved.pdf_url:
-                    pdf_url = resolved.pdf_url
-                    pdf_bytes = await pdf_extractor.fetch_pdf_bytes(pdf_url)
+                if resolved:
                     title = resolved.title or title
                     authors = [a.name for a in resolved.authors]
                     year = resolved.year or year
                     abstract = resolved.abstract or abstract
+                    if resolved.pdf_url:
+                        pdf_url = resolved.pdf_url
+            except Exception as e:
+                logger.warning("[PaperImport] Resolver metadata fetch error: %s", e)
 
         # 3. Resolve via generic DOI or title
         else:
-            resolved = await resolver.resolve(target_ident)
-            if resolved and resolved.pdf_url:
-                pdf_url = resolved.pdf_url
-                pdf_bytes = await pdf_extractor.fetch_pdf_bytes(pdf_url)
-                title = resolved.title or title
-                authors = [a.name for a in resolved.authors]
-                year = resolved.year or year
-                abstract = resolved.abstract or abstract
+            try:
+                resolved = await resolver.resolve(target_ident)
+                if resolved:
+                    title = resolved.title or title
+                    authors = [a.name for a in resolved.authors]
+                    year = resolved.year or year
+                    abstract = resolved.abstract or abstract
+                    if resolved.pdf_url:
+                        pdf_url = resolved.pdf_url
+            except Exception as e:
+                logger.warning("[PaperImport] Resolver metadata fetch error: %s", e)
 
-        if not pdf_bytes:
-            import os
-            for cand_path in [target_ident, f"{target_ident}.pdf", "temp_ericsson.pdf"]:
-                if os.path.isfile(cand_path):
-                    with open(cand_path, "rb") as f_cand:
-                        pdf_bytes = f_cand.read()
-                        if len(pdf_bytes) > 1000:
-                            break
+        if not pdf_url and arxiv_id:
+            pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
 
-        if not pdf_bytes:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Could not retrieve PDF bytes for '{target_ident}'. Please ensure the link is valid and open access, or upload the file directly."
-            )
-
-        parsed = markdown_engine.convert_pdf_to_markdown(pdf_bytes, filename=title)
         clean_slug = re.sub(r"[^a-z0-9]+", "-", (arxiv_id or target_ident).lower())[:25]
         paper_id = f"import-{clean_slug}"
 
@@ -215,16 +176,11 @@ async def import_paper_from_url_endpoint(req: ImportPaperUrlRequest):
             "status": "success",
             "paper": {
                 "id": paper_id,
-                "title": parsed["title"] or title,
-                "authors": parsed["authors"] or authors or ["Authors listed in publication"],
-                "affiliations": parsed.get("affiliations", []),
-                "year": parsed["year"] or year,
-                "abstract": parsed["abstract"] or abstract,
-                "markdown": parsed["markdown"],
-                "body_markdown": parsed.get("body_markdown", parsed["markdown"]),
-                "sections": parsed["sections"],
-                "figures": parsed["figures"],
-                "total_pages": parsed["total_pages"],
+                "title": title,
+                "authors": authors or ["Authors listed in publication"],
+                "affiliations": [],
+                "year": year,
+                "abstract": abstract,
                 "source": "arXiv" if (arxiv_id or "arxiv" in target_ident.lower()) else "Imported URL",
                 "pdf_url": pdf_url,
                 "arxiv_id": arxiv_id or "",

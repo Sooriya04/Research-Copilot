@@ -90,3 +90,61 @@ async def test_normalized_paper_persistence_and_caching():
         by_doi = await PaperRepository.get_by_doi_or_arxiv(db, doi="10.1038/s41586-021-03819-2")
         assert by_doi is not None
         assert by_doi.canonical_id == loaded.canonical_id
+
+
+@pytest.mark.asyncio
+async def test_benchmark_persistence_by_arxiv_id():
+    """Verify storing and querying benchmarks in SQLite by arXiv ID e.g. 2310.06625."""
+    async with get_db_session() as db:
+        benchmarks = [
+            BenchmarkEvidence(
+                source="paperswithcode",
+                task="Multivariate Time Series Forecasting",
+                dataset="Electricity",
+                metric="MSE",
+                value="0.141",
+                model="iTransformer",
+                split="test",
+            ),
+            BenchmarkEvidence(
+                source="paperswithcode",
+                task="Multivariate Time Series Forecasting",
+                dataset="Traffic",
+                metric="MAE",
+                value="0.258",
+                model="iTransformer",
+                split="test",
+            ),
+        ]
+        repos = [
+            CodeRepository(
+                url="https://github.com/thuml/iTransformer",
+                is_official=True,
+                framework="pytorch",
+                stars=1250,
+            )
+        ]
+
+        # 1. Save with arXiv ID 2310.06625
+        await PaperRepository.save_benchmarks_and_repos(
+            db=db,
+            benchmarks=benchmarks,
+            repositories=repos,
+            arxiv_id="2310.06625",
+            title="iTransformer: Inverted Transformers Are Effective for Time Series Forecasting",
+        )
+
+        # 2. Query with clean arXiv ID "2310.06625"
+        res = await PaperRepository.get_benchmarks_and_repos(db, arxiv_id="2310.06625")
+        assert res is not None
+        loaded_benchmarks, loaded_repos = res
+        assert len(loaded_benchmarks) == 2
+        assert loaded_benchmarks[0].dataset in ["Electricity", "Traffic"]
+        assert len(loaded_repos) == 1
+        assert "thuml/iTransformer" in loaded_repos[0].url
+
+        # 3. Query with prefixed arXiv ID "arxiv:2310.06625v1" - should normalize and hit cache
+        res2 = await PaperRepository.get_benchmarks_and_repos(db, arxiv_id="arxiv:2310.06625v1")
+        assert res2 is not None
+        loaded_benchmarks2, _ = res2
+        assert len(loaded_benchmarks2) == 2
