@@ -1410,12 +1410,17 @@ bundle compilation (`npm run build`).
     * **Details**: Full abstract, authors, publication metadata, external links, and 1-click BibTeX copy.
   * Added a header toggle button (`Copilot & Benchmarks` / `Hide Copilot`) to show or hide the drawer on demand across both `PaperReaderView` and `LibraryReaderView`.
 
-* **SQLite Benchmark & Repository Storage by arXiv ID and DOI (`src/core/paper_repository.py`, `src/api/routes_graph.py`, `frontend/src/components/reader/PaperReaderSidebar.jsx`)**:
+* **SQLite Benchmark & Repository Storage with Architectural Methods, Ranks, and Methodology (`src/core/paper_repository.py`, `src/engines/paperswithcode.py`, `src/api/routes_graph.py`, `frontend/src/components/reader/PaperReaderSidebar.jsx`, `src/core/database.py`)**:
   * Implemented `PaperRepository.get_benchmarks_and_repos` and `PaperRepository.save_benchmarks_and_repos` for persistent storage of empirical research evidence in SQLite.
   * Extracted and normalized canonical arXiv IDs via regex pattern `(\d{4}\.\d{4,5})` (e.g. `2310.06625`), stripping version suffixes and URI prefixes, while also supporting digital object identifiers (DOIs).
-  * Automatically creates or links to `NormalizedPaperModel`, persisting `BenchmarkModel` records (source, task, dataset, metric, value, model, split) and `CodeRepositoryModel` records (url, official status, framework, stars, license).
-  * Updated `GET /api/v1/graph/benchmarks` to query SQLite cache first, immediately returning stored benchmarks and repository lists (`"cached": true, "source": "sqlite"`). On a cache miss, fetches live data from Papers With Code / Hugging Face and caches into SQLite.
-  * Synchronized `PaperReaderSidebar.jsx` `BenchmarksTab` to extract clean arXiv IDs (e.g. `2310.06625`) and DOIs and pass them as query params.
+  * Upgraded `PapersWithCodeClient` to query direct Papers With Code evaluation tables and method indexes:
+    * **Architectural Methods & Components**: Extracted techniques (e.g. `Transformer`, `Flash Attention`, `Layer Normalization`, `Multi-head attention`, `Adam`).
+    * **SOTA Ranks**: Captured leaderboard rank placements (e.g. `🏆 #2 SOTA`).
+    * **Experimental Methodology**: Extracted exact publication tables (e.g. *Table 10*) and prediction horizons (e.g. `Exchange 96 -> 192`, lower MSE/MAE is better).
+    * **Official Implementations**: Extracted official repositories and citations directly from author abstracts and evaluations.
+  * Added automated schema column migration in `src/core/database.py` for `rank`, `methodology`, and `methods_json` in the `benchmarks` SQLite table.
+  * Updated `GET /api/v1/graph/benchmarks` to return top-level `methods` array alongside normalized evaluations.
+  * Enhanced `PaperReaderSidebar.jsx` `BenchmarksTab` to render dedicated **Architectural Methods** chips, SOTA trophy rank badges, and methodology callouts.
 
 * **Sidebar Streamlining & Clutter Removal (`frontend/src/components/layout/Sidebar.jsx`)**:
   * Removed the middle section containing the active workspace card and recent papers list.
@@ -1424,8 +1429,43 @@ bundle compilation (`npm run build`).
 * **Automated Verification & Unit Tests (`tests/test_paper_repository.py`, `tests/test_api.py`)**:
   * Added `test_benchmark_persistence_by_arxiv_id` in `tests/test_paper_repository.py` to verify saving and querying benchmarks using clean `2310.06625` and prefixed `arxiv:2310.06625v1` identifiers.
   * Added `test_graph_benchmarks_sqlite_caching` in `tests/test_api.py` validating the `/api/v1/graph/benchmarks` route and SQLite cache hit flow.
-  * Verified frontend Vite build cleanly compiled (`npm run build`) in 8.83s with 0 errors.
+  * Verified frontend Vite build cleanly compiled (`npm run build`) in 6.71s with 0 errors.
   * Verified backend test suites passed 100% green across all 11 unit tests.
+
+<br />
+
+## Redesign Interface into Modern Paper Reader Research Workspace (Center Viewer, Document Toolbar, Sidebar, AI Copilot)
+
+* **Left Navigation Sidebar Streamlining (`frontend/src/components/layout/Sidebar.jsx`, `frontend/src/styles/styles.css`)**:
+  * Flattened sidebar navigation into a compact, modern research productivity list:
+    * Brand header: **Research Copilot** (with AI Research Engineer sub-badge).
+    * Core tools: Overview (`/`), Literature Search (`/search`), Discovered Papers (`/search-results`), Knowledge Graph (`/knowledge-graph`), Novelty Studio (`/novelty`), LitGraph (`/litgraph`), Paper Reader (`/pdf-inspector`), and Library (`/library`).
+  * Implemented an active highlight indicator for **Paper Reader** when on `/pdf-inspector` or `/library/reader` featuring a subtle violet accent background, indicator bar, and accent icon.
+
+* **Center Paper Viewer Overhaul (`frontend/src/views/PaperReaderView.jsx`, `frontend/src/styles/styles.css`, `frontend/src/App.jsx`)**:
+  * Made the research paper the visual focus of the workspace on desktop (1440px+):
+    * **Clean Top Bar**: Integrated back button, paper title with dark typography, comma-separated authors, interactive arXiv / DOI badge, quick jump search input, direct PDF download button, and a "More Actions" menu (Copy BibTeX, Copy Link, Open in Tab).
+    * **Compact Document Toolbar**: Added page number indicator with prev/next navigation, zoom controls (`-`, zoom percentage, `+`), Fit Width toggle, in-paper search bar (`Find in paper...`), highlight tool toggle, and annotation tool toggle.
+    * **Reading Canvas & White Document Sheet**: Rendered the PDF on a clean white document surface (`#ffffff`) with subtle page boundaries and shadow (`box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.08)`) against a subtle gray reading desk canvas (`#f1f5f9`).
+    * **Empty State Desk**: Added a focused research desk view with input for arXiv ID/DOI/URL, PDF upload, and 1-click popular paper cards (*HalluCounter*, *Attention Is All You Need*, *DeepSeek-R1*, *LoRA*).
+    * **Full-Bleed IDE Layout (`frontend/src/App.jsx`)**: Suppressed global top header specifically on paper reader routes, allowing the 3-column research IDE layout to fill 100% of the viewport.
+
+* **Right Panel AI Copilot & Restored Tab Navigation (`frontend/src/components/reader/PaperReaderSidebar.jsx`, `frontend/src/styles/styles.css`)**:
+  * Retained the full tab navigation bar with pill buttons for `Chat`, `Benchmarks`, and `Details`, and quick close toggle:
+    * **Chat Tab (AI Copilot)**: Styled with `AI Copilot` header, `Context: Current Paper` badge, an empty state with *"Ask anything about this paper"*, four suggestion buttons (*Summarize paper*, *Explain methodology*, *Find key contributions*, *Explain this section*), and a bottom input bar (*"Ask about this paper..."*).
+    * **Benchmarks & Code Tab**: Displays extracted SOTA ranks, architectural methods, introduced datasets, and official implementations.
+    * **Details Tab**: Detailed paper abstract and publication metadata.
+
+* **Robust Author Normalization & Bug Fix (`frontend/src/views/PaperReaderView.jsx`)**:
+  * Implemented `formatAuthors` helper to safely parse both primitive string arrays and nested author dictionary objects (e.g. `[{ name: "..." }, { display_name: "..." }]`) returned by arXiv and OpenAlex, resolving `[object Object]` string rendering in the paper reader header and abstract view.
+  * Formatted authors cleanly in BibTeX citations (`Author 1 and Author 2 and Author 3`).
+
+* **Automated Verification & Unit Tests (`tests/test_paper_intelligence_engine.py`, `tests/test_api.py`)**:
+  * Included markdown text extraction in `/api/v1/paper/upload` response ensuring full parity with test assertions.
+  * Verified backend unit test suites in `tests/test_paper_intelligence_engine.py` and `tests/test_api.py` pass 100% green (10/10 tests).
+  * Verified frontend production build cleanly compiled via Vite (`npm run build`) in `8.06s` with 0 errors.
+
+
 
 
 

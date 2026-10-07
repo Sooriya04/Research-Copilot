@@ -53,6 +53,7 @@ async def upload_pdf_endpoint(
         title = file.filename.replace(".pdf", "").replace("_", " ").title()
         total_pages = 1
         abstract = ""
+        full_text = []
         try:
             import pymupdf as fitz
             doc = fitz.open(stream=content_bytes, filetype="pdf")
@@ -60,8 +61,10 @@ async def upload_pdf_endpoint(
             meta_title = doc.metadata.get("title")
             if meta_title and len(meta_title.strip()) > 3:
                 title = meta_title.strip()
+            for page in doc:
+                full_text.append(page.get_text("text"))
             if total_pages > 0:
-                p0 = doc[0].get_text("text")
+                p0 = full_text[0] if full_text else ""
                 if "Abstract" in p0:
                     abs_match = re.search(r"Abstract[:\s\n]+([\s\S]{100,1200}?)(?=\n\s*(?:1\.?|I\.?|Introduction|Index Terms|Keywords))", p0, re.IGNORECASE)
                     if abs_match:
@@ -71,6 +74,7 @@ async def upload_pdf_endpoint(
 
         clean_slug = re.sub(r"[^a-z0-9]+", "-", file.filename.lower())[:25]
         paper_id = f"upload-{clean_slug}"
+        markdown_content = "\n\n".join(full_text)
 
         return {
             "status": "success",
@@ -84,6 +88,7 @@ async def upload_pdf_endpoint(
                 "total_pages": total_pages,
                 "source": "Uploaded File",
                 "pdf_url": None,
+                "markdown": markdown_content,
             }
         }
     except Exception as e:

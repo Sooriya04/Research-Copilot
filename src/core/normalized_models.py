@@ -76,6 +76,9 @@ class BenchmarkModel(Base):
     model = Column(String, nullable=True)
     split = Column(String, default="test")
     repository_url = Column(String, nullable=True)
+    rank = Column(String, nullable=True)
+    methodology = Column(Text, nullable=True)
+    methods_json = Column(JSON, default=list)
 
     paper = relationship("NormalizedPaperModel", back_populates="benchmarks")
 

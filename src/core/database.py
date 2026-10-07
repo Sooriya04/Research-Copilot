@@ -19,9 +19,23 @@ AsyncSessionLocal = async_sessionmaker(
 )
 
 async def init_db() -> None:
-    """Initialize database tables asynchronously."""
+    """Initialize database tables asynchronously and migrate missing columns if needed."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        def _migrate_columns(sync_conn):
+            try:
+                cursor = sync_conn.connection.cursor()
+                cursor.execute("PRAGMA table_info(benchmarks)")
+                cols = {row[1] for row in cursor.fetchall()}
+                if cols and "rank" not in cols:
+                    cursor.execute("ALTER TABLE benchmarks ADD COLUMN rank VARCHAR")
+                if cols and "methodology" not in cols:
+                    cursor.execute("ALTER TABLE benchmarks ADD COLUMN methodology TEXT")
+                if cols and "methods_json" not in cols:
+                    cursor.execute("ALTER TABLE benchmarks ADD COLUMN methods_json JSON")
+            except Exception as e:
+                logger.debug("Column migration note: %s", e)
+        await conn.run_sync(_migrate_columns)
     logger.info("Database initialized successfully at %s", settings.database_url)
 
 @asynccontextmanager

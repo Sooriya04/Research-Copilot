@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { Routes, Route, useNavigate } from 'react-router-dom';
+import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { useApp } from './context/AppContext';
 import Sidebar from './components/layout/Sidebar';
 import TopHeader from './components/layout/TopHeader';
@@ -26,7 +26,13 @@ import NoveltyStudioView from './views/NoveltyStudioView';
 
 export default function App() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { mobileSidebarOpen, setMobileSidebarOpen } = useApp();
+
+  const isReaderRoute =
+    location.pathname === '/pdf-inspector' ||
+    location.pathname.startsWith('/library/reader') ||
+    location.pathname === '/library-reader';
 
   // Numeric shortcuts 1, 2, 3, 4
   useEffect(() => {
@@ -50,8 +56,8 @@ export default function App() {
       )}
       <Sidebar />
       <main className="main-content">
-        <TopHeader />
-        <div className="content-body">
+        {!isReaderRoute && <TopHeader />}
+        <div className={`content-body ${isReaderRoute ? 'reader-body' : ''}`}>
           <Routes>
             <Route path="/" element={<OverviewView />} />
             <Route path="/overview" element={<OverviewView />} />

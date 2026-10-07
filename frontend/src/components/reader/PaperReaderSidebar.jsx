@@ -13,18 +13,15 @@ import {
   GitFork,
   Star,
   Database,
+  Cpu,
+  ChevronRight,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 
 // ─── Tab 1: Chat (Ask AI Copilot) ─────────────────────────────────────────────
 function AskTab({ paper }) {
   const { activeWorkspace, workspaceMemories } = useApp();
-  const [messages, setMessages] = useState([
-    {
-      role: 'assistant',
-      content: `I've loaded **${paper?.title || 'this paper'}**. Ask me anything about it — methodology, formulas, empirical results, or comparisons.`,
-    },
-  ]);
+  const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef(null);
@@ -83,146 +80,135 @@ function AskTab({ paper }) {
     }
   };
 
-  const quickPrompts = [
-    'Summarize core contributions',
-    'Explain mathematical formulation',
-    'What are the main limitations?',
-    'Generate PyTorch pseudocode',
-  ];
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* Messages list */}
-      <div
-        style={{
-          flex: 1,
-          overflowY: 'auto',
-          padding: 14,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 12,
-        }}
-      >
-        {messages.map((m, i) => (
-          <div
-            key={i}
-            style={{
-              display: 'flex',
-              justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start',
-            }}
-          >
+      {/* Header */}
+      <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border-subtle, #e2e8f0)', background: 'var(--bg-card, #ffffff)', flexShrink: 0 }}>
+        <h3 style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text-primary)', margin: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Sparkles size={14} style={{ color: 'var(--accent-violet, #6366f1)' }} />
+          <span>AI Copilot</span>
+        </h3>
+        <div className="copilot-context-badge">
+          Context: Current Paper
+        </div>
+      </div>
+
+      {/* Messages list / Empty State */}
+      {messages.length === 0 ? (
+        <div className="copilot-empty-state">
+          <div className="copilot-empty-icon">
+            <Sparkles size={20} />
+          </div>
+          <h4 className="copilot-empty-title">
+            Ask anything about this paper
+          </h4>
+          <div className="copilot-suggestions-list">
+            <button
+              type="button"
+              className="copilot-suggestion-btn"
+              onClick={() => handleSend('Summarize paper')}
+            >
+              <span>Summarize paper</span>
+              <ChevronRight size={13} style={{ opacity: 0.4 }} />
+            </button>
+            <button
+              type="button"
+              className="copilot-suggestion-btn"
+              onClick={() => handleSend('Explain methodology')}
+            >
+              <span>Explain methodology</span>
+              <ChevronRight size={13} style={{ opacity: 0.4 }} />
+            </button>
+            <button
+              type="button"
+              className="copilot-suggestion-btn"
+              onClick={() => handleSend('Find key contributions')}
+            >
+              <span>Find key contributions</span>
+              <ChevronRight size={13} style={{ opacity: 0.4 }} />
+            </button>
+            <button
+              type="button"
+              className="copilot-suggestion-btn"
+              onClick={() => handleSend('Explain this section')}
+            >
+              <span>Explain this section</span>
+              <ChevronRight size={13} style={{ opacity: 0.4 }} />
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div
+          style={{
+            flex: 1,
+            overflowY: 'auto',
+            padding: 14,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12,
+          }}
+        >
+          {messages.map((m, i) => (
             <div
+              key={i}
               style={{
-                maxWidth: '88%',
-                padding: '9px 13px',
-                borderRadius: m.role === 'user' ? '14px 14px 4px 14px' : '14px 14px 14px 4px',
-                background: m.role === 'user' ? 'var(--accent-primary, #6366f1)' : 'var(--bg-subtle, #f8fafc)',
-                color: m.role === 'user' ? '#ffffff' : 'var(--text-primary, #0f172a)',
-                fontSize: 12.5,
-                lineHeight: 1.55,
-                border: m.role === 'assistant' ? '1px solid var(--border-subtle, #e2e8f0)' : 'none',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
+                display: 'flex',
+                justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start',
               }}
             >
-              {m.content}
+              <div
+                style={{
+                  maxWidth: '88%',
+                  padding: '9px 13px',
+                  borderRadius: m.role === 'user' ? '12px 12px 2px 12px' : '12px 12px 12px 2px',
+                  background: m.role === 'user' ? 'var(--accent-violet, #6366f1)' : 'var(--bg-subtle, #f4f4f5)',
+                  color: m.role === 'user' ? '#ffffff' : 'var(--text-primary, #09090b)',
+                  fontSize: 12.5,
+                  lineHeight: 1.55,
+                  border: m.role === 'assistant' ? '1px solid var(--border-subtle, #e2e8f0)' : 'none',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                }}
+              >
+                {m.content}
+              </div>
             </div>
-          </div>
-        ))}
-        {loading && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-muted)', fontSize: 12 }}>
-            <Loader2 size={13} className="animate-spin" />
-            <span>Analyzing publication…</span>
-          </div>
-        )}
-        <div ref={messagesEndRef} />
-      </div>
+          ))}
+          {loading && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-muted)', fontSize: 12 }}>
+              <Loader2 size={13} className="animate-spin" />
+              <span>Analyzing paper…</span>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+      )}
 
-      {/* Quick Prompts */}
-      <div
-        style={{
-          padding: '6px 12px',
-          borderTop: '1px solid var(--border-subtle, #e2e8f0)',
-          display: 'flex',
-          gap: 6,
-          overflowX: 'auto',
-          whiteSpace: 'nowrap',
-          background: 'var(--bg-card, #ffffff)',
-          flexShrink: 0,
-        }}
-      >
-        {quickPrompts.map((p, idx) => (
-          <button
-            key={idx}
-            type="button"
-            onClick={() => handleSend(p)}
-            disabled={loading}
-            style={{
-              fontSize: 11,
-              padding: '3px 8px',
-              borderRadius: 12,
-              background: 'var(--bg-subtle, #f1f5f9)',
-              border: '1px solid var(--border-subtle, #e2e8f0)',
-              color: 'var(--text-secondary, #475569)',
-              cursor: 'pointer',
-              flexShrink: 0,
-            }}
-          >
-            {p}
-          </button>
-        ))}
-      </div>
-
-      {/* Input bar */}
+      {/* Bottom input box */}
       <form
         onSubmit={(e) => {
           e.preventDefault();
           handleSend();
         }}
-        style={{
-          padding: 10,
-          borderTop: '1px solid var(--border-subtle, #e2e8f0)',
-          display: 'flex',
-          gap: 8,
-          background: 'var(--bg-card, #ffffff)',
-          flexShrink: 0,
-        }}
+        className="copilot-input-container"
       >
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask about this paper..."
-          disabled={loading}
-          style={{
-            flex: 1,
-            padding: '7px 10px',
-            border: '1px solid var(--border-subtle, #e2e8f0)',
-            borderRadius: 6,
-            fontSize: 12.5,
-            background: 'var(--bg-subtle, #f8fafc)',
-            color: 'var(--text-primary, #0f172a)',
-            outline: 'none',
-          }}
-        />
-        <button
-          type="submit"
-          disabled={loading || !input.trim()}
-          style={{
-            padding: '0 12px',
-            borderRadius: 6,
-            background: 'var(--accent-primary, #6366f1)',
-            color: '#fff',
-            border: 'none',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            opacity: loading || !input.trim() ? 0.6 : 1,
-          }}
-        >
-          <Send size={14} />
-        </button>
+        <div className="copilot-input-box">
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="Ask about this paper..."
+            disabled={loading}
+          />
+          <button
+            type="submit"
+            disabled={loading || !input.trim()}
+            className="copilot-input-send-btn"
+            title="Send"
+          >
+            <Send size={13} />
+          </button>
+        </div>
       </form>
     </div>
   );
@@ -301,8 +287,9 @@ function BenchmarksTab({ paper }) {
 
   const benchmarks = data?.benchmarks || [];
   const repos = data?.repositories || [];
+  const methods = data?.methods || (benchmarks.length > 0 && benchmarks[0]?.methods) || [];
 
-  if (!benchmarks.length && !repos.length) {
+  if (!benchmarks.length && !repos.length && !methods.length) {
     return (
       <div style={{ padding: 28, textAlign: 'center', color: 'var(--text-muted, #64748b)', fontSize: 12.5 }}>
         <Award size={32} style={{ opacity: 0.35, display: 'block', margin: '0 auto 10px' }} />
@@ -318,6 +305,44 @@ function BenchmarksTab({ paper }) {
 
   return (
     <div style={{ padding: 14, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* Architectural Methods & Techniques */}
+      {methods.length > 0 && (
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+            <Cpu size={13} style={{ color: 'var(--accent-primary, #6366f1)' }} />
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                textTransform: 'uppercase',
+                letterSpacing: '0.06em',
+                color: 'var(--text-muted, #64748b)',
+              }}
+            >
+              Architectural Methods ({methods.length})
+            </span>
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {methods.map((m, i) => (
+              <span
+                key={i}
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  padding: '3px 8px',
+                  borderRadius: 6,
+                  background: 'var(--bg-subtle, #f8fafc)',
+                  border: '1px solid var(--border-subtle, #e2e8f0)',
+                  color: 'var(--text-primary, #0f172a)',
+                }}
+              >
+                {m}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Code Repositories */}
       {repos.length > 0 && (
         <div>
@@ -422,24 +447,41 @@ function BenchmarksTab({ paper }) {
               Benchmark Evaluations ({benchmarks.length})
             </span>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {benchmarks.map((b, i) => (
               <div
                 key={i}
                 style={{
-                  padding: '9px 11px',
+                  padding: '10px 12px',
                   background: 'var(--bg-subtle, #f8fafc)',
                   border: '1px solid var(--border-subtle, #e2e8f0)',
                   borderRadius: 6,
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: 4,
+                  gap: 6,
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary, #0f172a)' }}>
-                    {b.task || b.task_name || 'Benchmark Evaluation'}
-                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary, #0f172a)' }}>
+                      {b.task || b.task_name || 'Benchmark Evaluation'}
+                    </span>
+                    {b.rank && (
+                      <span
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 700,
+                          padding: '1px 6px',
+                          borderRadius: 4,
+                          background: 'rgba(245, 158, 11, 0.15)',
+                          color: '#d97706',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        🏆 {b.rank}
+                      </span>
+                    )}
+                  </div>
                   <span
                     style={{
                       fontSize: 11.5,
@@ -448,6 +490,7 @@ function BenchmarksTab({ paper }) {
                       color: 'var(--accent-primary, #6366f1)',
                       padding: '2px 8px',
                       borderRadius: 4,
+                      flexShrink: 0,
                     }}
                   >
                     {b.value || b.metric_value || '—'}
@@ -470,6 +513,21 @@ function BenchmarksTab({ paper }) {
                   {(b.metric || b.metric_name) && <span>Metric: {b.metric || b.metric_name}</span>}
                   {b.model && <span>Model: {b.model}</span>}
                 </div>
+                {b.methodology && (
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: 'var(--text-muted, #64748b)',
+                      background: 'var(--bg-card, #ffffff)',
+                      padding: '5px 8px',
+                      borderRadius: 4,
+                      borderLeft: '2px solid var(--accent-primary, #6366f1)',
+                      lineHeight: 1.45,
+                    }}
+                  >
+                    {b.methodology}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -657,21 +715,8 @@ export default function PaperReaderSidebar({ paper, onClose }) {
   const [activeTab, setActiveTab] = useState('ask'); // 'ask' | 'benchmarks' | 'details'
 
   return (
-    <aside
-      style={{
-        width: 380,
-        maxWidth: '100%',
-        borderLeft: '1px solid var(--border-subtle, #e2e8f0)',
-        background: 'var(--bg-card, #ffffff)',
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100%',
-        flexShrink: 0,
-        zIndex: 10,
-        boxShadow: '-4px 0 16px rgba(0, 0, 0, 0.04)',
-      }}
-    >
-      {/* Tab Header */}
+    <aside className="reader-assistant-panel" aria-label="AI Copilot">
+      {/* Navigation Tab Bar */}
       <div
         style={{
           display: 'flex',
@@ -679,7 +724,7 @@ export default function PaperReaderSidebar({ paper, onClose }) {
           justifyContent: 'space-between',
           borderBottom: '1px solid var(--border-subtle, #e2e8f0)',
           background: 'var(--bg-subtle, #f8fafc)',
-          padding: '4px 8px',
+          padding: '5px 8px',
           flexShrink: 0,
         }}
       >
@@ -691,15 +736,16 @@ export default function PaperReaderSidebar({ paper, onClose }) {
               display: 'flex',
               alignItems: 'center',
               gap: 5,
-              padding: '6px 10px',
+              padding: '6px 11px',
               borderRadius: 6,
               border: 'none',
               background: activeTab === 'ask' ? 'var(--bg-card, #ffffff)' : 'transparent',
-              color: activeTab === 'ask' ? 'var(--accent-primary, #6366f1)' : 'var(--text-muted, #64748b)',
+              color: activeTab === 'ask' ? 'var(--accent-violet, #6366f1)' : 'var(--text-muted, #64748b)',
               fontWeight: activeTab === 'ask' ? 600 : 500,
               fontSize: 12,
               cursor: 'pointer',
               boxShadow: activeTab === 'ask' ? '0 1px 3px rgba(0,0,0,0.06)' : 'none',
+              transition: 'all 0.12s ease',
             }}
           >
             <MessageSquare size={13} />
@@ -713,15 +759,16 @@ export default function PaperReaderSidebar({ paper, onClose }) {
               display: 'flex',
               alignItems: 'center',
               gap: 5,
-              padding: '6px 10px',
+              padding: '6px 11px',
               borderRadius: 6,
               border: 'none',
               background: activeTab === 'benchmarks' ? 'var(--bg-card, #ffffff)' : 'transparent',
-              color: activeTab === 'benchmarks' ? 'var(--accent-primary, #6366f1)' : 'var(--text-muted, #64748b)',
+              color: activeTab === 'benchmarks' ? 'var(--accent-violet, #6366f1)' : 'var(--text-muted, #64748b)',
               fontWeight: activeTab === 'benchmarks' ? 600 : 500,
               fontSize: 12,
               cursor: 'pointer',
               boxShadow: activeTab === 'benchmarks' ? '0 1px 3px rgba(0,0,0,0.06)' : 'none',
+              transition: 'all 0.12s ease',
             }}
           >
             <Award size={13} />
@@ -735,15 +782,16 @@ export default function PaperReaderSidebar({ paper, onClose }) {
               display: 'flex',
               alignItems: 'center',
               gap: 5,
-              padding: '6px 10px',
+              padding: '6px 11px',
               borderRadius: 6,
               border: 'none',
               background: activeTab === 'details' ? 'var(--bg-card, #ffffff)' : 'transparent',
-              color: activeTab === 'details' ? 'var(--accent-primary, #6366f1)' : 'var(--text-muted, #64748b)',
+              color: activeTab === 'details' ? 'var(--accent-violet, #6366f1)' : 'var(--text-muted, #64748b)',
               fontWeight: activeTab === 'details' ? 600 : 500,
               fontSize: 12,
               cursor: 'pointer',
               boxShadow: activeTab === 'details' ? '0 1px 3px rgba(0,0,0,0.06)' : 'none',
+              transition: 'all 0.12s ease',
             }}
           >
             <Info size={13} />
@@ -773,7 +821,7 @@ export default function PaperReaderSidebar({ paper, onClose }) {
       </div>
 
       {/* Tab Body */}
-      <div style={{ flex: 1, overflowY: 'auto' }}>
+      <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
         {activeTab === 'ask' && <AskTab paper={paper} />}
         {activeTab === 'benchmarks' && <BenchmarksTab paper={paper} />}
         {activeTab === 'details' && <DetailsTab paper={paper} />}

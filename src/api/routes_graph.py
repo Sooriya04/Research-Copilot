@@ -722,18 +722,21 @@ async def get_paper_benchmarks(
         )
         if cached is not None:
             cached_benchmarks, cached_repos = cached
-            return {
-                "arxiv_id": clean_arxiv or arxiv_id,
-                "doi": clean_doi,
-                "paper_id": paper_id,
-                "title": title,
-                "benchmark_count": len(cached_benchmarks),
-                "repo_count": len(cached_repos),
-                "benchmarks": [b.model_dump() for b in cached_benchmarks],
-                "repositories": [r.model_dump() for r in cached_repos],
-                "cached": True,
-                "source": "sqlite",
-            }
+            if len(cached_benchmarks) > 0:
+                all_methods = list(dict.fromkeys([m for b in cached_benchmarks for m in (b.methods or [])]))
+                return {
+                    "arxiv_id": clean_arxiv or arxiv_id,
+                    "doi": clean_doi,
+                    "paper_id": paper_id,
+                    "title": title,
+                    "benchmark_count": len(cached_benchmarks),
+                    "repo_count": len(cached_repos),
+                    "methods": all_methods,
+                    "benchmarks": [b.model_dump() for b in cached_benchmarks],
+                    "repositories": [r.model_dump() for r in cached_repos],
+                    "cached": True,
+                    "source": "sqlite",
+                }
     except Exception as exc:
         logger.warning("[Benchmarks] SQLite read error: %s", exc)
 
@@ -759,6 +762,7 @@ async def get_paper_benchmarks(
     except Exception as exc:
         logger.warning("[Benchmarks] Failed to save benchmarks to SQLite: %s", exc)
 
+    all_methods = list(dict.fromkeys([m for b in benchmarks for m in (b.methods or [])]))
     return {
         "arxiv_id": clean_arxiv or arxiv_id,
         "doi": clean_doi,
@@ -766,6 +770,7 @@ async def get_paper_benchmarks(
         "title": title,
         "benchmark_count": len(benchmarks),
         "repo_count": len(repos),
+        "methods": all_methods,
         "benchmarks": [b.model_dump() for b in benchmarks],
         "repositories": [r.model_dump() for r in repos],
         "cached": False,

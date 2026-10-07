@@ -142,7 +142,10 @@ class PaperRepository:
                 value=b.value,
                 model=b.model,
                 split=b.split,
-                repository_url=b.repository_url
+                repository_url=b.repository_url,
+                rank=b.rank,
+                methodology=b.methodology,
+                methods_json=b.methods or []
             ))
 
         for r in paper.code_repositories:
@@ -319,7 +322,7 @@ class PaperRepository:
         if not record:
             return None
 
-        if not record.benchmarks and not record.code_repositories:
+        if not record.benchmarks:
             return None
 
         benchmarks = [
@@ -333,6 +336,9 @@ class PaperRepository:
                 split=b.split,
                 paper_title=record.title,
                 repository_url=b.repository_url,
+                rank=getattr(b, "rank", None),
+                methodology=getattr(b, "methodology", None),
+                methods=getattr(b, "methods_json", None) or [],
             )
             for b in (record.benchmarks or [])
         ]
@@ -411,6 +417,9 @@ class PaperRepository:
                 model=b.model,
                 split=b.split or "test",
                 repository_url=b.repository_url,
+                rank=b.rank,
+                methodology=b.methodology,
+                methods_json=b.methods or [],
             ))
 
         for r in repositories:

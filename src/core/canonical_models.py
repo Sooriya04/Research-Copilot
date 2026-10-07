@@ -46,6 +46,9 @@ class BenchmarkEvidence(BaseModel):
     split: Optional[str] = "test"
     paper_title: Optional[str] = None
     repository_url: Optional[str] = None
+    rank: Optional[str] = None
+    methodology: Optional[str] = None
+    methods: List[str] = Field(default_factory=list)
 
 class CodeRepository(BaseModel):
     url: str

@@ -6,7 +6,6 @@ import {
   BookOpen,
   Network,
   FileText,
-  FolderKanban,
   Sparkles,
   Library,
   Workflow,
@@ -27,15 +26,10 @@ export default function Sidebar() {
     setMobileSidebarOpen,
   } = useApp();
 
-  const isWorkspaceRoute = [
-    '/workspaces',
-    '/search',
-    '/search-results',
-    '/knowledge-graph',
-    '/novelty',
-    '/novelty-studio',
-    '/litgraph',
+  const isPaperReaderActive = [
     '/pdf-inspector',
+    '/library/reader',
+    '/library-reader',
   ].some((p) => location.pathname === p || location.pathname.startsWith(p + '/'));
 
   return (
@@ -105,105 +99,94 @@ export default function Sidebar() {
           </div>
         </NavLink>
 
-        {/* 2. Workspace & Tools Tree */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <NavLink
-            to="/workspaces"
-            className={({ isActive }) => `nav-item ${isActive || isWorkspaceRoute ? 'active' : ''}`}
-            title="Workspaces"
-            onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
-          >
-            <div className="nav-item-left">
-              <FolderKanban size={15} />
-              <span>Workspaces</span>
-            </div>
-          </NavLink>
+        {/* 2. Literature Search */}
+        <NavLink
+          to="/search"
+          className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+          title="Literature Search"
+          onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
+        >
+          <div className="nav-item-left">
+            <Search size={15} />
+            <span>Literature Search</span>
+          </div>
+        </NavLink>
 
-          {/* Sub-tree: Shown when expanded and on a workspace route */}
-          {!sidebarCollapsed && isWorkspaceRoute && (
-            <div className="sidebar-sub-tree">
-              <NavLink
-                to="/search"
-                className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-                style={{ fontSize: 12.5, padding: '5px 10px' }}
-                onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
-              >
-                <div className="nav-item-left">
-                  <Search size={13} />
-                  <span>Literature Search</span>
-                </div>
-              </NavLink>
+        {/* 3. Discovered Papers */}
+        <NavLink
+          to="/search-results"
+          className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+          title="Discovered Papers"
+          onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
+        >
+          <div className="nav-item-left">
+            <BookOpen size={15} />
+            <span>Discovered Papers</span>
+          </div>
+        </NavLink>
 
-              <NavLink
-                to="/search-results"
-                className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-                style={{ fontSize: 12.5, padding: '5px 10px' }}
-                onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
-              >
-                <div className="nav-item-left">
-                  <BookOpen size={13} />
-                  <span>Discovered Papers</span>
-                </div>
-              </NavLink>
+        {/* 4. Knowledge Graph */}
+        <NavLink
+          to="/knowledge-graph"
+          className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+          title="Knowledge Graph"
+          onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
+        >
+          <div className="nav-item-left">
+            <Network size={15} />
+            <span>Knowledge Graph</span>
+          </div>
+        </NavLink>
 
-              <NavLink
-                to="/knowledge-graph"
-                className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-                style={{ fontSize: 12.5, padding: '5px 10px' }}
-                onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
-              >
-                <div className="nav-item-left">
-                  <Network size={13} />
-                  <span>Knowledge Graph</span>
-                </div>
-              </NavLink>
+        {/* 5. Novelty Studio */}
+        <NavLink
+          to="/novelty"
+          className={({ isActive }) =>
+            `nav-item ${isActive || location.pathname === '/novelty-studio' ? 'active' : ''}`
+          }
+          title="Novelty Studio"
+          onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
+        >
+          <div className="nav-item-left">
+            <Lightbulb size={15} />
+            <span>Novelty Studio</span>
+          </div>
+        </NavLink>
 
-              <NavLink
-                to="/novelty"
-                className={({ isActive }) =>
-                  `nav-item ${isActive || location.pathname === '/novelty-studio' ? 'active' : ''}`
-                }
-                style={{ fontSize: 12.5, padding: '5px 10px' }}
-                onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
-              >
-                <div className="nav-item-left">
-                  <Lightbulb size={13} style={{ color: '#10b981' }} />
-                  <span>Novelty Studio</span>
-                </div>
-              </NavLink>
+        {/* 6. LitGraph */}
+        <NavLink
+          to="/litgraph"
+          className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+          title="LitGraph"
+          onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
+        >
+          <div className="nav-item-left">
+            <Workflow size={15} />
+            <span>LitGraph</span>
+          </div>
+        </NavLink>
 
-              <NavLink
-                to="/litgraph"
-                className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-                style={{ fontSize: 12.5, padding: '5px 10px' }}
-                onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
-              >
-                <div className="nav-item-left">
-                  <Workflow size={13} />
-                  <span>LitGraph</span>
-                </div>
-              </NavLink>
-
-              <NavLink
-                to="/pdf-inspector"
-                className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-                style={{ fontSize: 12.5, padding: '5px 10px' }}
-                onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
-              >
-                <div className="nav-item-left">
-                  <FileText size={13} />
-                  <span>Paper Reader</span>
-                </div>
-              </NavLink>
-            </div>
+        {/* 7. Paper Reader (Active Highlight) */}
+        <NavLink
+          to="/pdf-inspector"
+          className={`nav-item ${isPaperReaderActive ? 'active paper-reader-active' : ''}`}
+          title="Paper Reader"
+          onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
+        >
+          <div className="nav-item-left">
+            <FileText size={15} />
+            <span>Paper Reader</span>
+          </div>
+          {isPaperReaderActive && !sidebarCollapsed && (
+            <span className="reader-active-indicator" title="Active Paper Reader" />
           )}
-        </div>
+        </NavLink>
 
-        {/* 3. Library */}
+        {/* 8. Library */}
         <NavLink
           to="/library"
           className={({ isActive }) =>
-            `nav-item ${isActive || location.pathname.startsWith('/library') ? 'active' : ''}`
+            `nav-item ${isActive || (location.pathname.startsWith('/library') && !isPaperReaderActive) ? 'active' : ''}`
           }
           title="Research Library"
           onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
