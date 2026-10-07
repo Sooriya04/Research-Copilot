@@ -6,12 +6,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.database import get_db
 from src.core.logger import logger
 from src.core.models import PaperChunkModel, PaperDocumentModel
+from src.rag.active_cache import get_active_paper_cache
 from src.rag.ingestion import PaperIngestionService
 from src.rag.service import CitationItem, PaperRAGResponse, PaperRAGService
 
 router = APIRouter(tags=["Paper RAG Pipeline"])
 rag_service = PaperRAGService()
 ingestion_service = PaperIngestionService()
+active_cache = get_active_paper_cache()
 
 
 class PaperChatRequest(BaseModel):
@@ -189,3 +191,55 @@ async def paper_rag_get_chunks_endpoint(
             for c in chunks
         ],
     }
+
+
+@router.post("/api/v1/papers/{paper_id}/activate")
+@router.post("/papers/{paper_id}/activate")
+async def activate_paper_endpoint(
+    paper_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark a research paper as active and load its context & chunks into Redis."""
+    # Ensure paper is indexed in SQLite first
+    await ingestion_service.ensure_paper_indexed(paper_id, db)
+    loaded = await active_cache.load_paper(paper_id, db)
+    if not loaded:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Paper '{paper_id}' not found in SQLite repository.",
+        )
+    return {
+        "paper_id": paper_id,
+        "status": "active",
+        "cached": True,
+        "title": loaded.get("title"),
+        "page_count": loaded.get("page_count", 1),
+    }
+
+
+@router.get("/api/v1/papers/{paper_id}/cache")
+@router.get("/papers/{paper_id}/cache")
+async def get_paper_cache_endpoint(paper_id: str):
+    """Inspect active paper cache status and TTL in Redis."""
+    status_info = await active_cache.get_cache_status(paper_id)
+    return status_info
+
+
+@router.delete("/api/v1/papers/{paper_id}/cache")
+@router.delete("/papers/{paper_id}/cache")
+async def invalidate_paper_cache_endpoint(paper_id: str):
+    """Evict active paper context and chunks from Redis."""
+    evicted = await active_cache.invalidate_paper(paper_id)
+    return {
+        "paper_id": paper_id,
+        "status": "invalidated",
+        "evicted": evicted,
+    }
+
+
+@router.get("/api/v1/papers/active")
+@router.get("/papers/active")
+async def get_active_paper_endpoint():
+    """Retrieve currently active paper ID."""
+    active_id = await active_cache.get_active_paper_id()
+    return {"active_paper_id": active_id}

@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     rag_top_k: int = 5
     rag_chunk_size: int = 800
     rag_chunk_overlap: int = 150
+
+    # Redis Active Paper Cache Configuration
+    redis_url: str = "redis://localhost:6379"
+    redis_active_paper_ttl: int = 3600
+    redis_enabled: bool = True
     
     # Graph & Loop Execution limits
     max_loop_iterations: int = 10

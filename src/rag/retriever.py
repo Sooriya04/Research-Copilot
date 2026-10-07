@@ -73,15 +73,21 @@ def cosine_similarity(vec_a: List[float], vec_b: List[float]) -> float:
 
 
 class HybridRetriever:
-    """Hybrid vector + BM25 retriever for paper chunks."""
+    """Hybrid vector + BM25 retriever for paper chunks with Redis active-cache support."""
 
     def __init__(
         self,
         embedding_provider: Optional[BaseEmbeddingProvider] = None,
+        active_cache: Optional[Any] = None,
         vector_weight: float = 0.6,
         bm25_weight: float = 0.4,
     ):
         self.embedding_provider = embedding_provider or get_embedding_provider()
+        if active_cache is not None:
+            self.active_cache = active_cache
+        else:
+            from src.rag.active_cache import get_active_paper_cache
+            self.active_cache = get_active_paper_cache()
         self.vector_weight = vector_weight
         self.bm25_weight = bm25_weight
         self.bm25 = BM25Ranker()
@@ -93,27 +99,63 @@ class HybridRetriever:
         db: AsyncSession,
         top_k: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
-        """Retrieve most relevant chunks for a paper using combined vector & keyword search."""
+        """Retrieve most relevant chunks for a paper using combined vector & keyword search.
+        
+        Prioritizes Redis active-paper chunks cache to eliminate SQLite I/O overhead.
+        """
+        import time
         limit = top_k or getattr(settings, "rag_top_k", 5)
 
-        # 1. Fetch chunks from SQLite
-        stmt = (
-            select(PaperChunkModel)
-            .where(PaperChunkModel.paper_id == paper_id)
-            .order_by(PaperChunkModel.chunk_index)
-        )
-        res = await db.execute(stmt)
-        chunks = res.scalars().all()
+        # 1. Check Redis Active Paper Cache
+        t_fetch = time.perf_counter()
+        retrieval_source = "sqlite"
+        chunks_list: List[Dict[str, Any]] = []
 
-        if not chunks:
+        if self.active_cache:
+            try:
+                cached_chunks = await self.active_cache.get_chunks(paper_id)
+                if cached_chunks:
+                    retrieval_source = "redis"
+                    chunks_list = cached_chunks
+            except Exception as e:
+                logger.warning("[HybridRetriever] Redis fetch exception: %s", e)
+
+        # Fall back to SQLite if not in Redis
+        if not chunks_list:
+            stmt = (
+                select(PaperChunkModel)
+                .where(PaperChunkModel.paper_id == paper_id)
+                .order_by(PaperChunkModel.chunk_index)
+            )
+            res = await db.execute(stmt)
+            db_chunks = res.scalars().all()
+            chunks_list = [
+                {
+                    "chunk_id": c.id,
+                    "paper_id": c.paper_id,
+                    "chunk_index": c.chunk_index,
+                    "content": c.content,
+                    "page_number": c.page_number,
+                    "section": c.section,
+                    "token_count": c.token_count,
+                    "embedding_json": c.embedding_json,
+                    "metadata": c.metadata_json or {},
+                }
+                for c in db_chunks
+            ]
+
+        fetch_latency = round((time.perf_counter() - t_fetch) * 1000, 2)
+
+        if not chunks_list:
             logger.info("[HybridRetriever] No chunks found for paper_id='%s'", paper_id)
             return []
 
         # 2. Vector search (Semantic)
+        t_vec = time.perf_counter()
         query_vec = await self.embedding_provider.embed_text(query)
         vector_scores: List[float] = []
-        for c in chunks:
-            chunk_vec = c.embedding_json
+        for c in chunks_list:
+            chunk_vec = c.get("embedding_json")
             if chunk_vec and isinstance(chunk_vec, list):
                 sim = cosine_similarity(query_vec, chunk_vec)
                 vector_scores.append(max(0.0, sim))
@@ -121,7 +163,7 @@ class HybridRetriever:
                 vector_scores.append(0.0)
 
         # 3. BM25 search (Keyword)
-        chunk_texts = [c.content for c in chunks]
+        chunk_texts = [c.get("content", "") for c in chunks_list]
         bm25_raw_scores = self.bm25.score_corpus(query, chunk_texts)
 
         # Normalize scores to [0, 1]
@@ -129,7 +171,7 @@ class HybridRetriever:
         max_bm25 = max(bm25_raw_scores) if bm25_raw_scores else 1.0
 
         scored_items = []
-        for i, chunk in enumerate(chunks):
+        for i, chunk in enumerate(chunks_list):
             norm_vec = (vector_scores[i] / max_vec) if max_vec > 0 else 0.0
             norm_bm25 = (bm25_raw_scores[i] / max_bm25) if max_bm25 > 0 else 0.0
 
@@ -137,15 +179,17 @@ class HybridRetriever:
             hybrid = (self.vector_weight * norm_vec) + (self.bm25_weight * norm_bm25)
 
             scored_items.append({
-                "chunk_id": chunk.id,
-                "paper_id": chunk.paper_id,
-                "chunk_index": chunk.chunk_index,
-                "content": chunk.content,
-                "page_number": chunk.page_number,
-                "section": chunk.section,
+                "chunk_id": chunk.get("chunk_id", f"{paper_id}_c{i}"),
+                "paper_id": chunk.get("paper_id", paper_id),
+                "chunk_index": chunk.get("chunk_index", i),
+                "content": chunk.get("content", ""),
+                "page_number": chunk.get("page_number", 1),
+                "section": chunk.get("section", "General"),
                 "score": round(hybrid, 4),
                 "vector_score": round(norm_vec, 4),
                 "bm25_score": round(norm_bm25, 4),
+                "retrieval_source": retrieval_source,
+                "fetch_latency_ms": fetch_latency,
             })
 
         # Sort descending by hybrid score

@@ -1579,3 +1579,33 @@ bundle compilation (`npm run build`).
   * Created unit and integration test suite covering chunking, BM25 + cosine similarity, context construction, citation extraction, ingestion, and chat.
   * Verified 18/18 test suites passing green across backend.
   * Built frontend cleanly with Vite.
+
+<br />
+
+## Implement Redis Active-Paper Cache & Cache-Augmented Generation (CAG Layer)
+
+* **Redis Active-Paper Context Cache Service (`src/rag/active_cache.py`, `src/core/config.py`, `.env`)**:
+  * Built `ActivePaperCache` managing fast in-memory active-paper sessions using predictable keys (`paper:{paper_id}:metadata`, `paper:{paper_id}:chunks`, `paper:{paper_id}:context`, and `active_paper:current`).
+  * Added configurable expiration via `REDIS_ACTIVE_PAPER_TTL=3600` and activation toggle `REDIS_ENABLED=true`.
+  * Preserved SQLite as the persistent source of truth with Redis functioning strictly as an accelerator cache.
+
+* **Cache-Augmented Retrieval Optimization (`src/rag/retriever.py`, `src/rag/service.py`)**:
+  * Optimized `HybridRetriever` to check the Redis active-paper cache before querying the database, eliminating repeated SQLite I/O for ongoing chat sessions.
+  * Preserved existing hybrid vector + BM25 ranking algorithm on in-memory chunks.
+  * Added comprehensive latency tracking measuring `sqlite_latency_ms`, `redis_latency_ms`, `retrieval_latency_ms`, `context_latency_ms`, and `total_latency_ms`.
+
+* **Resilient Offline Fallback & Automatic Invalidation (`src/rag/active_cache.py`, `src/rag/ingestion.py`)**:
+  * Built zero-downtime fallback: if Redis daemon is offline or uninstalled, operations automatically log a warning and fall back to SQLite without breaking user chat.
+  * Hooked automatic cache invalidation into `PaperIngestionService.ingest_document()`, immediately evicting stale Redis keys whenever paper data is updated.
+  * Guaranteed strict paper isolation preventing context leakage between papers.
+
+* **Active-Paper & Cache Management Endpoints (`src/api/routes_paper_rag.py`)**:
+  * Added `POST /api/v1/papers/{paper_id}/activate` (and `/papers/{paper_id}/activate`) to load paper context into Redis and set the active session.
+  * Added `GET /api/v1/papers/{paper_id}/cache` (and `/papers/{paper_id}/cache`) for inspection of cache state and remaining TTL.
+  * Added `DELETE /api/v1/papers/{paper_id}/cache` (and `/papers/{paper_id}/cache`) to evict cached paper keys.
+  * Added `GET /api/v1/papers/active` to retrieve the current active paper session ID.
+
+* **Automated Verification & Test Suite (`tests/test_redis_active_cache.py`)**:
+  * Added test suite verifying cache hit/miss, activation, invalidation, TTL expiration, fallback resilience, paper isolation, and latency reporting.
+  * Executed 23/23 tests passing green across entire application test suite.
+  * Built frontend bundle cleanly via Vite.

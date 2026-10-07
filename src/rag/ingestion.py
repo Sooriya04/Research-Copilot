@@ -171,6 +171,14 @@ class PaperIngestionService:
         await db.commit()
         await db.refresh(paper_doc)
 
+        # 6. Invalidate active Redis cache to prevent stale context
+        try:
+            from src.rag.active_cache import get_active_paper_cache
+            cache = get_active_paper_cache()
+            await cache.invalidate_paper(paper_id)
+        except Exception as e:
+            logger.warning("[PaperIngestion] Cache invalidation note: %s", e)
+
         elapsed = round((time.perf_counter() - t0) * 1000, 2)
         logger.info(
             "[PaperIngestion] Ingested paper '%s': %d chunks, %d embeddings in %sms",
