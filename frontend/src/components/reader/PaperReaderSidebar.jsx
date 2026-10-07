@@ -270,8 +270,10 @@ function AskTab({ paper, onJumpToPage, onClearContext, onHighlightEvidence }) {
     setLoading(true);
 
     try {
+      const paperKey = paper?.id || paper?.arxiv_id || null;
       const payload = {
         messages: nextHistory.map((m) => ({ role: m.role, content: m.content })),
+        paper_id: paperKey,
         paper_title: paper?.title || null,
         paper_abstract: paper?.abstract || null,
         paper_markdown: paper?.markdown_content || paper?.markdown || null,
@@ -292,14 +294,28 @@ function AskTab({ paper, onJumpToPage, onClearContext, onHighlightEvidence }) {
         const responseText = data.response || 'No response generated.';
         const grounding = enrichPaperGrounding(responseText, paper, rawQuery);
 
+        let finalSources = grounding.sources;
+        if (data.citations && Array.isArray(data.citations) && data.citations.length > 0) {
+          finalSources = data.citations.map((c, idx) => ({
+            id: `rag-${c.chunk_id || idx}`,
+            page: c.page,
+            section: c.section || 'Methodology',
+            excerpt: c.excerpt || `Grounded chunk evidence from page ${c.page} (${c.section})`,
+            type: 'text',
+            label: `p.${c.page}${c.section ? ` · ${c.section}` : ''}`,
+            confidence: 'direct',
+            chunk_id: c.chunk_id,
+          }));
+        }
+
         setMessages((prev) => [
           ...prev,
           {
             role: 'assistant',
             content: responseText,
-            sources: grounding.sources,
-            confidence: grounding.confidence,
-            confidenceLabel: grounding.confidenceLabel,
+            sources: finalSources,
+            confidence: finalSources.length > 0 ? 0.95 : grounding.confidence,
+            confidenceLabel: finalSources.length > 0 ? 'Direct evidence' : grounding.confidenceLabel,
             missing: grounding.missing,
             missingMessage: grounding.missingMessage,
           },

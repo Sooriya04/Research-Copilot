@@ -34,6 +34,14 @@ class Settings(BaseSettings):
     nvidia_api_key: Optional[str] = None
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "phi4-mini"
+
+    # Embedding & RAG Pipeline Configuration
+    embedding_provider: str = "ollama"
+    embedding_model: str = "nomic-embed-text"
+    embedding_dim: int = 768
+    rag_top_k: int = 5
+    rag_chunk_size: int = 800
+    rag_chunk_overlap: int = 150
     
     # Graph & Loop Execution limits
     max_loop_iterations: int = 10

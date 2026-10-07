@@ -212,6 +212,27 @@ export default function PaperReaderView() {
         }
       }
     } catch {}
+
+    // Ensure paper RAG chunks & embeddings are indexed in SQLite
+    const activeDoc = activeReaderPaper || (localStorage.getItem('rc_active_library_paper') ? JSON.parse(localStorage.getItem('rc_active_library_paper')) : null);
+    const paperId = activeDoc?.id || activeDoc?.arxiv_id;
+    if (paperId) {
+      fetch(`/api/v1/papers/${encodeURIComponent(paperId)}/ingest`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: activeDoc.title || 'Research Paper',
+          abstract: activeDoc.abstract || '',
+          pages: activeDoc.sections?.map((s, idx) => ({
+            page_number: idx + 1,
+            text: `${s.title}\n\n${s.content}`,
+          })) || null,
+          doi: activeDoc.doi || null,
+          arxiv_id: activeDoc.arxiv_id || null,
+          authors: Array.isArray(activeDoc.authors) ? activeDoc.authors : [],
+        }),
+      }).catch(() => {});
+    }
   }, [activeReaderPaper]);
 
   const handleExtract = async (overrideQuery) => {

@@ -1,16 +1,21 @@
 import json
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
+from src.core.database import get_db
 from src.providers.base import ChatMessage
 from src.providers.factory import get_llm_provider
+from src.rag.service import PaperRAGService
 
 router = APIRouter(prefix="/api/v1/chat", tags=["Workbench Chat & Streaming"])
+rag_service = PaperRAGService()
 
 
 class ResearchChatRequest(BaseModel):
     messages: List[ChatMessage]
+    paper_id: Optional[str] = None
     paper_title: Optional[str] = None
     paper_abstract: Optional[str] = None
     paper_markdown: Optional[str] = None
@@ -23,6 +28,7 @@ class ResearchChatRequest(BaseModel):
 class ResearchChatResponse(BaseModel):
     response: str
     paper_referenced: Optional[str] = None
+    citations: Optional[List[Dict[str, Any]]] = None
     status: str = "success"
 
 
@@ -38,10 +44,32 @@ Guidelines:
 
 
 @router.post("/message", response_model=ResearchChatResponse)
-async def chat_message_endpoint(req: ResearchChatRequest):
-    """Context-aware conversational research Q&A assistant with long-term workspace memory."""
-    provider = get_llm_provider()
+async def chat_message_endpoint(req: ResearchChatRequest, db: AsyncSession = Depends(get_db)):
+    """Context-aware conversational research Q&A assistant with long-term workspace memory & Paper RAG."""
+    # 1. If paper_id is provided, prioritize Hybrid Paper RAG retrieval
+    if req.paper_id and req.messages:
+        user_msgs = [m for m in req.messages if m.role == "user"]
+        if user_msgs:
+            latest_query = user_msgs[-1].content
+            try:
+                rag_res = await rag_service.answer_question(
+                    paper_id=req.paper_id,
+                    question=latest_query,
+                    db=db,
+                    llm_model=req.model,
+                )
+                if rag_res.status == "success":
+                    return ResearchChatResponse(
+                        response=rag_res.answer,
+                        paper_referenced=rag_res.paper_title or req.paper_title,
+                        citations=[c.dict() if hasattr(c, "dict") else dict(c) for c in rag_res.citations],
+                        status="success",
+                    )
+            except Exception as ex:
+                logger.warning("[ChatEndpoint] RAG pipeline fallback: %s", ex)
 
+    # 2. Standard Workspace / Augmented Prompt Synthesis
+    provider = get_llm_provider()
     augmented_messages: List[ChatMessage] = []
 
     # Build Grounding System Prompt

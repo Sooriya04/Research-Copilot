@@ -127,6 +127,40 @@ class WorkspaceMemoryModel(Base):
     title = Column(String, nullable=False)
     content = Column(Text, nullable=False)
     status = Column(String, default="active")  # active, confirmed, refuted, archived
-    provenance_source = Column(String, nullable=True)
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class PaperDocumentModel(Base):
+    """Persistent paper entity for RAG and literature indexing."""
+    __tablename__ = "papers"
+
+    id = Column(String, primary_key=True, index=True)
+    doi = Column(String, index=True, nullable=True)
+    arxiv_id = Column(String, index=True, nullable=True)
+    title = Column(String, nullable=False)
+    authors_json = Column(JSON, default=list)
+    abstract = Column(Text, default="")
+    page_count = Column(Integer, default=1)
+    metadata_json = Column(JSON, default=dict)
+    created_at = Column(DateTime, default=utcnow)
+
+    chunks = relationship("PaperChunkModel", back_populates="paper", cascade="all, delete-orphan", order_by="PaperChunkModel.chunk_index")
+
+
+class PaperChunkModel(Base):
+    """Section- and page-grounded paper chunk with vector embeddings."""
+    __tablename__ = "chunks"
+
+    id = Column(String, primary_key=True, index=True)
+    paper_id = Column(String, ForeignKey("papers.id", ondelete="CASCADE"), nullable=False, index=True)
+    chunk_index = Column(Integer, nullable=False, index=True)
+    content = Column(Text, nullable=False)
+    page_number = Column(Integer, nullable=False, index=True)
+    section = Column(String, default="General", index=True)
+    token_count = Column(Integer, default=0)
+    embedding_json = Column(JSON, nullable=True)
+    metadata_json = Column(JSON, default=dict)
+    created_at = Column(DateTime, default=utcnow)
+
+    paper = relationship("PaperDocumentModel", back_populates="chunks")

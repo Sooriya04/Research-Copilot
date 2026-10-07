@@ -1540,3 +1540,42 @@ bundle compilation (`npm run build`).
   * Verified end-to-end `/api/v1/chat/message` with local `phi4-mini` responding cleanly with status 200.
   * All unit tests passed green (`pytest tests/test_intelligence_routes.py tests/test_api.py`).
   * Compiled frontend via Vite (`npm run build`) cleanly with zero errors.
+
+<br />
+
+## Implement End-to-End Paper RAG Pipeline (Page/Section Chunking, Embeddings, SQLite Storage, Hybrid Retrieval, Grounded Citations, and Chat API)
+
+* **Page- and Section-Aware Paper Chunking Engine (`src/rag/chunker.py`)**:
+  * Built `PaperChunker` to split extracted paper pages into cohesive chunks while strictly tracking `page_number`, `section`, `token_count`, and `chunk_index`.
+  * Detects section headers (`Abstract`, `Introduction`, `Methodology`, `Experiments`, `Results`, `Limitations`, `Conclusion`) to segment paragraphs logically.
+  * Preserves page boundaries and avoids blindly flattening PDFs into ungrounded text strings.
+
+* **Configurable Local & Frontier Embedding Provider (`src/rag/embeddings.py`, `src/core/config.py`, `.env`)**:
+  * Implemented `BaseEmbeddingProvider` abstraction and `OllamaEmbeddingProvider` defaulting to local `nomic-embed-text` (`768`-dimension vectors).
+  * Added configurable environment variables (`EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`, `RAG_TOP_K`, `RAG_CHUNK_SIZE`, `RAG_CHUNK_OVERLAP`).
+  * Added deterministic fallback embedding generator for resilience when daemon is unreachable.
+
+* **SQLite RAG Schema (`src/core/models.py`)**:
+  * Added `PaperDocumentModel` (`papers` table) storing paper ID, title, authors, abstract, page count, and metadata.
+  * Added `PaperChunkModel` (`chunks` table) storing `chunk_id`, `paper_id`, `chunk_index`, `content`, `page_number`, `section`, `embedding_json`, and `metadata_json`.
+
+* **Hybrid Vector + BM25 Keyword Retrieval (`src/rag/retriever.py`)**:
+  * Implemented `BM25Ranker` computing tokenized Lucene-style BM25 keyword relevance scores across chunks.
+  * Implemented cosine similarity search over chunk vector embeddings.
+  * Combined vector and keyword scores into unified normalized hybrid ranking (`0.6 * vector + 0.4 * bm25`) to return top-k metadata-rich chunks.
+
+* **Structured Context Builder & Citation Verifier (`src/rag/context_builder.py`, `src/rag/service.py`)**:
+  * Built `ContextBuilder` assembling strict grounding prompts with structured source tags (`SOURCE X · Page Y · Section Z · Chunk ID W`).
+  * Enforces anti-hallucination refusals (*"I couldn't find enough information about this in the paper."*) when query relevance is absent.
+  * Added citation extractor mapping statements back to exact verified chunks with page, section, score, and excerpt.
+
+* **Dedicated Paper RAG Endpoints & UI Integration (`src/api/routes_paper_rag.py`, `src/api/routes_chat.py`, `frontend/src/views/PaperReaderView.jsx`, `frontend/src/components/reader/PaperReaderSidebar.jsx`)**:
+  * Added `POST /api/v1/papers/{paper_id}/chat` (and `/papers/{paper_id}/chat`) accepting `{ "question": "..." }` and returning answer + verified citations.
+  * Added `POST /api/v1/papers/{paper_id}/ingest` for PDF upload and structured document indexing.
+  * Added `GET /api/v1/papers/{paper_id}/status` and `GET /api/v1/papers/{paper_id}/chunks` for inspection and debugging.
+  * Connected Paper Reader frontend chat to pass `paper_id` and consume backend verified RAG citations.
+
+* **Automated Verification & Test Suite (`tests/test_paper_rag.py`)**:
+  * Created unit and integration test suite covering chunking, BM25 + cosine similarity, context construction, citation extraction, ingestion, and chat.
+  * Verified 18/18 test suites passing green across backend.
+  * Built frontend cleanly with Vite.
