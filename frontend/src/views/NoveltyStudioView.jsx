@@ -34,6 +34,8 @@ import {
   Eye,
   EyeOff,
   Key,
+  Brain,
+  BrainCircuit,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
@@ -51,13 +53,14 @@ export default function NoveltyStudioView() {
 
   // Providers & Models state
   const [providersStatus, setProvidersStatus] = useState(null);
-  const [selectedProviders, setSelectedProviders] = useState(['gemini']); // Array of active engines: ['gemini', 'groq', 'ollama', 'openrouter', 'nvidia']
-  const selectedProvider = selectedProviders.length === 1 ? selectedProviders[0] : (selectedProviders.length === 5 ? 'all' : selectedProviders.join(','));
+  const [selectedProviders, setSelectedProviders] = useState(['gemini']); // Array of active engines: ['gemini', 'groq', 'ollama', 'openrouter', 'nvidia', 'deepseek']
+  const selectedProvider = selectedProviders.length === 1 ? selectedProviders[0] : (selectedProviders.length === 6 ? 'all' : selectedProviders.join(','));
   const [selectedModel, setSelectedModel] = useState('');
   const [groqKeyOverride, setGroqKeyOverride] = useState(() => localStorage.getItem('rc_groq_key') || '');
   const [geminiKeyOverride, setGeminiKeyOverride] = useState(() => localStorage.getItem('rc_gemini_key') || '');
   const [openrouterKeyOverride, setOpenrouterKeyOverride] = useState(() => localStorage.getItem('rc_openrouter_key') || '');
   const [nvidiaKeyOverride, setNvidiaKeyOverride] = useState(() => localStorage.getItem('rc_nvidia_key') || '');
+  const [deepseekKeyOverride, setDeepseekKeyOverride] = useState(() => localStorage.getItem('rc_deepseek_key') || '');
   const [ollamaUrlOverride, setOllamaUrlOverride] = useState(() => localStorage.getItem('rc_ollama_url') || 'http://localhost:11434');
   const [testTargetProvider, setTestTargetProvider] = useState('gemini');
   const [showConfigDrawer, setShowConfigDrawer] = useState(false);
@@ -82,11 +85,11 @@ export default function NoveltyStudioView() {
   };
 
   const selectAllProviders = () => {
-    setSelectedProviders(['gemini', 'groq', 'ollama', 'openrouter', 'nvidia']);
+    setSelectedProviders(['gemini', 'groq', 'ollama', 'openrouter', 'nvidia', 'deepseek']);
   };
 
   const selectCloudProviders = () => {
-    setSelectedProviders(['gemini', 'groq', 'openrouter', 'nvidia']);
+    setSelectedProviders(['gemini', 'groq', 'openrouter', 'nvidia', 'deepseek']);
   };
 
   // Connection testing state
@@ -106,7 +109,6 @@ export default function NoveltyStudioView() {
     }
   });
   const [lastTelemetry, setLastTelemetry] = useState(null);
-  const [telemetryLogs, setTelemetryLogs] = useState([]);
   const [errorMsg, setErrorMsg] = useState(null);
   const [toastMsg, setToastMsg] = useState(null);
 
@@ -191,10 +193,7 @@ export default function NoveltyStudioView() {
     fetchSavedProposals();
   }, [activeWorkspace?.id]);
 
-  const addTelemetryLog = (msg) => {
-    const timeStr = new Date().toLocaleTimeString();
-    setTelemetryLogs((prev) => [`[${timeStr}] ${msg}`, ...prev.slice(0, 19)]);
-  };
+  const addTelemetryLog = () => {};
 
   const fetchProvidersStatus = async () => {
     try {
@@ -234,6 +233,7 @@ export default function NoveltyStudioView() {
         if (provider === 'gemini') localStorage.setItem('rc_gemini_key', apiKey || '');
         if (provider === 'openrouter') localStorage.setItem('rc_openrouter_key', apiKey || '');
         if (provider === 'nvidia') localStorage.setItem('rc_nvidia_key', apiKey || '');
+        if (provider === 'deepseek') localStorage.setItem('rc_deepseek_key', apiKey || '');
         await fetchProvidersStatus();
       } else {
         setErrorMsg(data.detail || `Failed to save ${provider} credentials in SQLite`);
@@ -260,6 +260,7 @@ export default function NoveltyStudioView() {
         if (provider === 'gemini') { setGeminiKeyOverride(''); localStorage.removeItem('rc_gemini_key'); }
         if (provider === 'openrouter') { setOpenrouterKeyOverride(''); localStorage.removeItem('rc_openrouter_key'); }
         if (provider === 'nvidia') { setNvidiaKeyOverride(''); localStorage.removeItem('rc_nvidia_key'); }
+        if (provider === 'deepseek') { setDeepseekKeyOverride(''); localStorage.removeItem('rc_deepseek_key'); }
         await fetchProvidersStatus();
       }
     } catch (err) {
@@ -438,6 +439,8 @@ export default function NoveltyStudioView() {
             ? openrouterKeyOverride
             : target === 'nvidia'
             ? nvidiaKeyOverride
+            : target === 'deepseek'
+            ? deepseekKeyOverride
             : undefined,
         base_url: target === 'ollama' ? ollamaUrlOverride : undefined,
         model: selectedModel || undefined,
@@ -507,6 +510,8 @@ export default function NoveltyStudioView() {
                 ? openrouterKeyOverride || undefined
                 : selectedProviders[0] === 'nvidia'
                 ? nvidiaKeyOverride || undefined
+                : selectedProviders[0] === 'deepseek'
+                ? deepseekKeyOverride || undefined
                 : undefined)
             : undefined,
         base_url: selectedProviders.includes('ollama') ? ollamaUrlOverride || undefined : undefined,
@@ -605,7 +610,7 @@ ${nov.mathematical_formulation || 'N/A'}
 
   // Grouped for side-by-side comparison mode
   const comparisonByEngine = useMemo(() => {
-    const groups = { gemini: [], groq: [], ollama: [], openrouter: [], nvidia: [], custom: [], heuristic: [] };
+    const groups = { gemini: [], groq: [], ollama: [], openrouter: [], nvidia: [], deepseek: [], custom: [], heuristic: [] };
     (noveltyResults || []).forEach((n) => {
       const eng = (n.engine || 'gemini').toLowerCase();
       if (n.is_custom || eng === 'custom') {
@@ -1220,6 +1225,77 @@ ${nov.mathematical_formulation || 'N/A'}
               </div>
             );
           })()}
+
+          {/* 6. DeepSeek Card */}
+          {(() => {
+            const isSelected = selectedProviders.includes('deepseek');
+            return (
+              <div
+                className="card"
+                onClick={() => toggleProvider('deepseek')}
+                style={{
+                  padding: '14px 16px',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                  border: isSelected ? '2px solid #0284c7' : '1px solid var(--border-subtle)',
+                  background: isSelected ? (isDark ? '#0c2340' : '#f0f9ff') : 'var(--bg-card)',
+                  borderRadius: 'var(--radius-sm)',
+                  position: 'relative',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => {}}
+                      style={{ cursor: 'pointer', accentColor: '#0284c7' }}
+                    />
+                    <BrainCircuit size={16} style={{ color: '#0284c7' }} />
+                    <strong style={{ fontSize: 13.5 }}>DeepSeek</strong>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span
+                      className="badge"
+                      style={{
+                        fontSize: 9.5,
+                        background: isDark ? '#082f49' : '#e0f2fe',
+                        color: '#0284c7',
+                        border: '1px solid #0284c7',
+                      }}
+                    >
+                      V3 / R1 Reasoner
+                    </span>
+                    <button
+                      type="button"
+                      onClick={(e) => selectOnlyProvider('deepseek', e)}
+                      style={{
+                        fontSize: 9.5,
+                        padding: '1px 5px',
+                        borderRadius: 3,
+                        border: '1px solid var(--border-subtle)',
+                        background: 'var(--bg-subtle)',
+                        color: 'var(--text-muted)',
+                        cursor: 'pointer',
+                      }}
+                      title="Select only DeepSeek"
+                    >
+                      Only
+                    </button>
+                  </div>
+                </div>
+                <p style={{ fontSize: 11, color: 'var(--text-secondary)', margin: '0 0 8px', lineHeight: 1.35 }}>
+                  DeepSeek-V3 671B MoE and DeepSeek-R1 reasoning models via official API.
+                </p>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 10, color: 'var(--text-muted)' }}>
+                  <span>Model: {providersStatus?.deepseek?.default_model || 'deepseek-chat'}</span>
+                  <span style={{ color: providersStatus?.deepseek?.has_key ? '#10b981' : '#0284c7', fontWeight: 600 }}>
+                    {providersStatus?.deepseek?.stored_in_db ? '● SQLite Active' : (providersStatus?.deepseek?.has_key ? '● .env Active' : '○ Needs Key')}
+                  </span>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       </div>
 
@@ -1742,6 +1818,135 @@ ${nov.mathematical_formulation || 'N/A'}
                 )}
               </div>
             </div>
+
+            {/* 6. DeepSeek Card */}
+            <div
+              style={{
+                padding: '14px 16px',
+                borderRadius: 'var(--radius-sm)',
+                border: '1px solid var(--border-subtle)',
+                background: isDark ? '#1e293b' : '#ffffff',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <BrainCircuit size={14} style={{ color: '#0284c7' }} />
+                  <strong style={{ fontSize: 13 }}>DeepSeek</strong>
+                </div>
+                {providersStatus?.deepseek?.stored_in_db ? (
+                  <span className="badge badge-emerald" style={{ fontSize: 10, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <Database size={10} /> SQLite Saved
+                  </span>
+                ) : providersStatus?.deepseek?.has_key ? (
+                  <span
+                    className="badge"
+                    style={{
+                      fontSize: 10,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      background: isDark ? '#082f49' : '#e0f2fe',
+                      color: '#0284c7',
+                      border: '1px solid #0284c7',
+                    }}
+                  >
+                    <Key size={10} /> .env Active
+                  </span>
+                ) : (
+                  <span className="badge badge-gray" style={{ fontSize: 10 }}>○ Needs Key</span>
+                )}
+              </div>
+
+              <div style={{ marginBottom: 10 }}>
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>
+                  API Key: {providersStatus?.deepseek?.api_key_masked && <span style={{ color: 'var(--text-muted)', fontWeight: 'normal' }}>({providersStatus.deepseek.api_key_masked})</span>}
+                </label>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type={showKeyPassword ? 'text' : 'password'}
+                    className="input"
+                    placeholder={providersStatus?.deepseek?.api_key_masked || 'Paste DeepSeek key (sk-...)'}
+                    value={deepseekKeyOverride}
+                    onChange={(e) => setDeepseekKeyOverride(e.target.value)}
+                    style={{ fontSize: 12, width: '100%', padding: '6px 30px 6px 10px' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowKeyPassword((prev) => !prev)}
+                    style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
+                  >
+                    {showKeyPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>
+                  Target Model:
+                </label>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder={providersStatus?.deepseek?.default_model || 'deepseek-chat'}
+                  value={selectedProviders.includes('deepseek') ? selectedModel : ''}
+                  onChange={(e) => {
+                    if (!selectedProviders.includes('deepseek')) toggleProvider('deepseek');
+                    setSelectedModel(e.target.value);
+                  }}
+                  list="deepseek-models-datalist"
+                  style={{ fontSize: 12, width: '100%', padding: '6px 10px', marginBottom: 4 }}
+                />
+                <datalist id="deepseek-models-datalist">
+                  <option value="deepseek-chat" />
+                  <option value="deepseek-reasoner" />
+                </datalist>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+                  {['deepseek-chat', 'deepseek-reasoner'].map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => {
+                        if (!selectedProviders.includes('deepseek')) toggleProvider('deepseek');
+                        setSelectedModel(m);
+                      }}
+                      style={{
+                        fontSize: 10,
+                        padding: '1px 6px',
+                        borderRadius: 3,
+                        border: '1px solid var(--border-subtle)',
+                        background: 'var(--bg-subtle)',
+                        color: 'var(--text-muted)',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {m}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={() => handleSaveKeyToDb('deepseek', deepseekKeyOverride, selectedModel)}
+                  disabled={savingKey || !deepseekKeyOverride}
+                  style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6, flex: 1, justifyContent: 'center' }}
+                >
+                  <Save size={12} />
+                  <span>{savingKey ? 'Saving...' : 'Save to SQLite DB'}</span>
+                </button>
+                {providersStatus?.deepseek?.stored_in_db && (
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => handleRemoveKeyFromDb('deepseek')}
+                    style={{ fontSize: 11, color: '#ef4444', display: 'flex', alignItems: 'center', gap: 4 }}
+                    title="Remove key from SQLite DB"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
 
           {/* Diagnostics Test Bar */}
@@ -1759,6 +1964,7 @@ ${nov.mathematical_formulation || 'N/A'}
                 <option value="ollama">Local Ollama</option>
                 <option value="openrouter">OpenRouter</option>
                 <option value="nvidia">NVIDIA NIM</option>
+                <option value="deepseek">DeepSeek</option>
               </select>
             </div>
 
@@ -1956,6 +2162,7 @@ ${nov.mathematical_formulation || 'N/A'}
             <option value="ollama">Local Ollama</option>
             <option value="openrouter">OpenRouter</option>
             <option value="nvidia">NVIDIA NIM</option>
+            <option value="deepseek">DeepSeek</option>
             <option value="heuristic">Heuristic</option>
           </select>
         </div>
@@ -2124,7 +2331,7 @@ ${nov.mathematical_formulation || 'N/A'}
       ) : viewMode === 'compare' ? (
         /* Side-by-side Multi-Model Comparison View */
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16, alignItems: 'flex-start' }}>
-          {['gemini', 'groq', 'ollama', 'openrouter', 'nvidia', ...(comparisonByEngine.custom?.length > 0 ? ['custom'] : [])].map((eng) => {
+          {['gemini', 'groq', 'ollama', 'openrouter', 'nvidia', 'deepseek', ...(comparisonByEngine.custom?.length > 0 ? ['custom'] : [])].map((eng) => {
             const list = comparisonByEngine[eng] || [];
             return (
               <div key={eng} className="card" style={{ padding: 16 }}>
@@ -2135,6 +2342,7 @@ ${nov.mathematical_formulation || 'N/A'}
                     {eng === 'ollama' && <Server size={15} style={{ color: '#10b981' }} />}
                     {eng === 'openrouter' && <Layers size={15} style={{ color: '#8b5cf6' }} />}
                     {eng === 'nvidia' && <Cpu size={15} style={{ color: '#76b900' }} />}
+                    {eng === 'deepseek' && <BrainCircuit size={15} style={{ color: '#0284c7' }} />}
                     {eng === 'custom' && <Sparkles size={15} style={{ color: '#a855f7' }} />}
                     <strong style={{ fontSize: 13.5, textTransform: 'capitalize' }}>
                       {eng === 'gemini'
@@ -2147,6 +2355,8 @@ ${nov.mathematical_formulation || 'N/A'}
                         ? 'OpenRouter'
                         : eng === 'nvidia'
                         ? 'NVIDIA NIM'
+                        : eng === 'deepseek'
+                        ? 'DeepSeek'
                         : 'User Authored'}
                     </strong>
                   </div>
@@ -2226,46 +2436,7 @@ ${nov.mathematical_formulation || 'N/A'}
         </div>
       )}
 
-      {/* 8. Telemetry Terminal Log Box */}
-      <div
-        className="card"
-        style={{
-          marginTop: 28,
-          padding: '12px 16px',
-          background: isDark ? '#050507' : '#1e293b',
-          color: '#e2e8f0',
-          borderRadius: 'var(--radius-sm)',
-          fontFamily: 'monospace',
-          fontSize: 11,
-        }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, borderBottom: '1px solid #334155', paddingBottom: 6 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Code2 size={13} style={{ color: '#38bdf8' }} />
-            <strong style={{ color: '#f8fafc' }}>Novelty Engine Telemetry Stream</strong>
-          </div>
-          <button
-            onClick={() => setTelemetryLogs([])}
-            style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: 10 }}
-          >
-            Clear
-          </button>
-        </div>
-
-        <div style={{ maxHeight: 110, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3 }}>
-          {telemetryLogs.length === 0 ? (
-            <span style={{ color: '#64748b' }}>No telemetry events recorded yet.</span>
-          ) : (
-            telemetryLogs.map((log, idx) => (
-              <div key={idx} style={{ color: log.includes('error') || log.includes('failed') ? '#f87171' : log.includes('success') ? '#4ade80' : '#cbd5e1' }}>
-                {log}
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-
-      {/* 9. Custom Novelty Creation Modal */}
+      {/* Custom Novelty Creation Modal */}
       {showCustomModal && (
         <div
           style={{
@@ -2591,6 +2762,9 @@ function NoveltyCardItem({ novelty, isDark, isAdded, isAdding, copied, onAddToGr
   } else if (eng === 'nvidia') {
     engineBadge = 'NVIDIA NIM';
     engineColor = '#76b900';
+  } else if (eng === 'deepseek') {
+    engineBadge = 'DeepSeek';
+    engineColor = '#0284c7';
   } else if (eng === 'heuristic') {
     engineBadge = 'Heuristic';
     engineColor = '#64748b';

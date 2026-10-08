@@ -15,6 +15,7 @@ from src.providers.groq import GroqProvider
 from src.providers.llm import LocalOllamaProvider
 from src.providers.openrouter import OpenRouterProvider
 from src.providers.nvidia import NvidiaProvider
+from src.providers.deepseek import DeepSeekProvider
 
 from src.core.provider_settings import (
     resolve_provider_credentials,
@@ -32,7 +33,7 @@ class NoveltyStudioRequest(BaseModel):
     topic: Optional[str] = "Literature Synthesis"
     workspace_id: Optional[str] = None
     paper_ids: List[str] = Field(default_factory=list)
-    provider: str = Field(default="gemini", description="gemini | groq | ollama | openrouter | nvidia | all")
+    provider: str = Field(default="gemini", description="gemini | groq | ollama | openrouter | nvidia | deepseek | all")
     providers: Optional[List[str]] = Field(default=None, description="List of providers for multi-model synthesis")
     model: Optional[str] = None
     api_key: Optional[str] = None
@@ -85,6 +86,7 @@ async def get_providers_status():
     ollama_creds = await resolve_provider_credentials("ollama")
     openrouter_creds = await resolve_provider_credentials("openrouter")
     nvidia_creds = await resolve_provider_credentials("nvidia")
+    deepseek_creds = await resolve_provider_credentials("deepseek")
 
     # Probe Groq dynamic models if key is present
     groq_models = ["qwen/qwen3.8-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama-3.3-70b-versatile"]
@@ -180,6 +182,20 @@ async def get_providers_status():
                 ],
                 "badge": "Enterprise NIM",
             },
+            "deepseek": {
+                "name": "DeepSeek AI",
+                "configured": deepseek_creds["has_key"],
+                "has_key": deepseek_creds["has_key"],
+                "stored_in_db": deepseek_creds["stored_in_db"],
+                "key_source": deepseek_creds["key_source"],
+                "api_key_masked": deepseek_creds["api_key_masked"],
+                "default_model": deepseek_creds.get("model") or "deepseek-chat",
+                "supported_models": [
+                    "deepseek-chat",
+                    "deepseek-reasoner",
+                ],
+                "badge": "Reasoning & Coding",
+            },
         },
         "system_time": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
@@ -225,6 +241,11 @@ async def save_provider_key_endpoint(req: SaveProviderKeyRequest):
             latency_ms = t_res.get("latency_ms")
         elif p_name == "nvidia":
             prov = NvidiaProvider(api_key=req.api_key, model=req.model, base_url=req.base_url)
+            t_res = await prov.test_connection(model=req.model)
+            online = t_res.get("success", False)
+            latency_ms = t_res.get("latency_ms")
+        elif p_name == "deepseek":
+            prov = DeepSeekProvider(api_key=req.api_key, model=req.model, base_url=req.base_url)
             t_res = await prov.test_connection(model=req.model)
             online = t_res.get("success", False)
             latency_ms = t_res.get("latency_ms")
@@ -293,6 +314,13 @@ async def test_provider_connection(req: ProviderTestRequest):
         provider = NvidiaProvider(api_key=creds["api_key"], model=target_model, base_url=creds["base_url"])
         res = await provider.test_connection(model=target_model)
         res["provider"] = "nvidia"
+        res["key_source"] = creds["key_source"]
+        res["stored_in_db"] = creds["stored_in_db"]
+        return res
+    elif p_name == "deepseek":
+        provider = DeepSeekProvider(api_key=creds["api_key"], model=target_model, base_url=creds["base_url"])
+        res = await provider.test_connection(model=target_model)
+        res["provider"] = "deepseek"
         res["key_source"] = creds["key_source"]
         res["stored_in_db"] = creds["stored_in_db"]
         return res

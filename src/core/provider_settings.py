@@ -52,6 +52,7 @@ DEFAULT_PROVIDER_MODELS = {
     "openrouter": "anthropic/claude-3.5-sonnet",
     "openai": "gpt-4o",
     "nvidia": "meta/llama-3.3-70b-instruct",
+    "deepseek": "deepseek-chat",
 }
 
 
@@ -162,6 +163,8 @@ async def resolve_provider_credentials(
             resolved_key = settings.openai_api_key or os.getenv("OPENAI_API_KEY", "")
         elif p_id == "nvidia":
             resolved_key = getattr(settings, "nvidia_api_key", None) or os.getenv("NVIDIA_API_KEY", "")
+        elif p_id == "deepseek":
+            resolved_key = getattr(settings, "deepseek_api_key", None) or os.getenv("DEEPSEEK_API_KEY", "")
         if resolved_key:
             key_source = "env"
 
@@ -178,6 +181,8 @@ async def resolve_provider_credentials(
             resolved_base_url = "https://api.openai.com/v1"
         elif p_id == "nvidia":
             resolved_base_url = "https://integrate.api.nvidia.com/v1"
+        elif p_id == "deepseek":
+            resolved_base_url = getattr(settings, "deepseek_base_url", None) or "https://api.deepseek.com"
 
     # 3. Resolve Model
     resolved_model = (explicit_model or "").strip()
@@ -196,6 +201,8 @@ async def resolve_provider_credentials(
             resolved_model = "gpt-4o"
         elif p_id == "nvidia":
             resolved_model = "meta/llama-3.3-70b-instruct"
+        elif p_id == "deepseek":
+            resolved_model = getattr(settings, "deepseek_model", None) or "deepseek-chat"
 
     return {
         "provider_id": p_id,

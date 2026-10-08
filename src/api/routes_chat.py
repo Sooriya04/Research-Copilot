@@ -78,7 +78,7 @@ async def chat_message_endpoint(req: ResearchChatRequest, db: AsyncSession = Dep
                 logger.warning("[ChatEndpoint] RAG pipeline fallback: %s", ex)
 
     # 2. Standard Workspace / Augmented Prompt Synthesis
-    provider = get_llm_provider()
+    provider = get_llm_provider(model=req.model or "")
     augmented_messages: List[ChatMessage] = []
 
     # Build Grounding System Prompt
@@ -136,7 +136,7 @@ async def chat_message_endpoint(req: ResearchChatRequest, db: AsyncSession = Dep
 @router.post("/stream")
 async def chat_stream_endpoint(messages: List[ChatMessage], model: str = "gemini-2.0-flash-lite"):
     """Stream LLM responses using Server-Sent Events (SSE)."""
-    provider = get_llm_provider()
+    provider = get_llm_provider(model=model or "")
 
     async def event_generator():
         async for delta in provider.stream_chat(messages, model=model):

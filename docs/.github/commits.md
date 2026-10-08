@@ -1695,5 +1695,31 @@ bundle compilation (`npm run build`).
   * Verified 100% test pass rate across new and existing RAG and Redis test suites.
   * Built frontend production bundle cleanly with zero errors via Vite.
 
+<br />
 
+## Add DeepSeek LLM Provider, Factory Routing, SQLite Credential Persistence & Clean Up Novelty Telemetry Logging
 
+* **DeepSeek Provider & Dynamic Routing (`src/providers/deepseek.py`, `src/providers/factory.py`)**:
+  * Implemented native OpenAI-compatible `DeepSeekProvider` client targeting official endpoints (`https://api.deepseek.com`), supporting `deepseek-chat` (V3 671B MoE) and `deepseek-reasoner` (R1 reasoning).
+  * Implemented reasoning token handling for R1 (bypassing unsupported JSON object mode and custom temperatures while expanding max token capacity to 4096).
+  * Added dynamic model routing in `src/providers/factory.py`: automatically routes `provider="deepseek"` or any model name matching `deepseek-*` directly to `DeepSeekProvider`.
+  * Updated `src/rag/service.py` and `src/api/routes_chat.py` to forward model parameters into the provider factory.
+
+* **SQLite Persistent Storage & Credential Resolution (`src/core/provider_settings.py`, `src/core/config.py`)**:
+  * Added `deepseek` to `DEFAULT_PROVIDER_MODELS` with default model `deepseek-chat`.
+  * Implemented persistent credential storage (`save_provider_config("deepseek", ...)`), masking keys for safe UI display and storing custom base URLs and models in SQLite `user_settings` table (`data/research_copilot.db`).
+  * Implemented asynchronous SQLite fallback (`_ensure_credentials()`) in both `DeepSeekProvider` and `NvidiaProvider` so providers automatically load stored credentials when instantiated without an explicit key.
+
+* **Frontend Settings & Multi-Engine Novelty Studio UI (`frontend/src/views/SettingsView.jsx`, `frontend/src/views/NoveltyStudioView.jsx`)**:
+  * Added DeepSeek provider configuration card in Settings with model suggestions (`deepseek-chat`, `deepseek-reasoner`) and SQLite database persistence.
+  * Added DeepSeek engine card, drawer configuration, model suggestions, diagnostics connection test target, engine filter dropdown, and side-by-side comparison column in Novelty Studio.
+  * Added custom badges and brand styling (`#0284c7`) across proposal cards.
+
+* **Novelty Engine Telemetry Logging Cleanup (`frontend/src/views/NoveltyStudioView.jsx`)**:
+  * Removed the Novelty Engine Telemetry Stream terminal log box from the Novelty Studio UI.
+  * Removed `telemetryLogs` state and silenced runtime event logging across provider fetch, connection testing, proposal deck clearing, and synthesis operations.
+
+* **Comprehensive Test Suite & Quality Verification (`tests/test_deepseek_provider.py`)**:
+  * Added 4 unit tests covering factory routing (by provider name and model pattern), SQLite database storage and credential retrieval, connection probing mocks, and completion response parsing.
+  * Verified all novelty and provider tests passing 100% green.
+  * Verified clean Vite frontend production build (`public_dist/`) with zero warnings.

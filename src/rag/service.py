@@ -279,7 +279,7 @@ class PaperRAGService:
 
         # 8. LLM Synthesis
         t_llm_start = time.perf_counter()
-        provider = get_llm_provider()
+        provider = get_llm_provider(model=llm_model or "")
         try:
             raw_reply = await provider.complete(messages, model=llm_model)
             llm_latency = round((time.perf_counter() - t_llm_start) * 1000, 2)

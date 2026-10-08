@@ -22,10 +22,11 @@ from src.providers.gemini import GeminiFlashLiteProvider
 from src.providers.groq import GroqProvider
 from src.providers.llm import LocalOllamaProvider
 from src.providers.openrouter import OpenRouterProvider
+from src.providers.deepseek import DeepSeekProvider
 
 router = APIRouter(prefix="/api/v1/settings", tags=["Settings"])
 
-KNOWN_PROVIDERS = ["openai", "gemini", "nvidia", "groq", "ollama", "openrouter"]
+KNOWN_PROVIDERS = ["openai", "gemini", "nvidia", "deepseek", "groq", "ollama", "openrouter"]
 
 
 class ProviderConfig(BaseModel):
@@ -285,6 +286,9 @@ async def test_provider_connection_endpoint(req: TestConnectionRequest):
         res = await _test_openai(api_key=api_key, base_url=base_url, model=model)
     elif p_id == "nvidia":
         res = await _test_nvidia(api_key=api_key, base_url=base_url, model=model)
+    elif p_id == "deepseek":
+        prov = DeepSeekProvider(api_key=api_key, model=model or "deepseek-chat", base_url=base_url)
+        res = await prov.test_connection(model=model)
     else:
         res = {
             "success": False,

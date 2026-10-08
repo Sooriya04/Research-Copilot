@@ -1,6 +1,6 @@
 """
-NVIDIA NIM Provider - High-throughput GPU inference for frontier models.
-Supports streaming, completion, connection validation, and dynamic model routing on build.nvidia.com.
+DeepSeek Provider - Native OpenAI-compatible API client for DeepSeek-V3 and DeepSeek-R1.
+Supports completions, streaming, connection testing, and model catalog routing.
 """
 import json
 import os
@@ -13,8 +13,8 @@ from src.core.logger import logger
 from src.providers.base import BaseLLMProvider, ChatMessage
 
 
-class NvidiaProvider(BaseLLMProvider):
-    """NVIDIA NIM API client supporting Meta Llama 3.3, Nemotron, DeepSeek, and Mixtral on NVIDIA DGX Cloud."""
+class DeepSeekProvider(BaseLLMProvider):
+    """DeepSeek API client supporting deepseek-chat (V3) and deepseek-reasoner (R1)."""
 
     def __init__(
         self,
@@ -22,14 +22,15 @@ class NvidiaProvider(BaseLLMProvider):
         model: Optional[str] = None,
         base_url: Optional[str] = None,
     ):
-        self.api_key = (
+        raw_key = (
             api_key
-            or getattr(settings, "nvidia_api_key", None)
-            or os.getenv("NVIDIA_API_KEY", "")
-        ).strip()
-        raw_url = base_url or "https://integrate.api.nvidia.com/v1"
+            or getattr(settings, "deepseek_api_key", None)
+            or os.getenv("DEEPSEEK_API_KEY", "")
+        )
+        self.api_key = raw_key.strip() if raw_key else ""
+        raw_url = base_url or getattr(settings, "deepseek_base_url", "https://api.deepseek.com") or "https://api.deepseek.com"
         self.base_url = raw_url.rstrip("/")
-        self.default_model = model or "meta/llama-3.3-70b-instruct"
+        self.default_model = model or getattr(settings, "deepseek_model", "deepseek-chat") or "deepseek-chat"
 
     def _get_headers(self) -> Dict[str, str]:
         headers = {
@@ -45,7 +46,7 @@ class NvidiaProvider(BaseLLMProvider):
         if not self.api_key:
             try:
                 from src.core.provider_settings import get_saved_provider_config
-                cfg = await get_saved_provider_config("nvidia")
+                cfg = await get_saved_provider_config("deepseek")
                 if cfg and cfg.get("api_key"):
                     self.api_key = cfg["api_key"]
                 if cfg and cfg.get("base_url") and not self.base_url:
@@ -53,19 +54,12 @@ class NvidiaProvider(BaseLLMProvider):
                 if cfg and cfg.get("model") and not self.default_model:
                     self.default_model = cfg["model"]
             except Exception as e:
-                logger.debug("[NvidiaProvider] Failed resolving SQLite credentials: %s", e)
+                logger.debug("[DeepSeekProvider] Failed resolving SQLite credentials: %s", e)
 
     async def list_models(self) -> List[str]:
-        """Fetch available models from NVIDIA NIM or return curated high-performing catalog."""
+        """Fetch available models from DeepSeek API or return curated catalog."""
         await self._ensure_credentials()
-        curated = [
-            "meta/llama-3.3-70b-instruct",
-            "nvidia/llama-3.1-nemotron-70b-instruct",
-            "deepseek-ai/deepseek-r1",
-            "mistralai/mixtral-8x22b-instruct-v0.1",
-            "meta/llama-3.1-405b-instruct",
-            "meta/llama-3.1-8b-instruct",
-        ]
+        curated = ["deepseek-chat", "deepseek-reasoner"]
         if not self.api_key:
             return curated
         try:
@@ -74,24 +68,20 @@ class NvidiaProvider(BaseLLMProvider):
                 if resp.status_code == 200:
                     data = resp.json().get("data", [])
                     models = [m.get("id") for m in data if m.get("id")]
-                    chat_models = [
-                        m for m in models
-                        if not any(bad in m.lower() for bad in ["embed", "rerank", "whisper", "guard", "vision"])
-                    ]
-                    return chat_models or models
+                    return models or curated
         except Exception as e:
-            logger.debug("[NvidiaProvider] list_models fallback: %s", e)
+            logger.debug("[DeepSeekProvider] list_models fallback: %s", e)
         return curated
 
     async def test_connection(self, model: Optional[str] = None) -> Dict[str, Any]:
-        """Verify API key validity and probe the particular target model."""
+        """Verify DeepSeek API key validity and test model responsiveness."""
         await self._ensure_credentials()
-        target_mdl = (model or self.default_model or "meta/llama-3.3-70b-instruct").strip()
+        target_mdl = (model or self.default_model or "deepseek-chat").strip()
         if not self.api_key:
             return {
                 "success": False,
                 "latency_ms": 0.0,
-                "error": "NVIDIA API key is missing. Enter a valid key from build.nvidia.com (starts with 'nvapi-').",
+                "error": "DeepSeek API key is missing. Configure a valid key (starts with 'sk-') in Settings or SQLite.",
                 "model": target_mdl,
             }
 
@@ -115,14 +105,21 @@ class NvidiaProvider(BaseLLMProvider):
                     return {
                         "success": True,
                         "latency_ms": latency,
-                        "message": f"Connected & verified NVIDIA NIM model '{target_mdl}'",
+                        "message": f"Connected & verified DeepSeek model '{target_mdl}'",
                         "model": target_mdl,
                     }
                 elif resp.status_code == 401:
                     return {
                         "success": False,
                         "latency_ms": latency,
-                        "error": "Authentication failed: Invalid NVIDIA API key (HTTP 401).",
+                        "error": "Authentication failed: Invalid DeepSeek API key (HTTP 401).",
+                        "model": target_mdl,
+                    }
+                elif resp.status_code == 402:
+                    return {
+                        "success": False,
+                        "latency_ms": latency,
+                        "error": "Insufficient balance on DeepSeek account (HTTP 402).",
                         "model": target_mdl,
                     }
                 else:
@@ -135,7 +132,7 @@ class NvidiaProvider(BaseLLMProvider):
                     return {
                         "success": False,
                         "latency_ms": latency,
-                        "error": f"NVIDIA model '{target_mdl}' check failed: {err_msg}",
+                        "error": f"DeepSeek model '{target_mdl}' probe failed: {err_msg}",
                         "model": target_mdl,
                     }
         except Exception as e:
@@ -143,7 +140,7 @@ class NvidiaProvider(BaseLLMProvider):
             return {
                 "success": False,
                 "latency_ms": latency,
-                "error": f"NVIDIA NIM connection failed: {str(e)}",
+                "error": f"DeepSeek connection failed: {str(e)}",
                 "model": target_mdl,
             }
 
@@ -152,16 +149,15 @@ class NvidiaProvider(BaseLLMProvider):
         messages: List[ChatMessage],
         model: Optional[str] = None,
         temperature: float = 0.3,
-        json_mode: bool = True,
+        json_mode: bool = False,
     ) -> str:
-        """Generate completion via NVIDIA NIM OpenAI-compatible endpoint."""
+        """Generate completion via DeepSeek OpenAI-compatible endpoint."""
         await self._ensure_credentials()
         target_model = (model or self.default_model).strip()
         if not self.api_key:
-            logger.warning("[NvidiaProvider] No API key detected. Returning error payload.")
+            logger.warning("[DeepSeekProvider] No API key detected. Returning error payload.")
             return json.dumps({
-                "error": "Missing NVIDIA_API_KEY. Configure NVIDIA API key in Novelty Studio or .env.",
-                "proposals": [],
+                "error": "Missing DEEPSEEK_API_KEY. Configure DeepSeek API key in Settings or .env.",
             })
 
         formatted_messages = [
@@ -171,13 +167,17 @@ class NvidiaProvider(BaseLLMProvider):
             "model": target_model,
             "messages": formatted_messages,
             "temperature": temperature,
-            "max_tokens": 1024,
         }
-        if json_mode:
-            payload["response_format"] = {"type": "json_object"}
+        # DeepSeek reasoner (R1) doesn't use temperature or json_object, but deepseek-chat does
+        if "reasoner" not in target_model.lower():
+            if json_mode:
+                payload["response_format"] = {"type": "json_object"}
+        else:
+            # For reasoning models, default max_tokens may need to be higher to allow chain of thought
+            payload["max_tokens"] = 4096
 
         try:
-            async with httpx.AsyncClient(timeout=75.0) as client:
+            async with httpx.AsyncClient(timeout=90.0) as client:
                 resp = await client.post(
                     f"{self.base_url}/chat/completions",
                     headers=self._get_headers(),
@@ -185,11 +185,12 @@ class NvidiaProvider(BaseLLMProvider):
                 )
                 if resp.status_code == 200:
                     data = resp.json()
-                    return data["choices"][0]["message"]["content"]
-                
-                # If json_object response_format caused an error, retry once without it
+                    choice = data["choices"][0]["message"]
+                    return choice.get("content") or ""
+
+                # Retry without json_mode if json_object caused an error
                 if resp.status_code in (400, 422) and json_mode:
-                    logger.info("[NvidiaProvider] Retrying without response_format json_object...")
+                    logger.info("[DeepSeekProvider] Retrying without json_object response_format...")
                     payload.pop("response_format", None)
                     retry_resp = await client.post(
                         f"{self.base_url}/chat/completions",
@@ -198,13 +199,13 @@ class NvidiaProvider(BaseLLMProvider):
                     )
                     if retry_resp.status_code == 200:
                         data = retry_resp.json()
-                        return data["choices"][0]["message"]["content"]
+                        return data["choices"][0]["message"].get("content") or ""
 
-                logger.error("[NvidiaProvider] Request failed (%d): %s", resp.status_code, resp.text)
-                return json.dumps({"error": f"NVIDIA NIM error ({resp.status_code}): {resp.text}"})
+                logger.error("[DeepSeekProvider] Request failed (%d): %s", resp.status_code, resp.text)
+                return json.dumps({"error": f"DeepSeek API error ({resp.status_code}): {resp.text}"})
         except Exception as e:
-            logger.error("[NvidiaProvider] Execution exception: %s", e)
-            return json.dumps({"error": f"NVIDIA NIM exception: {str(e)}"})
+            logger.error("[DeepSeekProvider] Execution exception: %s", e)
+            return json.dumps({"error": f"DeepSeek API exception: {str(e)}"})
 
     async def stream_chat(
         self,
@@ -212,14 +213,15 @@ class NvidiaProvider(BaseLLMProvider):
         model: Optional[str] = None,
         temperature: float = 0.3,
     ) -> AsyncGenerator[str, None]:
-        """Stream token chunks via Server-Sent Events."""
+        """Stream token chunks via Server-Sent Events from DeepSeek."""
         await self._ensure_credentials()
         if not self.api_key:
-            yield "NVIDIA NIM streaming unavailable: NVIDIA_API_KEY not configured."
+            yield "DeepSeek streaming unavailable: DEEPSEEK_API_KEY not configured."
             return
 
-        payload = {
-            "model": model or self.default_model,
+        target_model = (model or self.default_model).strip()
+        payload: Dict[str, Any] = {
+            "model": target_model,
             "messages": [{"role": m.role, "content": m.content} for m in messages],
             "temperature": temperature,
             "stream": True,
@@ -228,19 +230,31 @@ class NvidiaProvider(BaseLLMProvider):
         try:
             async with httpx.AsyncClient(timeout=90.0) as client:
                 async with client.stream(
-                    "POST", f"{self.base_url}/chat/completions", headers=self._get_headers(), json=payload
-                ) as resp:
-                    async for line in resp.aiter_lines():
-                        if line.startswith("data: "):
-                            raw = line.replace("data: ", "").strip()
-                            if raw == "[DONE]":
-                                break
-                            try:
-                                chunk = json.loads(raw)
-                                delta = chunk["choices"][0]["delta"].get("content", "")
-                                if delta:
-                                    yield delta
-                            except Exception:
-                                continue
+                    "POST",
+                    f"{self.base_url}/chat/completions",
+                    headers=self._get_headers(),
+                    json=payload,
+                ) as response:
+                    if response.status_code != 200:
+                        err_text = await response.aread()
+                        yield f"DeepSeek error ({response.status_code}): {err_text.decode('utf-8', errors='ignore')}"
+                        return
+
+                    async for line in response.aiter_lines():
+                        line = line.strip()
+                        if not line or not line.startswith("data: "):
+                            continue
+                        data_str = line[6:].strip()
+                        if data_str == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data_str)
+                            delta = chunk.get("choices", [{}])[0].get("delta", {})
+                            content = delta.get("content", "")
+                            if content:
+                                yield content
+                        except json.JSONDecodeError:
+                            continue
         except Exception as e:
-            yield f"NVIDIA NIM streaming error: {str(e)}"
+            logger.error("[DeepSeekProvider] Streaming exception: %s", e)
+            yield f"DeepSeek streaming error: {str(e)}"

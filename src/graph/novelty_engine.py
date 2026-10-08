@@ -24,6 +24,7 @@ from src.providers.groq import GroqProvider
 from src.providers.llm import LocalOllamaProvider
 from src.providers.openrouter import OpenRouterProvider
 from src.providers.nvidia import NvidiaProvider
+from src.providers.deepseek import DeepSeekProvider
 from src.core.provider_settings import resolve_provider_credentials
 from src.core.config import settings
 
@@ -421,6 +422,9 @@ class GraphNoveltyEngine:
         elif p_name == "nvidia":
             mdl = resolved_model or "meta/llama-3.3-70b-instruct"
             return NvidiaProvider(api_key=resolved_key, model=mdl, base_url=resolved_base_url), "nvidia", mdl
+        elif p_name == "deepseek":
+            mdl = resolved_model or "deepseek-chat"
+            return DeepSeekProvider(api_key=resolved_key, model=mdl, base_url=resolved_base_url), "deepseek", mdl
         else:
             if not api_key and not model and self.provider:
                 return self.provider, "gemini", getattr(self.provider, "model", "gemini-3.5-flash-lite")

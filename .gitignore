@@ -25,6 +25,9 @@ public
 artifacts/*
 !artifacts/status.md
 data/
+*.db
+*.sqlite
+*.sqlite3
 others/
 dump_extract/
 

@@ -3,18 +3,33 @@ from src.providers.base import BaseLLMProvider
 from src.providers.llm import LocalOllamaProvider, OpenRouterProvider
 from src.providers.nvidia import NvidiaProvider
 from src.providers.groq import GroqProvider
+from src.providers.deepseek import DeepSeekProvider
 
-def get_llm_provider(provider_name: str = "") -> BaseLLMProvider:
+
+def get_llm_provider(
+    provider_name: str = "",
+    model: str = "",
+    api_key: str = "",
+    base_url: str = "",
+) -> BaseLLMProvider:
     """Factory to instantiate the configured LLM provider."""
+    # If model is explicitly a deepseek model and provider is not specified
+    if not provider_name and model:
+        m_lower = model.lower()
+        if "deepseek" in m_lower and "/" not in m_lower:
+            return DeepSeekProvider(api_key=api_key or None, model=model, base_url=base_url or None)
+
     name = (provider_name or settings.default_llm_provider or "ollama").lower()
     if name == "ollama":
-        return LocalOllamaProvider()
+        return LocalOllamaProvider(model=model or getattr(settings, "ollama_model", "phi4-mini"), base_url=base_url or None)
     elif name == "nvidia":
-        return NvidiaProvider()
+        return NvidiaProvider(api_key=api_key or None, model=model or None, base_url=base_url or None)
     elif name == "groq":
-        return GroqProvider()
+        return GroqProvider(api_key=api_key or None, model=model or None, base_url=base_url or None)
+    elif name == "deepseek":
+        return DeepSeekProvider(api_key=api_key or None, model=model or None, base_url=base_url or None)
     elif name == "openrouter":
-        if settings.openrouter_api_key:
-            return OpenRouterProvider()
-        return LocalOllamaProvider()
-    return LocalOllamaProvider()
+        if api_key or settings.openrouter_api_key:
+            return OpenRouterProvider(api_key=api_key or None, model=model or None)
+        return LocalOllamaProvider(model=model or getattr(settings, "ollama_model", "phi4-mini"), base_url=base_url or None)
+    return LocalOllamaProvider(model=model or getattr(settings, "ollama_model", "phi4-mini"), base_url=base_url or None)
