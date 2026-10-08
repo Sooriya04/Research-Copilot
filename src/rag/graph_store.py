@@ -135,6 +135,63 @@ class PaperGraphStore:
         rel_res = await db.execute(rel_stmt)
         relationships = rel_res.scalars().all()
 
+        # If graph is empty but paper exists in SQLite chunks, auto-extract on the fly
+        if not entities:
+            try:
+                from src.core.models import PaperChunkModel, PaperDocumentModel
+                from src.rag.graph_extractor import PaperGraphExtractor
+                doc_stmt = select(PaperDocumentModel).where(PaperDocumentModel.id == paper_id)
+                doc_res = await db.execute(doc_stmt)
+                paper_doc = doc_res.scalar_one_or_none()
+                if paper_doc:
+                    c_stmt = select(PaperChunkModel).where(PaperChunkModel.paper_id == paper_id).order_by(PaperChunkModel.chunk_index)
+                    c_res = await db.execute(c_stmt)
+                    chunks = c_res.scalars().all()
+                    if chunks:
+                        extractor = PaperGraphExtractor()
+                        raw_authors = paper_doc.authors_json or []
+                        authors = raw_authors if isinstance(raw_authors, list) else []
+                        ext_entities, ext_relationships = extractor.extract_from_chunks(
+                            paper_id=paper_id,
+                            chunks=chunks,
+                            title=paper_doc.title,
+                            authors=authors,
+                        )
+                        if ext_entities:
+                            await self.save_graph(paper_id, ext_entities, ext_relationships, db)
+                            return {
+                                "paper_id": paper_id,
+                                "nodes": [
+                                    {
+                                        "id": e.id,
+                                        "label": e.name,
+                                        "type": e.entity_type,
+                                        "page": e.page_number,
+                                        "source_chunk_id": e.source_chunk_id,
+                                        "description": e.description,
+                                    }
+                                    for e in ext_entities
+                                ],
+                                "edges": [
+                                    {
+                                        "id": r.id,
+                                        "source": r.source_entity_id,
+                                        "target": r.target_entity_id,
+                                        "label": r.relationship,
+                                        "relationship": r.relationship,
+                                        "page": r.page_number,
+                                        "source_chunk_id": r.source_chunk_id,
+                                        "confidence": r.confidence,
+                                    }
+                                    for r in ext_relationships
+                                ],
+                                "entity_count": len(ext_entities),
+                                "relationship_count": len(ext_relationships),
+                                "source": "extracted",
+                            }
+            except Exception as auto_ex:
+                logger.warning("[PaperGraphStore] Auto-extraction fallback note: %s", auto_ex)
+
         nodes = [
             {
                 "id": e.id,

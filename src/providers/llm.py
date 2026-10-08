@@ -103,7 +103,7 @@ class LocalOllamaProvider(BaseLLMProvider):
         target_model = self._resolve_model(model)
         payload = {
             "model": target_model,
-            "messages": [m.dict() if hasattr(m, "dict") else dict(m) for m in messages],
+            "messages": [m.model_dump() if hasattr(m, "model_dump") else (m.dict() if hasattr(m, "dict") else dict(m)) for m in messages],
             "stream": False,
             "options": {"temperature": temperature},
         }
@@ -124,7 +124,7 @@ class LocalOllamaProvider(BaseLLMProvider):
         target_model = self._resolve_model(model)
         payload = {
             "model": target_model,
-            "messages": [m.dict() if hasattr(m, "dict") else dict(m) for m in messages],
+            "messages": [m.model_dump() if hasattr(m, "model_dump") else (m.dict() if hasattr(m, "dict") else dict(m)) for m in messages],
             "stream": True,
             "options": {"temperature": temperature},
         }

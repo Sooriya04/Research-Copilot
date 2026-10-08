@@ -306,3 +306,39 @@ async def test_paper_isolation_in_graph_store():
         assert "YNet" in labels_y or "CIFAR-100" in labels_y
         assert "XNet" not in labels_y
         assert "ImageNet-1k" not in labels_y
+
+
+@pytest.mark.asyncio
+async def test_lazy_graph_auto_extraction_on_fly():
+    """Verify that get_graph automatically extracts and persists the graph if paper chunks exist in SQLite but graph was cleared."""
+    fake_client = fake_aioredis.FakeRedis(decode_responses=True)
+    cache = ActivePaperCache(redis_client=fake_client, ttl_seconds=600, enabled=True)
+    store = PaperGraphStore(active_cache=cache)
+    ingestion = PaperIngestionService()
+
+    paper_id = "paper-lazy-extract-001"
+
+    async with get_db_session() as db:
+        await ingestion.ingest_document(
+            paper_id=paper_id,
+            title="Lazy Auto Extraction Test",
+            pages=[{"page_number": 1, "text": "We introduce FastAttention evaluated on SQuAD."}],
+            db=db,
+        )
+
+        # Explicitly clear graph tables for this paper to simulate legacy unextracted paper
+        from sqlalchemy import delete
+        from src.core.models import GraphEntityModel, GraphRelationshipModel
+        await db.execute(delete(GraphRelationshipModel).where(GraphRelationshipModel.paper_id == paper_id))
+        await db.execute(delete(GraphEntityModel).where(GraphEntityModel.paper_id == paper_id))
+        await db.commit()
+        await store.invalidate_graph(paper_id)
+
+        # Calling get_graph should auto-extract and return nodes and edges
+        graph = await store.get_graph(paper_id, db)
+        assert graph["paper_id"] == paper_id
+        assert graph["source"] == "extracted"
+        assert graph["entity_count"] > 0
+        node_labels = [n["label"] for n in graph["nodes"]]
+        assert "FastAttention" in node_labels or "SQuAD" in node_labels
+

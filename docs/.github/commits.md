@@ -1642,3 +1642,20 @@ bundle compilation (`npm run build`).
   * Verified 16/16 RAG and cache tests passing green across backend test suites.
   * Verified frontend builds cleanly with Vite without regression.
 
+<br />
+
+## Resolve Codebase Warnings, Add On-The-Fly Graph Extraction Fallback & Verify Full Test Suite
+
+* **Pydantic V2 Deprecation Fix (`src/providers/llm.py`)**:
+  * Resolved deprecation warnings across `LocalOllamaProvider.chat()` and `LocalOllamaProvider.stream_chat()` by replacing deprecated `.dict()` calls with `.model_dump()`.
+
+* **On-The-Fly Graph Extraction Fallback (`src/rag/graph_store.py`)**:
+  * Enhanced `PaperGraphStore.get_graph()` with lazy extraction fallback: if a paper's graph was cleared or ingested before GraphRAG, it automatically extracts and persists entities and relationships on demand from existing SQLite chunks.
+
+* **Full Suite Health Verification (`tests/test_graph_rag.py`)**:
+  * Added `test_lazy_graph_auto_extraction_on_fly` testing the on-demand graph recovery mechanism.
+  * Re-verified local Ollama daemon connectivity on port 11434 (`phi4-mini` & `nomic-embed-text`).
+  * Executed all 84 test suites across the entire repository passing 100% green.
+  * Verified frontend builds cleanly with zero errors via Vite.
+
+
