@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 from src.core.database import get_db
+from src.core.logger import logger
 from src.providers.base import ChatMessage
 from src.providers.factory import get_llm_provider
 from src.rag.service import PaperRAGService
@@ -23,12 +24,16 @@ class ResearchChatRequest(BaseModel):
     workspace_id: Optional[str] = None
     workspace_memories: Optional[List[Dict[str, Any]]] = None
     model: Optional[str] = "gemini-2.0-flash-lite"
+    mode: Optional[str] = "auto"  # "auto" | "paper" | "research"
 
 
 class ResearchChatResponse(BaseModel):
     response: str
     paper_referenced: Optional[str] = None
     citations: Optional[List[Dict[str, Any]]] = None
+    web_sources: Optional[List[Dict[str, Any]]] = None
+    external_search_used: bool = False
+    mode: str = "auto"
     status: str = "success"
 
 
@@ -57,12 +62,16 @@ async def chat_message_endpoint(req: ResearchChatRequest, db: AsyncSession = Dep
                     question=latest_query,
                     db=db,
                     llm_model=req.model,
+                    mode=req.mode or "auto",
                 )
                 if rag_res.status == "success":
                     return ResearchChatResponse(
                         response=rag_res.answer,
                         paper_referenced=rag_res.paper_title or req.paper_title,
                         citations=[c.dict() if hasattr(c, "dict") else dict(c) for c in rag_res.citations],
+                        web_sources=[w.dict() if hasattr(w, "dict") else dict(w) for w in rag_res.web_sources],
+                        external_search_used=rag_res.external_search_used,
+                        mode=rag_res.mode,
                         status="success",
                     )
             except Exception as ex:

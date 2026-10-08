@@ -3,8 +3,10 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from src.core.config import settings
 from src.core.logger import logger
 from src.core.models import PaperDocumentModel
+from src.engines.searqon_client import SearqonClient, WebSearchResult
 from src.providers.factory import get_llm_provider
 from src.rag.context_builder import ContextBuilder
 from src.rag.graph_retriever import PaperGraphRetriever
@@ -21,12 +23,26 @@ class CitationItem(BaseModel):
     excerpt: Optional[str] = None
 
 
+class WebCitationItem(BaseModel):
+    title: str
+    url: str
+    domain: str = ""
+    source: str = "searqon"
+    snippet: Optional[str] = None
+    published_at: Optional[str] = None
+    query: Optional[str] = None
+
+
 class PaperRAGResponse(BaseModel):
     paper_id: str
     paper_title: Optional[str] = None
     question: str
     answer: str
     citations: List[CitationItem]
+    paper_citations: List[CitationItem] = []
+    web_sources: List[WebCitationItem] = []
+    external_search_used: bool = False
+    mode: str = "auto"
     retrieved_chunks_count: int
     cache_hit: bool = False
     retrieval_source: str = "sqlite"
@@ -35,6 +51,7 @@ class PaperRAGResponse(BaseModel):
     redis_latency_ms: float = 0.0
     retrieval_latency_ms: float = 0.0
     graph_latency_ms: float = 0.0
+    web_search_latency_ms: float = 0.0
     context_latency_ms: float = 0.0
     llm_latency_ms: float = 0.0
     total_latency_ms: float = 0.0
@@ -54,6 +71,7 @@ class PaperRAGService:
         graph_retriever: Optional[PaperGraphRetriever] = None,
         query_router: Optional[QueryRouter] = None,
         active_cache: Optional[Any] = None,
+        searqon_client: Optional[SearqonClient] = None,
     ):
         if active_cache is not None:
             self.active_cache = active_cache
@@ -66,6 +84,7 @@ class PaperRAGService:
         self.ingestion = ingestion_service or PaperIngestionService()
         self.graph_retriever = graph_retriever or PaperGraphRetriever(active_cache=self.active_cache)
         self.query_router = query_router or QueryRouter()
+        self.searqon_client = searqon_client or SearqonClient(active_cache=self.active_cache)
 
     async def answer_question(
         self,
@@ -74,6 +93,7 @@ class PaperRAGService:
         db: AsyncSession,
         top_k: Optional[int] = None,
         llm_model: Optional[str] = None,
+        mode: str = "auto",
     ) -> PaperRAGResponse:
         """Executes hybrid retrieval, builds grounded context, queries LLM, and formats structured citations."""
         overall_start = time.perf_counter()
@@ -89,11 +109,17 @@ class PaperRAGService:
                 pass
 
         if not paper_title:
-            doc_stmt = select(PaperDocumentModel).where(PaperDocumentModel.id == paper_id)
-            res = await db.execute(doc_stmt)
-            paper_doc = res.scalar_one_or_none()
-            if paper_doc:
-                paper_title = paper_doc.title
+            try:
+                doc_stmt = select(PaperDocumentModel).where(PaperDocumentModel.id == paper_id)
+                res = await db.execute(doc_stmt)
+                if hasattr(res, "scalar_one_or_none"):
+                    paper_doc = res.scalar_one_or_none()
+                    if hasattr(paper_doc, "__await__"):
+                        paper_doc = await paper_doc
+                    if paper_doc and hasattr(paper_doc, "title") and isinstance(paper_doc.title, str):
+                        paper_title = paper_doc.title
+            except Exception:
+                pass
 
         # 2. Ensure paper is indexed in RAG tables
         is_indexed = await self.ingestion.ensure_paper_indexed(paper_id, db)
@@ -104,6 +130,10 @@ class PaperRAGService:
                 question=question,
                 answer=f"Paper '{paper_id}' not found or has not been ingested yet. Please upload or ingest the paper first.",
                 citations=[],
+                paper_citations=[],
+                web_sources=[],
+                external_search_used=False,
+                mode=mode,
                 retrieved_chunks_count=0,
                 retrieval_latency_ms=0.0,
                 llm_latency_ms=0.0,
@@ -176,14 +206,50 @@ class PaperRAGService:
                 seen_chunk_ids.add(c_id)
                 merged_chunks.append(rc)
 
-        if not merged_chunks and not (graph_evidence and graph_evidence.get("relationships")):
-            logger.info("[PaperRAGService] No relevant chunks or graph relationships found for '%s'", paper_id)
+        # 6. Searqon External Web Research (Triggered based on query intent & mode)
+        should_search_web = self.query_router.should_search_external(
+            query=question,
+            mode=mode,
+            paper_chunks_found=len(merged_chunks),
+        )
+        web_results: List[WebSearchResult] = []
+        web_search_latency = 0.0
+        generated_query = None
+
+        if should_search_web:
+            paper_context = {"title": paper_title}
+            if self.active_cache:
+                try:
+                    c_data = await self.active_cache.get_paper(paper_id)
+                    if c_data:
+                        paper_context = c_data
+                except Exception:
+                    pass
+
+            generated_query = self.query_router.generate_search_query(question, paper_context=paper_context)
+            t_web = time.perf_counter()
+            try:
+                web_results = await self.searqon_client.search(
+                    query=generated_query,
+                    paper_id=paper_id,
+                    limit=getattr(settings, "web_search_top_k", 5),
+                )
+            except Exception as e:
+                logger.warning("[PaperRAGService] Searqon search failed or timed out: %s", e)
+            web_search_latency = round((time.perf_counter() - t_web) * 1000, 2)
+
+        if not merged_chunks and not (graph_evidence and graph_evidence.get("relationships")) and not web_results:
+            logger.info("[PaperRAGService] No relevant chunks, graph relationships, or web results found for '%s'", paper_id)
             return PaperRAGResponse(
                 paper_id=paper_id,
                 paper_title=paper_title,
                 question=question,
-                answer="I couldn't find enough information about this in the paper.",
+                answer="I couldn't find enough information about this in the paper or external search.",
                 citations=[],
+                paper_citations=[],
+                web_sources=[],
+                external_search_used=False,
+                mode=mode,
                 retrieved_chunks_count=0,
                 cache_hit=cache_hit,
                 retrieval_source=retrieval_source,
@@ -192,24 +258,26 @@ class PaperRAGService:
                 redis_latency_ms=redis_lat,
                 retrieval_latency_ms=retrieval_latency,
                 graph_latency_ms=graph_latency,
+                web_search_latency_ms=web_search_latency,
                 llm_latency_ms=0.0,
                 total_latency_ms=round((time.perf_counter() - overall_start) * 1000, 2),
                 graph_entities_found=len(graph_evidence.get("entities", [])) if graph_evidence else 0,
                 graph_relationships_found=len(graph_evidence.get("relationships", [])) if graph_evidence else 0,
-                status="no_relevant_chunks",
+                status="no_relevant_information",
             )
 
-        # 6. Context Construction
+        # 7. Context Construction
         t_ctx_start = time.perf_counter()
         messages = self.context_builder.build_context(
             question=question,
             retrieved_chunks=merged_chunks,
             paper_title=paper_title,
             graph_evidence=graph_evidence,
+            web_sources=web_results,
         )
         context_latency = round((time.perf_counter() - t_ctx_start) * 1000, 2)
 
-        # 7. LLM Synthesis
+        # 8. LLM Synthesis
         t_llm_start = time.perf_counter()
         provider = get_llm_provider()
         try:
@@ -223,6 +291,10 @@ class PaperRAGService:
                 question=question,
                 answer="Failed to synthesize response from LLM provider.",
                 citations=[],
+                paper_citations=[],
+                web_sources=[],
+                external_search_used=bool(web_results),
+                mode=mode,
                 retrieved_chunks_count=len(merged_chunks),
                 cache_hit=cache_hit,
                 retrieval_source=retrieval_source,
@@ -231,6 +303,7 @@ class PaperRAGService:
                 redis_latency_ms=redis_lat,
                 retrieval_latency_ms=retrieval_latency,
                 graph_latency_ms=graph_latency,
+                web_search_latency_ms=web_search_latency,
                 context_latency_ms=context_latency,
                 llm_latency_ms=round((time.perf_counter() - t_llm_start) * 1000, 2),
                 total_latency_ms=round((time.perf_counter() - overall_start) * 1000, 2),
@@ -239,20 +312,37 @@ class PaperRAGService:
                 status="llm_error",
             )
 
-        # 8. Extract and Verify Citations
+        # 9. Extract and Verify Citations
         raw_citations = self.context_builder.extract_structured_citations(raw_reply, merged_chunks)
         citations = [CitationItem(**c) for c in raw_citations]
 
+        raw_web_cits = self.context_builder.extract_structured_web_citations(raw_reply, web_results)
+        web_sources = [
+            WebCitationItem(
+                title=w.get("title", ""),
+                url=w.get("url", ""),
+                domain=w.get("domain", ""),
+                source=w.get("source", "searqon"),
+                snippet=w.get("snippet"),
+                published_at=w.get("published_at"),
+                query=generated_query,
+            )
+            for w in raw_web_cits
+        ]
+
         total_latency = round((time.perf_counter() - overall_start) * 1000, 2)
         logger.info(
-            "[PaperRAGService] Completed query for paper '%s': strategy=%s, source=%s, chunks=%d, citations=%d (retrieval=%sms, graph=%sms, llm=%sms, total=%sms)",
+            "[PaperRAGService] Completed query for paper '%s': mode=%s, strategy=%s, source=%s, chunks=%d, paper_cits=%d, web_cits=%d (retrieval=%sms, graph=%sms, web=%sms, llm=%sms, total=%sms)",
             paper_id,
+            mode,
             strategy,
             retrieval_source,
             len(merged_chunks),
             len(citations),
+            len(web_sources),
             retrieval_latency,
             graph_latency,
+            web_search_latency,
             llm_latency,
             total_latency,
         )
@@ -263,6 +353,10 @@ class PaperRAGService:
             question=question,
             answer=raw_reply,
             citations=citations,
+            paper_citations=citations,
+            web_sources=web_sources,
+            external_search_used=bool(web_results),
+            mode=mode,
             retrieved_chunks_count=len(merged_chunks),
             cache_hit=cache_hit,
             retrieval_source=retrieval_source,
@@ -271,6 +365,7 @@ class PaperRAGService:
             redis_latency_ms=redis_lat,
             retrieval_latency_ms=retrieval_latency,
             graph_latency_ms=graph_latency,
+            web_search_latency_ms=web_search_latency,
             context_latency_ms=context_latency,
             llm_latency_ms=llm_latency,
             total_latency_ms=total_latency,

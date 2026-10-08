@@ -18,11 +18,13 @@ import {
   ChevronDown,
   ChevronUp,
   Paperclip,
+  Globe,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import MarkdownRenderer from '../common/MarkdownRenderer';
 import {
   CitationChip,
+  WebCitationChip,
   EvidenceInspectionPanel,
   EvidenceDrawer,
   ContextQuoteBlock,
@@ -235,6 +237,7 @@ function AskTab({ paper, onJumpToPage, onClearContext, onHighlightEvidence }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [researchMode, setResearchMode] = useState('auto'); // 'auto' | 'paper' | 'research'
   const [selectedCitation, setSelectedCitation] = useState(null);
   const [drawerSources, setDrawerSources] = useState(null);
   const [attachPopoverOpen, setAttachPopoverOpen] = useState(false);
@@ -252,9 +255,10 @@ function AskTab({ paper, onJumpToPage, onClearContext, onHighlightEvidence }) {
     }
   };
 
-  const handleSend = async (textToSend) => {
+  const handleSend = async (textToSend, overrideMode) => {
     const rawQuery = (textToSend || input).trim();
     if (!rawQuery || loading) return;
+    const modeToUse = overrideMode || researchMode;
 
     const parsed = parseAttachedContext(rawQuery);
     const userMsg = {
@@ -281,6 +285,7 @@ function AskTab({ paper, onJumpToPage, onClearContext, onHighlightEvidence }) {
         workspace_id: activeWorkspace?.id || null,
         workspace_memories: workspaceMemories || [],
         model: 'gemini-2.0-flash-lite',
+        mode: modeToUse,
       };
 
       const res = await fetch('/api/v1/chat/message', {
@@ -308,15 +313,31 @@ function AskTab({ paper, onJumpToPage, onClearContext, onHighlightEvidence }) {
           }));
         }
 
+        let webSources = [];
+        if (data.web_sources && Array.isArray(data.web_sources) && data.web_sources.length > 0) {
+          webSources = data.web_sources.map((ws, idx) => ({
+            id: `web-${idx}`,
+            type: 'web',
+            source: ws.source || 'searqon',
+            title: ws.title,
+            url: ws.url,
+            domain: ws.domain || (ws.url ? (() => { try { return new URL(ws.url).hostname.replace('www.', ''); } catch { return 'web'; } })() : 'web'),
+            snippet: ws.snippet,
+            published_at: ws.published_at,
+          }));
+        }
+
         setMessages((prev) => [
           ...prev,
           {
             role: 'assistant',
             content: responseText,
             sources: finalSources,
-            confidence: finalSources.length > 0 ? 0.95 : grounding.confidence,
-            confidenceLabel: finalSources.length > 0 ? 'Direct evidence' : grounding.confidenceLabel,
-            missing: grounding.missing,
+            webSources: webSources,
+            externalSearchUsed: data.external_search_used || webSources.length > 0,
+            confidence: finalSources.length > 0 ? 0.95 : (webSources.length > 0 ? 0.9 : grounding.confidence),
+            confidenceLabel: finalSources.length > 0 ? 'Direct evidence' : (webSources.length > 0 ? 'Searqon Web Research' : grounding.confidenceLabel),
+            missing: grounding.missing && webSources.length === 0,
             missingMessage: grounding.missingMessage,
           },
         ]);
@@ -434,7 +455,7 @@ function AskTab({ paper, onJumpToPage, onClearContext, onHighlightEvidence }) {
                   {m.missing ? (
                     <MissingEvidenceAlert
                       message={m.content || m.missingMessage}
-                      onSearchWeb={() => {}}
+                      onSearchWeb={() => handleSend(m.cleanText || m.content, 'research')}
                     />
                   ) : (
                     <>
@@ -475,6 +496,21 @@ function AskTab({ paper, onJumpToPage, onClearContext, onHighlightEvidence }) {
                                 <span>{m.sources.length} sources →</span>
                               </button>
                             )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Web Research Citations (From Searqon) */}
+                      {m.webSources && m.webSources.length > 0 && (
+                        <div className="research-citations-row web-sources-row" style={{ marginTop: m.sources?.length ? 6 : 8 }}>
+                          <div className="research-citations-chips-group">
+                            <span style={{ fontSize: 10, fontWeight: 700, color: '#60a5fa', textTransform: 'uppercase', letterSpacing: '0.04em', marginRight: 2, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                              <Globe size={10} />
+                              <span>Web Research</span>
+                            </span>
+                            {m.webSources.map((ws) => (
+                              <WebCitationChip key={ws.id} source={ws} />
+                            ))}
                           </div>
                         </div>
                       )}
@@ -533,18 +569,87 @@ function AskTab({ paper, onJumpToPage, onClearContext, onHighlightEvidence }) {
         )}
 
         <div className="copilot-composer-top-row">
-          <button
-            type="button"
-            className="copilot-attach-btn"
-            onClick={() => setAttachPopoverOpen((v) => !v)}
-            title="Attach paper excerpt or section"
-          >
-            <Paperclip size={11} />
-            <span>+ Attach</span>
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <button
+              type="button"
+              className="copilot-attach-btn"
+              onClick={() => setAttachPopoverOpen((v) => !v)}
+              title="Attach paper excerpt or section"
+            >
+              <Paperclip size={11} />
+              <span>+ Attach</span>
+            </button>
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: '6px',
+                padding: '1px 2px',
+                fontSize: '10px',
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setResearchMode('auto')}
+                style={{
+                  background: researchMode === 'auto' ? 'rgba(255,255,255,0.12)' : 'transparent',
+                  color: researchMode === 'auto' ? '#fff' : '#a1a1aa',
+                  border: 'none',
+                  borderRadius: '4px',
+                  padding: '2px 6px',
+                  cursor: 'pointer',
+                  fontSize: '10px',
+                  fontWeight: researchMode === 'auto' ? 600 : 400,
+                }}
+                title="Auto-detect if external research is needed"
+              >
+                Auto
+              </button>
+              <button
+                type="button"
+                onClick={() => setResearchMode('paper')}
+                style={{
+                  background: researchMode === 'paper' ? 'rgba(255,255,255,0.12)' : 'transparent',
+                  color: researchMode === 'paper' ? '#fff' : '#a1a1aa',
+                  border: 'none',
+                  borderRadius: '4px',
+                  padding: '2px 6px',
+                  cursor: 'pointer',
+                  fontSize: '10px',
+                  fontWeight: researchMode === 'paper' ? 600 : 400,
+                }}
+                title="Ground strictly inside paper only"
+              >
+                Paper Only
+              </button>
+              <button
+                type="button"
+                onClick={() => setResearchMode('research')}
+                style={{
+                  background: researchMode === 'research' ? 'rgba(59, 130, 246, 0.25)' : 'transparent',
+                  color: researchMode === 'research' ? '#60a5fa' : '#a1a1aa',
+                  border: 'none',
+                  borderRadius: '4px',
+                  padding: '2px 6px',
+                  cursor: 'pointer',
+                  fontSize: '10px',
+                  fontWeight: researchMode === 'research' ? 600 : 400,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '3px',
+                }}
+                title="Deep research with Searqon external web"
+              >
+                <Globe size={10} />
+                <span>Web Research</span>
+              </button>
+            </div>
+          </div>
           <div className="copilot-active-context-badge">
             <span className="copilot-status-dot" style={{ width: 5, height: 5 }} />
-            <span>Current Paper</span>
+            <span>{researchMode === 'research' ? 'Paper + Searqon' : 'Current Paper'}</span>
           </div>
         </div>
 

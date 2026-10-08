@@ -1658,4 +1658,42 @@ bundle compilation (`npm run build`).
   * Executed all 84 test suites across the entire repository passing 100% green.
   * Verified frontend builds cleanly with zero errors via Vite.
 
+<br />
+
+## Implement Searqon External Web Research Integration & Multi-Modal Citation Grounding
+
+* **Searqon API Client & Credibility Scoring (`src/engines/searqon_client.py`, `src/core/config.py`)**:
+  * Implemented `SearqonClient` connecting to the local Searqon service (`http://localhost:7493/search`), supporting SearXNG and DuckDuckGo search providers.
+  * Added academic credibility score boosting (1.25x – 1.35x) prioritizing authoritative primary domains (`arxiv.org`, `openreview.net`, `nature.com`, `acm.org`, `biorxiv.org`, `github.com`).
+  * Implemented URL normalization, tracking parameter stripping, and deduplication to ensure clean search sources.
+  * Added Redis caching (`paper:{paper_id}:web_search:{query_hash}`) with configurable TTL to minimize redundant search network latency.
+  * Built resilient zero-downtime fallback: catches connection errors and timeouts gracefully; if Searqon is offline or uninstalled, paper RAG continues unimpeded.
+
+* **Deterministic Query Routing & Focused Search Query Generation (`src/rag/query_router.py`)**:
+  * Implemented `should_search_external(query, mode, paper_chunks_found)` determining when external web research is needed.
+  * Keeps internal questions strictly within the paper (*"What is the main contribution?"*, *"Explain methodology"*, *"What dataset was used?"*, *"Explain Figure 3"*).
+  * Automatically routes external comparative and recency questions to Searqon (*"What papers came after this work?"*, *"Are there newer approaches?"*, *"How does this compare with current 2026 methods?"*, *"Current SOTA on benchmark?"*).
+  * Implemented `generate_search_query(query, paper_context)` synthesizing focused web queries by fusing query intent with paper title, primary method, and core topic.
+
+* **Context Builder Segregation & Dual Citation Verifier (`src/rag/context_builder.py`, `src/rag/service.py`)**:
+  * Enforced strict context segregation in `ContextBuilder`, formatting web results under `--- EXTERNAL WEB RESEARCH (From Searqon) ---` alongside paper evidence.
+  * Added anti-hallucination prompt instructions requiring distinct attribution for paper facts (`[p.X]`) versus external web facts (`[Web: domain]`).
+  * Built `extract_structured_web_citations()` to parse cited domains and URLs, returning structured `WebCitationItem` metadata (`title`, `url`, `domain`, `source`, `snippet`).
+  * Updated `PaperRAGResponse` to return `citations`, `paper_citations`, `web_sources`, `external_search_used`, `mode`, and `web_search_latency_ms`.
+
+* **API Endpoints & Research Mode Integration (`src/api/routes_paper_rag.py`, `src/api/routes_chat.py`)**:
+  * Added dedicated `POST /api/v1/papers/{paper_id}/research` (and `/papers/{paper_id}/research`) endpoint forcing deep research mode (Paper + GraphRAG + Searqon).
+  * Enhanced `POST /api/v1/papers/{paper_id}/chat` and `POST /api/v1/chat/message` with configurable research modes: `mode: "auto" | "paper" | "research"`.
+
+* **Frontend Interactive Reader & Web Citation Chips (`frontend/src/components/reader/EvidenceDrawer.jsx`, `frontend/src/components/reader/PaperReaderSidebar.jsx`)**:
+  * Added mode selector switch (`Auto`, `Paper Only`, `Web Research`) directly in the reader sidebar chat composer.
+  * Built interactive `WebCitationChip` component (`[Web · {domain}]`) with globe icon, domain badge, hover preview popover showing snippet and title, and direct `[Open source ↗]` link.
+  * Enhanced `MissingEvidenceAlert` with a single-click action to seamlessly trigger external Searqon web research when a query is missing from the active paper.
+
+* **Comprehensive Test Suite & Build Verification (`tests/test_searqon_research.py`)**:
+  * Built 9 unit and integration tests covering normalization, academic credibility boosting, offline resilience fallback, query routing triggers, query generation, context builder formatting, web citation extraction, and FastAPI endpoints.
+  * Verified 100% test pass rate across new and existing RAG and Redis test suites.
+  * Built frontend production bundle cleanly with zero errors via Vite.
+
+
 

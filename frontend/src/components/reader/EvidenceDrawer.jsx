@@ -15,6 +15,7 @@ import {
   HelpCircle,
   Search,
   Sparkles,
+  Globe,
 } from 'lucide-react';
 
 // Get matching icon for evidence source type
@@ -28,10 +29,114 @@ export function getEvidenceTypeIcon(type, size = 11) {
       return <Sigma size={size} />;
     case 'reference':
       return <Bookmark size={size} />;
+    case 'web':
+      return <Globe size={size} />;
     case 'text':
     default:
       return <FileText size={size} />;
   }
+}
+
+// ─── Web Citation Chip with Preview & External Link ─────────────────────────
+export function WebCitationChip({ source }) {
+  const [hovered, setHovered] = useState(false);
+  if (!source) return null;
+
+  const domain = source.domain || (source.url ? (() => { try { return new URL(source.url).hostname.replace('www.', ''); } catch { return 'web'; } })() : 'web');
+  const title = source.title || 'External Research Source';
+  const snippet = source.snippet || '';
+
+  return (
+    <span
+      className="web-citation-chip-wrapper"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{ position: 'relative', display: 'inline-block', margin: '2px 4px 2px 0' }}
+    >
+      <button
+        type="button"
+        className="citation-chip citation-type-web"
+        onClick={() => source.url && window.open(source.url, '_blank', 'noopener,noreferrer')}
+        title={`External source: ${title} (${domain})`}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '4px',
+          padding: '2px 7px',
+          borderRadius: '12px',
+          fontSize: '11px',
+          fontWeight: '500',
+          background: 'rgba(59, 130, 246, 0.12)',
+          border: '1px solid rgba(59, 130, 246, 0.35)',
+          color: '#60a5fa',
+          cursor: 'pointer',
+        }}
+      >
+        <Globe size={11} />
+        <span>[Web · {domain}]</span>
+        <ExternalLink size={10} style={{ opacity: 0.7 }} />
+      </button>
+
+      {hovered && (
+        <div
+          className="citation-hover-popover web-source-popover"
+          style={{
+            position: 'absolute',
+            bottom: '100%',
+            left: '0',
+            marginBottom: '6px',
+            zIndex: 100,
+            width: '280px',
+            background: '#18181b',
+            border: '1px solid rgba(59, 130, 246, 0.4)',
+            borderRadius: '8px',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+            padding: '10px',
+            fontSize: '12px',
+            color: '#e4e4e7',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#60a5fa', fontWeight: '600', fontSize: '11px' }}>
+              <Globe size={12} />
+              <span>{domain}</span>
+            </span>
+            <span style={{ fontSize: '10px', color: '#a1a1aa' }}>Searqon Research</span>
+          </div>
+
+          <div style={{ fontWeight: '600', marginBottom: '4px', lineHeight: '1.3', color: '#fafafa' }}>
+            {title}
+          </div>
+
+          {snippet && (
+            <div style={{ fontSize: '11px', color: '#a1a1aa', marginBottom: '8px', lineHeight: '1.4', maxHeight: '72px', overflow: 'hidden' }}>
+              "{snippet.length > 140 ? snippet.slice(0, 140) + '…' : snippet}"
+            </div>
+          )}
+
+          {source.url && (
+            <a
+              href={source.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                fontSize: '11px',
+                color: '#38bdf8',
+                textDecoration: 'none',
+                fontWeight: '500',
+              }}
+            >
+              <span>Open source</span>
+              <ExternalLink size={10} />
+            </a>
+          )}
+        </div>
+      )}
+    </span>
+  );
 }
 
 // ─── 1. Compact Clickable Citation Chip with Hover Preview ────────────────────

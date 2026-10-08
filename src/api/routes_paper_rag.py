@@ -22,6 +22,7 @@ class PaperChatRequest(BaseModel):
     question: str
     top_k: Optional[int] = None
     model: Optional[str] = None
+    mode: Optional[str] = "auto"  # "auto" | "paper" | "research"
 
 
 class PaperIngestPayload(BaseModel):
@@ -61,6 +62,32 @@ async def paper_rag_chat_endpoint(
         db=db,
         top_k=req.top_k,
         llm_model=req.model,
+        mode=req.mode or "auto",
+    )
+    return response
+
+
+@router.post("/api/v1/papers/{paper_id}/research", response_model=PaperRAGResponse)
+@router.post("/papers/{paper_id}/research", response_model=PaperRAGResponse)
+async def paper_research_endpoint(
+    paper_id: str,
+    req: PaperChatRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Deep research endpoint explicitly running Research Mode (Paper + Knowledge Graph + Searqon External Web)."""
+    if not req.question or not req.question.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Question cannot be empty.",
+        )
+
+    response = await rag_service.answer_question(
+        paper_id=paper_id,
+        question=req.question.strip(),
+        db=db,
+        top_k=req.top_k,
+        llm_model=req.model,
+        mode="research",
     )
     return response
 

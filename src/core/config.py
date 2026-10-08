@@ -48,6 +48,13 @@ class Settings(BaseSettings):
     redis_active_paper_ttl: int = 3600
     redis_enabled: bool = True
     
+    # Searqon External Web Research Configuration
+    searqon_base_url: str = "http://localhost:7493"
+    searqon_timeout: float = 10.0
+    web_search_top_k: int = 5
+    web_search_cache_ttl: int = 900
+    web_search_enabled: bool = True
+
     # Graph & Loop Execution limits
     max_loop_iterations: int = 10
     default_rank_limit: int = 25
