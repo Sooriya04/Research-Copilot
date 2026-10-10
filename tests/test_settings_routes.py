@@ -102,3 +102,60 @@ def test_settings_save_and_delete_provider(client):
     # Cleanup
     del_resp = client.delete("/api/v1/settings/providers/test_mock_provider")
     assert del_resp.status_code == 200
+
+
+def test_get_system_settings(client):
+    """Verify /api/v1/settings/system returns structured categories and variables."""
+    resp = client.get("/api/v1/settings/system")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "categories" in data
+    assert "settings" in data
+    keys = [item["key"] for item in data["settings"]]
+    assert "semantic_scholar_api_key" in keys
+    assert "openalex_email" in keys
+    assert "embedding_provider" in keys
+    assert "rag_chunk_size" in keys
+    assert "redis_url" in keys
+    assert "default_llm_provider" in keys
+
+
+def test_save_system_settings_to_sqlite(client):
+    """Verify saving settings to SQLite updates both database and runtime config."""
+    # 1. Update test settings
+    resp = client.post(
+        "/api/v1/settings/system",
+        json={
+            "settings": {
+                "rag_chunk_size": 950,
+                "embedding_provider": "gemini",
+                "redis_enabled": False,
+            }
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["saved_count"] >= 3
+
+    # 2. Verify values via GET
+    get_resp = client.get("/api/v1/settings/system")
+    assert get_resp.status_code == 200
+    settings_dict = {item["key"]: item for item in get_resp.json()["settings"]}
+    assert settings_dict["rag_chunk_size"]["value"] == 950
+    assert settings_dict["rag_chunk_size"]["stored_in_db"] is True
+    assert settings_dict["embedding_provider"]["value"] == "gemini"
+    assert settings_dict["redis_enabled"]["value"] is False
+
+    # 3. Clean up back to defaults
+    client.post(
+        "/api/v1/settings/system",
+        json={
+            "settings": {
+                "rag_chunk_size": 800,
+                "embedding_provider": "ollama",
+                "redis_enabled": True,
+            }
+        },
+    )
+

@@ -313,22 +313,24 @@ function AskTab({ paper, onJumpToPage, onClearContext, onHighlightEvidence }) {
   const hasKey = Boolean(currentSavedProvider?.has_key);
 
   const availableProviders = useMemo(() => {
-    return KNOWN_PROVIDER_DEFS.map((pDef) => {
-      const saved = providers.find((p) => p.provider_id === pDef.id);
-      const isProviderActive = Boolean(saved?.has_key);
-      const activeModel = saved?.model || pDef.modelPlaceholder || 'default';
-      return {
-        id: pDef.id,
-        name: pDef.name,
-        short: pDef.short,
-        color: pDef.color,
-        bg: pDef.bg,
-        border: pDef.border,
-        hasKey: isProviderActive,
-        activeModel,
-        isCurrent: selectedProviderId === pDef.id,
-      };
-    });
+    return KNOWN_PROVIDER_DEFS
+      .map((pDef) => {
+        const saved = providers.find((p) => p.provider_id === pDef.id);
+        const isProviderActive = Boolean(saved?.has_key);
+        const activeModel = saved?.model || pDef.modelPlaceholder || 'default';
+        return {
+          id: pDef.id,
+          name: pDef.name,
+          short: pDef.short,
+          color: pDef.color,
+          bg: pDef.bg,
+          border: pDef.border,
+          hasKey: isProviderActive,
+          activeModel,
+          isCurrent: selectedProviderId === pDef.id,
+        };
+      })
+      .filter((p) => p.hasKey);
   }, [providers, selectedProviderId]);
 
   const filteredProviders = useMemo(() => {
@@ -718,8 +720,28 @@ function AskTab({ paper, onJumpToPage, onClearContext, onHighlightEvidence }) {
             {/* Scrollable Provider List */}
             <div style={{ maxHeight: 240, overflowY: 'auto', padding: '6px' }}>
               {filteredProviders.length === 0 ? (
-                <div style={{ padding: '12px', fontSize: 12, color: '#94a3b8', textAlign: 'center' }}>
-                  No providers found
+                <div style={{ padding: '16px 12px', fontSize: 12, color: '#94a3b8', textAlign: 'center' }}>
+                  <div style={{ fontWeight: 600, color: '#475569', marginBottom: 4 }}>No configured models found</div>
+                  <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 10 }}>Set up an API key to enable providers</div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setModelSelectorOpen(false);
+                      setConfigModalOpen(true);
+                    }}
+                    style={{
+                      padding: '5px 12px',
+                      fontSize: 11.5,
+                      fontWeight: 600,
+                      borderRadius: 6,
+                      border: '1px solid #c7d2fe',
+                      backgroundColor: '#eef2ff',
+                      color: '#4338ca',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    + Configure AI Models
+                  </button>
                 </div>
               ) : (
                 filteredProviders.map((item) => (

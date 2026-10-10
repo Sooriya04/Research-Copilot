@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useApp } from '../../context/AppContext';
 import {
   Server,
   Cpu,
@@ -137,7 +138,7 @@ export const KNOWN_PROVIDER_DEFS = [
   },
 ];
 
-export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, initialProviderId = null }) {
+export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, initialProviderId = null, inline = false }) {
   const [providers, setProviders] = useState([]);
   const [loadingProviders, setLoadingProviders] = useState(true);
   const [selectedId, setSelectedId] = useState(initialProviderId || 'gemini');
@@ -174,13 +175,13 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
   };
 
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen || inline) {
       fetchProviders();
       if (initialProviderId) {
         setSelectedId(initialProviderId);
       }
     }
-  }, [isOpen, initialProviderId]);
+  }, [isOpen, inline, initialProviderId]);
 
   // Find metadata definition for selected provider
   const currentDef = useMemo(() => {
@@ -215,7 +216,7 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
     }
   }, [selectedId, currentSaved, currentDef]);
 
-  if (!isOpen) return null;
+  if (!isOpen && !inline) return null;
 
   // Providers list in left panel: show configured providers or default known providers
   const displayProvidersList = KNOWN_PROVIDER_DEFS.map((def) => {
@@ -319,75 +320,104 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
     handleSave(clean);
   };
 
-  return (
+  let isDark = false;
+  try {
+    const appCtx = useApp();
+    if (appCtx?.theme === 'dark') isDark = true;
+  } catch (e) {
+    if (typeof document !== 'undefined') {
+      isDark = document.body.classList.contains('dark-theme');
+    }
+  }
+
+  const t = {
+    bgModal: isDark ? '#141417' : '#ffffff',
+    bgHeader: isDark ? '#141417' : '#ffffff',
+    bgSidebar: isDark ? '#0d0d10' : '#f8fafc',
+    bgPanel: isDark ? '#141417' : '#ffffff',
+    bgCardSubtle: isDark ? '#18181c' : '#f8fafc',
+    bgInput: isDark ? '#1c1c22' : '#ffffff',
+    border: isDark ? '#27272a' : '#e2e8f0',
+    borderSubtle: isDark ? '#1e1e24' : '#f1f5f9',
+    borderInput: isDark ? '#3f3f46' : '#cbd5e1',
+    textPrimary: isDark ? '#fafafa' : '#0f172a',
+    textSecondary: isDark ? '#d4d4d8' : '#334155',
+    textMuted: isDark ? '#a1a1aa' : '#64748b',
+    itemHover: isDark ? '#1c1c22' : '#f1f5f9',
+    itemSelected: isDark ? 'rgba(99, 102, 241, 0.2)' : '#eef2ff',
+    itemSelectedBorder: isDark ? 'rgba(99, 102, 241, 0.5)' : '#c7d2fe',
+    itemSelectedText: isDark ? '#c7d2fe' : '#4338ca',
+    chipBg: isDark ? '#1c1c22' : '#ffffff',
+    chipBorder: isDark ? '#33333d' : '#cbd5e1',
+    chipText: isDark ? '#d4d4d8' : '#334155',
+    chipActiveBg: isDark ? 'rgba(99, 102, 241, 0.25)' : '#eef2ff',
+    chipActiveBorder: isDark ? '#6366f1' : '#6366f1',
+    chipActiveText: isDark ? '#a5b4fc' : '#4338ca',
+    footerBg: isDark ? '#0d0d10' : '#ffffff',
+    footerBorder: isDark ? '#27272a' : '#e2e8f0',
+    btnSecondaryBg: isDark ? '#1c1c22' : '#f8fafc',
+    btnSecondaryBorder: isDark ? '#3f3f46' : '#e2e8f0',
+    btnSecondaryText: isDark ? '#d4d4d8' : '#64748b',
+    codeBg: isDark ? '#27272a' : '#e2e8f0',
+  };
+
+  const modalContent = (
     <div
       style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 9999,
+        width: '100%',
+        maxWidth: inline ? '100%' : 960,
+        height: inline ? '720px' : '660px',
+        maxHeight: inline ? 'none' : '90vh',
+        backgroundColor: t.bgModal,
+        borderRadius: inline ? '14px' : '16px',
+        boxShadow: inline
+          ? '0 1px 3px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.04)'
+          : '0 25px 50px -12px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(0, 0, 0, 0.08)',
+        border: inline ? `1px solid ${t.border}` : 'none',
         display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: 'rgba(15, 23, 42, 0.55)',
-        backdropFilter: 'blur(6px)',
-        padding: '24px',
-      }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        flexDirection: 'column',
+        overflow: 'hidden',
+        fontFamily: 'var(--font-main, sans-serif)',
+        color: t.textPrimary,
       }}
     >
+      {/* ── Top Header ── */}
       <div
         style={{
-          width: '100%',
-          maxWidth: 960,
-          height: '660px',
-          maxHeight: '90vh',
-          backgroundColor: '#ffffff',
-          borderRadius: '16px',
-          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(0, 0, 0, 0.08)',
           display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-          fontFamily: 'var(--font-main, sans-serif)',
-          color: '#0f172a',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '16px 24px',
+          borderBottom: `1px solid ${t.border}`,
+          backgroundColor: t.bgHeader,
         }}
       >
-        {/* ── Top Header ── */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '16px 24px',
-            borderBottom: '1px solid #e2e8f0',
-            backgroundColor: '#ffffff',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div
-              style={{
-                width: 38,
-                height: 38,
-                borderRadius: 10,
-                backgroundColor: '#f1f5f9',
-                border: '1px solid #e2e8f0',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#475569',
-              }}
-            >
-              <Cpu size={20} />
-            </div>
-            <div>
-              <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: '#0f172a' }}>
-                AI Model Configuration
-              </h2>
-              <p style={{ fontSize: 12, margin: 0, color: '#64748b' }}>
-                Configure multiple AI providers, API credentials, and models
-              </p>
-            </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div
+            style={{
+              width: 38,
+              height: 38,
+              borderRadius: 10,
+              backgroundColor: isDark ? '#1e1e26' : '#f1f5f9',
+              border: `1px solid ${t.border}`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: isDark ? '#a5b4fc' : '#475569',
+            }}
+          >
+            <Cpu size={20} />
           </div>
+          <div>
+            <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: t.textPrimary }}>
+              AI Model Configuration
+            </h2>
+            <p style={{ fontSize: 12, margin: 0, color: t.textMuted }}>
+              Configure multiple AI providers, API credentials, and models (Persisted in SQLite)
+            </p>
+          </div>
+        </div>
+        {!inline && onClose ? (
           <button
             type="button"
             onClick={onClose}
@@ -395,7 +425,7 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
               background: 'transparent',
               border: 'none',
               cursor: 'pointer',
-              color: '#94a3b8',
+              color: t.textMuted,
               padding: 6,
               borderRadius: 6,
               display: 'flex',
@@ -406,7 +436,30 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
           >
             <X size={18} />
           </button>
-        </div>
+        ) : (
+          <button
+            type="button"
+            onClick={fetchProviders}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '6px 12px',
+              borderRadius: 6,
+              border: `1px solid ${t.btnSecondaryBorder}`,
+              background: t.btnSecondaryBg,
+              color: t.btnSecondaryText,
+              fontSize: 12,
+              fontWeight: 500,
+              cursor: 'pointer',
+            }}
+            title="Refresh providers list"
+          >
+            <RefreshCw size={13} className={loadingProviders ? 'animate-spin' : ''} />
+            Refresh
+          </button>
+        )}
+      </div>
 
         {/* ── Body: Two Columns ── */}
         <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
@@ -414,8 +467,8 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
           <div
             style={{
               width: 280,
-              borderRight: '1px solid #e2e8f0',
-              backgroundColor: '#f8fafc',
+              borderRight: `1px solid ${t.border}`,
+              backgroundColor: t.bgSidebar,
               display: 'flex',
               flexDirection: 'column',
               padding: '14px',
@@ -425,7 +478,7 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
               style={{
                 fontSize: 10.5,
                 fontWeight: 700,
-                color: '#64748b',
+                color: t.textMuted,
                 textTransform: 'uppercase',
                 letterSpacing: '0.06em',
                 marginBottom: 10,
@@ -452,8 +505,8 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
                       justifyContent: 'space-between',
                       padding: '9px 12px',
                       borderRadius: 9,
-                      border: isSelected ? '1px solid #c7d2fe' : '1px solid transparent',
-                      backgroundColor: isSelected ? '#eef2ff' : 'transparent',
+                      border: isSelected ? `1px solid ${t.itemSelectedBorder}` : '1px solid transparent',
+                      backgroundColor: isSelected ? t.itemSelected : 'transparent',
                       cursor: 'pointer',
                       textAlign: 'left',
                       transition: 'all 0.15s ease',
@@ -483,7 +536,7 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
                           style={{
                             fontSize: 13,
                             fontWeight: isSelected ? 600 : 500,
-                            color: isSelected ? '#4338ca' : '#1e293b',
+                            color: isSelected ? t.itemSelectedText : t.textPrimary,
                             whiteSpace: 'nowrap',
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
@@ -494,7 +547,7 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
                         <div
                           style={{
                             fontSize: 10.5,
-                            color: '#64748b',
+                            color: t.textMuted,
                             whiteSpace: 'nowrap',
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
@@ -522,7 +575,7 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
                           style={{
                             fontSize: 10,
                             color: '#d97706',
-                            backgroundColor: '#fef3c7',
+                            backgroundColor: isDark ? 'rgba(217, 119, 6, 0.2)' : '#fef3c7',
                             padding: '1px 5px',
                             borderRadius: 4,
                             fontWeight: 600,
@@ -532,7 +585,7 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
                           No Key
                         </span>
                       )}
-                      <ChevronRight size={14} style={{ color: isSelected ? '#6366f1' : '#94a3b8' }} />
+                      <ChevronRight size={14} style={{ color: isSelected ? '#6366f1' : t.textMuted }} />
                     </div>
                   </button>
                 );
@@ -540,7 +593,7 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
             </div>
 
             {/* Bottom + Add Provider Button */}
-            <div style={{ position: 'relative', marginTop: 12, paddingTop: 10, borderTop: '1px solid #e2e8f0' }}>
+            <div style={{ position: 'relative', marginTop: 12, paddingTop: 10, borderTop: `1px solid ${t.border}` }}>
               <button
                 type="button"
                 onClick={() => setShowAddMenu((v) => !v)}
@@ -551,9 +604,9 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
                   justifyContent: 'space-between',
                   padding: '9px 12px',
                   borderRadius: 8,
-                  border: '1px solid #e2e8f0',
-                  backgroundColor: '#ffffff',
-                  color: '#334155',
+                  border: `1px solid ${t.borderInput}`,
+                  backgroundColor: t.bgModal,
+                  color: t.textPrimary,
                   fontSize: 12.5,
                   fontWeight: 600,
                   cursor: 'pointer',
@@ -574,10 +627,10 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
                     bottom: '105%',
                     left: 0,
                     right: 0,
-                    backgroundColor: '#ffffff',
-                    border: '1px solid #cbd5e1',
+                    backgroundColor: t.bgModal,
+                    border: `1px solid ${t.borderInput}`,
                     borderRadius: 10,
-                    boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1)',
+                    boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.3)',
                     padding: 4,
                     display: 'flex',
                     flexDirection: 'column',
@@ -603,7 +656,7 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
                         borderRadius: 6,
                         border: 'none',
                         background: 'transparent',
-                        color: '#1e293b',
+                        color: t.textPrimary,
                         fontSize: 12,
                         cursor: 'pointer',
                         textAlign: 'left',
@@ -639,7 +692,7 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
               flex: 1,
               display: 'flex',
               flexDirection: 'column',
-              backgroundColor: '#ffffff',
+              backgroundColor: t.bgPanel,
               padding: '24px 28px',
               overflowY: 'auto',
             }}
@@ -672,11 +725,11 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
                   {currentDef.short}
                 </span>
                 <div>
-                  <h3 style={{ fontSize: 17, fontWeight: 700, margin: 0, color: '#0f172a' }}>
+                  <h3 style={{ fontSize: 17, fontWeight: 700, margin: 0, color: t.textPrimary }}>
                     {currentDef.name}
                   </h3>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
-                    <span style={{ fontSize: 12, color: '#64748b' }}>
+                    <span style={{ fontSize: 12, color: t.textMuted }}>
                       {currentSaved?.has_key
                         ? `Configured · Model: ${currentModel || currentSaved.model || 'default'}`
                         : 'No API key configured'}
@@ -713,9 +766,9 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
                     gap: 6,
                     padding: '6px 12px',
                     borderRadius: 6,
-                    border: '1px solid #fee2e2',
-                    backgroundColor: '#fff5f5',
-                    color: '#e11d48',
+                    border: isDark ? '1px solid rgba(225, 29, 72, 0.3)' : '1px solid #fee2e2',
+                    backgroundColor: isDark ? 'rgba(225, 29, 72, 0.12)' : '#fff5f5',
+                    color: '#f43f5e',
                     fontSize: 12,
                     fontWeight: 500,
                     cursor: 'pointer',
@@ -737,7 +790,7 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
                   gap: 6,
                   fontSize: 11,
                   fontWeight: 700,
-                  color: '#64748b',
+                  color: t.textMuted,
                   letterSpacing: '0.05em',
                   textTransform: 'uppercase',
                   marginBottom: 10,
@@ -749,8 +802,8 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
 
               <div
                 style={{
-                  backgroundColor: '#f8fafc',
-                  border: '1px solid #e2e8f0',
+                  backgroundColor: t.bgCardSubtle,
+                  border: `1px solid ${t.border}`,
                   borderRadius: 12,
                   padding: 16,
                   display: 'flex',
@@ -765,7 +818,7 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
                       display: 'block',
                       fontSize: 12,
                       fontWeight: 600,
-                      color: '#334155',
+                      color: t.textSecondary,
                       marginBottom: 5,
                     }}
                   >
@@ -775,14 +828,20 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
                     type="text"
                     value={displayName}
                     onChange={(e) => setDisplayName(e.target.value)}
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
+                    data-lpignore="true"
+                    data-form-type="other"
                     style={{
                       width: '100%',
                       padding: '9px 12px',
                       borderRadius: 8,
-                      border: '1px solid #cbd5e1',
-                      backgroundColor: '#ffffff',
+                      border: `1px solid ${t.borderInput}`,
+                      backgroundColor: t.bgInput,
                       fontSize: 13,
-                      color: '#0f172a',
+                      color: t.textPrimary,
                       outline: 'none',
                     }}
                     placeholder={currentDef.name}
@@ -792,12 +851,12 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
                 {/* API Key */}
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
-                    <label style={{ fontSize: 12, fontWeight: 600, color: '#334155' }}>
+                    <label style={{ fontSize: 12, fontWeight: 600, color: t.textSecondary }}>
                       🔑 API Key
                     </label>
                     {currentSaved?.api_key_masked && !apiKeyInput && (
-                      <span style={{ fontSize: 11, color: '#64748b' }}>
-                        Active: <code style={{ backgroundColor: '#e2e8f0', padding: '1px 4px', borderRadius: 4 }}>{currentSaved.api_key_masked}</code>
+                      <span style={{ fontSize: 11, color: t.textMuted }}>
+                        Active: <code style={{ backgroundColor: t.codeBg, color: t.textPrimary, padding: '1px 4px', borderRadius: 4 }}>{currentSaved.api_key_masked}</code>
                       </span>
                     )}
                   </div>
@@ -808,6 +867,13 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
                         type={showApiKey ? 'text' : 'password'}
                         value={apiKeyInput}
                         onChange={(e) => setApiKeyInput(e.target.value)}
+                        autoComplete="new-password"
+                        autoCorrect="off"
+                        autoCapitalize="off"
+                        spellCheck={false}
+                        data-lpignore="true"
+                        data-form-type="other"
+                        data-1p-ignore="true"
                         placeholder={
                           currentSaved?.has_key
                             ? '•••••••••••••••• (Leave blank to keep current)'
@@ -817,11 +883,11 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
                           width: '100%',
                           padding: '9px 38px 9px 12px',
                           borderRadius: 8,
-                          border: '1px solid #cbd5e1',
-                          backgroundColor: '#ffffff',
+                          border: `1px solid ${t.borderInput}`,
+                          backgroundColor: t.bgInput,
                           fontSize: 13,
                           fontFamily: 'var(--font-code, monospace)',
-                          color: '#0f172a',
+                          color: t.textPrimary,
                           outline: 'none',
                         }}
                       />
@@ -836,7 +902,7 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
                           background: 'none',
                           border: 'none',
                           cursor: 'pointer',
-                          color: '#94a3b8',
+                          color: t.textMuted,
                           display: 'flex',
                           alignItems: 'center',
                           padding: 4,
@@ -887,9 +953,9 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
                         display: 'flex',
                         alignItems: 'center',
                         gap: 8,
-                        backgroundColor: testResult.success ? '#f0fdf4' : '#fef2f2',
-                        border: `1px solid ${testResult.success ? '#bbf7d0' : '#fecaca'}`,
-                        color: testResult.success ? '#15803d' : '#b91c1c',
+                        backgroundColor: testResult.success ? (isDark ? 'rgba(22, 163, 74, 0.18)' : '#f0fdf4') : (isDark ? 'rgba(220, 38, 38, 0.18)' : '#fef2f2'),
+                        border: `1px solid ${testResult.success ? (isDark ? 'rgba(34, 197, 94, 0.35)' : '#bbf7d0') : (isDark ? 'rgba(239, 68, 68, 0.35)' : '#fecaca')}`,
+                        color: testResult.success ? (isDark ? '#4ade80' : '#15803d') : (isDark ? '#f87171' : '#b91c1c'),
                       }}
                     >
                       {testResult.success ? (
@@ -916,7 +982,7 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
                       display: 'block',
                       fontSize: 12,
                       fontWeight: 600,
-                      color: '#334155',
+                      color: t.textSecondary,
                       marginBottom: 5,
                     }}
                   >
@@ -926,16 +992,22 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
                     type="text"
                     value={baseUrlInput}
                     onChange={(e) => setBaseUrlInput(e.target.value)}
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
+                    data-lpignore="true"
+                    data-form-type="other"
                     placeholder={currentDef.defaultBaseUrl || 'https://...'}
                     style={{
                       width: '100%',
                       padding: '9px 12px',
                       borderRadius: 8,
-                      border: '1px solid #cbd5e1',
-                      backgroundColor: '#ffffff',
+                      border: `1px solid ${t.borderInput}`,
+                      backgroundColor: t.bgInput,
                       fontSize: 12.5,
                       fontFamily: 'var(--font-code, monospace)',
-                      color: '#0f172a',
+                      color: t.textPrimary,
                       outline: 'none',
                     }}
                   />
@@ -991,7 +1063,7 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
                     gap: 6,
                     fontSize: 11,
                     fontWeight: 700,
-                    color: '#64748b',
+                    color: t.textMuted,
                     letterSpacing: '0.05em',
                     textTransform: 'uppercase',
                   }}
@@ -1009,11 +1081,19 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
                     type="text"
                     value={customModelInput}
                     onChange={(e) => setCustomModelInput(e.target.value)}
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
+                    data-lpignore="true"
+                    data-form-type="other"
                     placeholder="Custom model ID..."
                     style={{
                       padding: '6px 10px',
                       borderRadius: 6,
-                      border: '1px solid #cbd5e1',
+                      border: `1px solid ${t.borderInput}`,
+                      backgroundColor: t.bgInput,
+                      color: t.textPrimary,
                       fontSize: 12,
                       width: 170,
                       outline: 'none',
@@ -1024,9 +1104,9 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
                     style={{
                       padding: '6px 10px',
                       borderRadius: 6,
-                      border: '1px solid #cbd5e1',
-                      backgroundColor: '#ffffff',
-                      color: '#334155',
+                      border: `1px solid ${t.borderInput}`,
+                      backgroundColor: t.btnSecondaryBg,
+                      color: t.btnSecondaryText,
                       fontSize: 12,
                       cursor: 'pointer',
                       display: 'flex',
@@ -1043,8 +1123,8 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
               {/* Models Box */}
               <div
                 style={{
-                  backgroundColor: '#f8fafc',
-                  border: '1px solid #e2e8f0',
+                  backgroundColor: t.bgCardSubtle,
+                  border: `1px solid ${t.border}`,
                   borderRadius: 12,
                   padding: 16,
                   display: 'flex',
@@ -1052,13 +1132,13 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
                   gap: 12,
                 }}
               >
-                <div style={{ fontSize: 12, color: '#475569', fontWeight: 600 }}>
+                <div style={{ fontSize: 12, color: t.textSecondary, fontWeight: 600 }}>
                   Active Model:
                   <span
                     style={{
                       marginLeft: 8,
-                      backgroundColor: '#e0e7ff',
-                      color: '#4338ca',
+                      backgroundColor: isDark ? 'rgba(99, 102, 241, 0.25)' : '#e0e7ff',
+                      color: isDark ? '#a5b4fc' : '#4338ca',
                       padding: '2px 8px',
                       borderRadius: 6,
                       fontFamily: 'var(--font-code, monospace)',
@@ -1071,7 +1151,7 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
 
                 {/* Suggested Model Chips (from Screenshot 22-58-42) */}
                 <div>
-                  <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, marginBottom: 8 }}>
+                  <div style={{ fontSize: 11, color: t.textMuted, fontWeight: 600, marginBottom: 8 }}>
                     Suggested Models:
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -1088,9 +1168,9 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
                             gap: 6,
                             padding: '6px 12px',
                             borderRadius: 20,
-                            border: isActive ? '1px solid #6366f1' : '1px solid #cbd5e1',
-                            backgroundColor: isActive ? '#eef2ff' : '#ffffff',
-                            color: isActive ? '#4338ca' : '#334155',
+                            border: isActive ? `1px solid ${t.chipActiveBorder}` : `1px solid ${t.chipBorder}`,
+                            backgroundColor: isActive ? t.chipActiveBg : t.chipBg,
+                            color: isActive ? t.chipActiveText : t.chipText,
                             fontSize: 12,
                             fontFamily: 'var(--font-code, monospace)',
                             cursor: 'pointer',
@@ -1099,7 +1179,7 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
                             transition: 'all 0.15s ease',
                           }}
                         >
-                          {isActive ? <Check size={12} color="#6366f1" /> : <Plus size={12} color="#94a3b8" />}
+                          {isActive ? <Check size={12} color="#6366f1" /> : <Plus size={12} color={t.textMuted} />}
                           <span>{sug}</span>
                         </button>
                       );
@@ -1118,10 +1198,10 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
             alignItems: 'center',
             justifyContent: 'space-between',
             padding: '12px 24px',
-            borderTop: '1px solid #e2e8f0',
-            backgroundColor: '#ffffff',
+            borderTop: `1px solid ${t.footerBorder}`,
+            backgroundColor: t.footerBg,
             fontSize: 12,
-            color: '#64748b',
+            color: t.textMuted,
           }}
         >
           {/* Left: Show unvalidated models toggle */}
@@ -1136,12 +1216,36 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
           </label>
 
           {/* Right: Storage guarantee */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#64748b' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: t.textMuted }}>
             <Lock size={12} />
             <span>API keys are securely stored in SQLite database</span>
           </div>
         </div>
       </div>
+  );
+
+  if (inline) {
+    return modalContent;
+  }
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 9999,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(15, 23, 42, 0.55)',
+        backdropFilter: 'blur(6px)',
+        padding: '24px',
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && onClose) onClose();
+      }}
+    >
+      {modalContent}
     </div>
   );
 }

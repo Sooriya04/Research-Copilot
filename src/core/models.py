@@ -117,6 +117,15 @@ class UserSettingsModel(Base):
     model = Column(String, nullable=True)                      # user-selected model
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
+class SystemSettingModel(Base):
+    """System-wide configuration, environment variables, and preferences stored in SQLite."""
+    __tablename__ = "system_settings"
+
+    key = Column(String, primary_key=True)
+    value = Column(Text, nullable=True)
+    category = Column(String, nullable=True, index=True)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
 class WorkspaceMemoryModel(Base):
     """Structured long-term research memory for workspaces (decisions, hypotheses, constraints, findings)."""
     __tablename__ = "workspace_memories"

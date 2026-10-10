@@ -1875,6 +1875,59 @@ bundle compilation (`npm run build`).
   * Verified Vite frontend production build (`npm run build`) compiles cleanly with zero warnings or errors in `6.85s` (`public_dist/`).
   * Verified all backend unit and integration tests passing 100% green: **108 passed, 0 failed** in `154.91s`.
 
+<br />
+
+## Unified Settings Dashboard, SQLite Persistence for All .env Variables, Dark Theme Polish, and Model Configurator
+
+* **SQLite System Settings Persistence (`src/core/models.py`, `src/core/system_settings.py`, `src/core/database.py`)**:
+  * Created `SystemSettingModel` table in SQLite (`key`, `value`, `category`, `updated_at`) for robust, persistent storage of all application environment settings and credentials.
+  * Added `src/core/system_settings.py` managing schema definitions, types (string, int, float, boolean), masking for sensitive API keys, loading SQLite records into runtime configuration (`load_system_settings_into_config`), and transactional updates (`save_system_settings`).
+  * Integrated automatic settings synchronization into `init_db()` in `src/core/database.py`, loading SQLite-persisted values into the runtime config singleton on server startup.
+
+* **Settings & External Service Verification API (`src/api/routes_settings.py`)**:
+  * Added `GET /api/v1/settings/system` to retrieve all structured configuration settings across Academic, RAG, Infrastructure, and Reasoning domains.
+  * Added `POST /api/v1/settings/system` for transactional batch updates to SQLite and immediate in-memory application to active services without server restarts.
+  * Added `POST /api/v1/settings/test-service` providing live end-to-end ping and verification testing for:
+    * **Redis**: Validates connection and measures round-trip latency (`PONG`).
+    * **Searqon**: Verifies web search scraper endpoint availability.
+    * **Semantic Scholar**: Validates API key authenticity against the live S2 graph endpoint.
+    * **OpenAlex**: Tests polite pool connectivity and optional premium key validity.
+
+* **Comprehensive Full-.env Settings Coverage**:
+  * **Academic & Literature**: `SEMANTIC_SCHOLAR_API_KEY`, `OPENALEX_EMAIL`, `OPENALEX_API_KEY`, `arxiv_base_url`, `crossref_base_url`, `europepmc_base_url`.
+  * **Embeddings & Vector RAG**: `EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`, `EMBEDDING_DIM`, `RAG_CHUNK_SIZE`, `RAG_CHUNK_OVERLAP`, `RAG_TOP_K`.
+  * **Cache & Infrastructure**: `REDIS_ENABLED`, `REDIS_URL`, `REDIS_ACTIVE_PAPER_TTL`, `WEB_SEARCH_ENABLED`, `SEARQON_BASE_URL`, `searqon_timeout`, `web_search_top_k`, `web_search_cache_ttl`.
+  * **Reasoning & Agent Execution**: `DEFAULT_LLM_PROVIDER`, `max_loop_iterations`, `default_rank_limit`.
+  * **AI Model Providers**: `GEMINI_API_KEY`, `GROQ_API_KEY`, `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `NVIDIA_API_KEY`, `OPENROUTER_API_KEY`, `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`.
+
+* **Settings UI Overhaul & Component Reuse (`frontend/src/views/SettingsView.jsx`, `frontend/src/components/modals/ModelConfigModal.jsx`)**:
+  * Extended `ModelConfigModal` with an `inline={true}` prop to allow direct, seamless embedding without duplicating code or recreating UI components from scratch.
+  * Redesigned `SettingsView.jsx` into a clean, modern dashboard with segmented category tabs:
+    * **AI Models & Providers**: Embeds the full two-column model configurator with provider navigation, latency testing, model chips, and SQLite storage indicators.
+    * **Academic & Search APIs**: Cards for Semantic Scholar, OpenAlex, and repository endpoints with key visibility toggles, live API testing, and direct documentation links.
+    * **Embeddings & Vector RAG**: Configuration for embedding engines, model checkpoints, vector dimensions, and interactive sliders for chunk size, chunk overlap, and top-K passages.
+    * **Cache & Infrastructure**: Toggle switches and connection URLs for Redis and Searqon with live ping buttons.
+    * **Reasoning & Agent Limits**: Dropdown for default LLM provider, recursion limits, and ranking depth.
+  * Removed redundant outer `"Multi-Provider AI Engine Manager"` banner from the models tab for an uncluttered layout.
+  * Added top header with database synchronization indicators and instant feedback toasts on save.
+
+* **Dark Theme Polish & Credential Autocomplete Suppression**:
+  * Connected [`SettingsView.jsx`](file:///home/sooriya/Desktop/research-copilot/frontend/src/views/SettingsView.jsx) and [`ModelConfigModal.jsx`](file:///home/sooriya/Desktop/research-copilot/frontend/src/components/modals/ModelConfigModal.jsx) to `useApp()` theme context (`theme === 'dark'`).
+  * Implemented dark theme palette across all 5 settings tabs: dark canvas (`#09090b`), card surfaces (`#141417`), inputs (`#1c1c22`), subtle borders (`#27272a`), crisp white headers (`#fafafa`), and high-contrast muted text (`#a1a1aa`).
+  * Added `autoComplete="new-password"`, `autoComplete="off"`, `data-lpignore="true"`, `data-1p-ignore="true"`, and `data-form-type="other"` across all credential and API key inputs to prevent intrusive browser autofill overlays and password manager popups.
+
+* **Chat Composer Provider Visibility Filtering (`frontend/src/components/reader/PaperReaderSidebar.jsx`)**:
+  * Updated provider selector in the chat composer to strictly filter for providers whose API keys or configurations are saved in SQLite (`has_key: true`).
+  * Unconfigured providers are hidden from the dropdown picker, preventing accidental selection of inactive services.
+  * Provided an interactive `+ Configure AI Models` fallback button in the selector when no providers are configured.
+
+* **Unit Tests & Verification (`tests/test_settings_routes.py`)**:
+  * Added unit tests validating `GET /api/v1/settings/system`, batch updates via `POST /api/v1/settings/system`, and runtime config mutation (7 passed in 2.73s).
+  * Verified Vite frontend production build (`npm run build`) compiles cleanly in `6.95s`.
+
+
+
+
 
 
 

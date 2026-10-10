@@ -24,6 +24,11 @@ from src.providers.llm import LocalOllamaProvider
 from src.providers.openrouter import OpenRouterProvider
 from src.providers.deepseek import DeepSeekProvider
 
+from src.core.system_settings import (
+    get_all_system_settings,
+    save_system_settings,
+)
+
 router = APIRouter(prefix="/api/v1/settings", tags=["Settings"])
 
 KNOWN_PROVIDERS = ["openai", "gemini", "nvidia", "deepseek", "groq", "ollama", "openrouter"]
@@ -301,3 +306,196 @@ async def test_provider_connection_endpoint(req: TestConnectionRequest):
     res["stored_in_db"] = creds["stored_in_db"]
     res["model"] = model
     return res
+
+
+# ---------------------------------------------------------------------------
+# System Settings & External Services Endpoints
+# ---------------------------------------------------------------------------
+
+class SystemSettingsUpdateRequest(BaseModel):
+    settings: Dict[str, Any]
+
+
+class TestServiceRequest(BaseModel):
+    service_id: str
+    target_url: Optional[str] = None
+    api_key: Optional[str] = None
+    email: Optional[str] = None
+
+
+@router.get("/system")
+async def get_system_settings_endpoint():
+    """Retrieve all environment and system-level configuration parameters."""
+    return await get_all_system_settings()
+
+
+@router.post("/system")
+async def save_system_settings_endpoint(req: SystemSettingsUpdateRequest):
+    """Save batch updates to system settings in SQLite and update runtime config."""
+    result = await save_system_settings(req.settings)
+    refreshed = await get_all_system_settings()
+    return {"ok": True, "saved_count": result.get("saved_count", 0), "data": refreshed}
+
+
+async def _test_redis_service(url: str) -> Dict[str, Any]:
+    start = time.perf_counter()
+    try:
+        import redis.asyncio as aioredis
+        client = aioredis.from_url(
+            url,
+            decode_responses=True,
+            socket_timeout=3.0,
+            socket_connect_timeout=3.0,
+        )
+        await client.ping()
+        await client.aclose()
+        latency = round((time.perf_counter() - start) * 1000, 2)
+        return {
+            "success": True,
+            "latency_ms": latency,
+            "message": f"Redis ping successful (PONG received in {latency} ms)",
+        }
+    except Exception as e:
+        latency = round((time.perf_counter() - start) * 1000, 2)
+        return {
+            "success": False,
+            "latency_ms": latency,
+            "error": f"Failed reaching Redis at '{url}': {str(e)}",
+        }
+
+
+async def _test_searqon_service(url: str) -> Dict[str, Any]:
+    start = time.perf_counter()
+    target = (url or "http://localhost:7493").rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=4.0) as client:
+            resp = await client.get(f"{target}/health")
+            if resp.status_code not in (200, 404):
+                resp = await client.get(f"{target}/")
+            latency = round((time.perf_counter() - start) * 1000, 2)
+            if resp.status_code in (200, 404):
+                return {
+                    "success": True,
+                    "latency_ms": latency,
+                    "message": f"Searqon endpoint responsive (HTTP {resp.status_code} in {latency} ms)",
+                }
+            return {
+                "success": False,
+                "latency_ms": latency,
+                "error": f"Searqon responded with HTTP {resp.status_code}",
+            }
+    except Exception as e:
+        latency = round((time.perf_counter() - start) * 1000, 2)
+        return {
+            "success": False,
+            "latency_ms": latency,
+            "error": f"Searqon unreachable at {target}: {str(e)}",
+        }
+
+
+async def _test_semantic_scholar_service(api_key: Optional[str]) -> Dict[str, Any]:
+    start = time.perf_counter()
+    headers = {"User-Agent": "ResearchCopilot/2.0"}
+    if api_key and api_key.strip():
+        headers["x-api-key"] = api_key.strip()
+    try:
+        async with httpx.AsyncClient(timeout=6.0) as client:
+            # Query standard Transformer paper
+            resp = await client.get(
+                "https://api.semanticscholar.org/graph/v1/paper/ARXIV:1706.03762?fields=title",
+                headers=headers,
+            )
+            latency = round((time.perf_counter() - start) * 1000, 2)
+            if resp.status_code == 200:
+                has_k = bool(api_key and api_key.strip())
+                return {
+                    "success": True,
+                    "latency_ms": latency,
+                    "message": f"Semantic Scholar reachable & verified ({'API Key active' if has_k else 'Public pool'} in {latency} ms)",
+                }
+            elif resp.status_code == 403:
+                return {
+                    "success": False,
+                    "latency_ms": latency,
+                    "error": "Semantic Scholar returned HTTP 403 Forbidden (Invalid API key)",
+                }
+            return {
+                "success": False,
+                "latency_ms": latency,
+                "error": f"Semantic Scholar responded with status HTTP {resp.status_code}",
+            }
+    except Exception as e:
+        latency = round((time.perf_counter() - start) * 1000, 2)
+        return {
+            "success": False,
+            "latency_ms": latency,
+            "error": f"Semantic Scholar connection error: {str(e)}",
+        }
+
+
+async def _test_openalex_service(email: Optional[str], api_key: Optional[str]) -> Dict[str, Any]:
+    start = time.perf_counter()
+    params = {}
+    headers = {"User-Agent": "ResearchCopilot/2.0"}
+    if email and email.strip():
+        params["mailto"] = email.strip()
+    if api_key and api_key.strip():
+        params["api_key"] = api_key.strip()
+        headers["Authorization"] = f"Bearer {api_key.strip()}"
+    try:
+        async with httpx.AsyncClient(timeout=6.0) as client:
+            resp = await client.get(
+                "https://api.openalex.org/works/W2741809807",
+                params=params,
+                headers=headers,
+            )
+            latency = round((time.perf_counter() - start) * 1000, 2)
+            if resp.status_code == 200:
+                return {
+                    "success": True,
+                    "latency_ms": latency,
+                    "message": f"OpenAlex API verified (Polite pool active in {latency} ms)",
+                }
+            return {
+                "success": False,
+                "latency_ms": latency,
+                "error": f"OpenAlex responded with status HTTP {resp.status_code}",
+            }
+    except Exception as e:
+        latency = round((time.perf_counter() - start) * 1000, 2)
+        return {
+            "success": False,
+            "latency_ms": latency,
+            "error": f"OpenAlex connection error: {str(e)}",
+        }
+
+
+@router.post("/test-service")
+async def test_service_connection_endpoint(req: TestServiceRequest):
+    """Test connectivity to external infrastructure or academic services."""
+    s_id = req.service_id.lower().strip()
+    logger.info("📡 [SettingsAPI] Testing service connection for '%s'...", s_id)
+
+    if s_id == "redis":
+        url = req.target_url or getattr(settings, "redis_url", "redis://localhost:6379")
+        res = await _test_redis_service(url)
+    elif s_id == "searqon":
+        url = req.target_url or getattr(settings, "searqon_base_url", "http://localhost:7493")
+        res = await _test_searqon_service(url)
+    elif s_id == "semantic_scholar":
+        key = req.api_key or getattr(settings, "semantic_scholar_api_key", None)
+        res = await _test_semantic_scholar_service(key)
+    elif s_id == "openalex":
+        em = req.email or getattr(settings, "openalex_email", None)
+        key = req.api_key or getattr(settings, "openalex_api_key", None)
+        res = await _test_openalex_service(em, key)
+    else:
+        res = {
+            "success": False,
+            "latency_ms": 0.0,
+            "error": f"Unknown service: '{s_id}'",
+        }
+
+    res["service_id"] = s_id
+    return res
+

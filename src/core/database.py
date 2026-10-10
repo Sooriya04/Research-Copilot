@@ -36,6 +36,11 @@ async def init_db() -> None:
             except Exception as e:
                 logger.debug("Column migration note: %s", e)
         await conn.run_sync(_migrate_columns)
+    try:
+        from src.core.system_settings import load_system_settings_into_config
+        await load_system_settings_into_config()
+    except Exception as e:
+        logger.debug("System settings sync note: %s", e)
     logger.info("Database initialized successfully at %s", settings.database_url)
 
 @asynccontextmanager
