@@ -1723,3 +1723,29 @@ bundle compilation (`npm run build`).
   * Added 4 unit tests covering factory routing (by provider name and model pattern), SQLite database storage and credential retrieval, connection probing mocks, and completion response parsing.
   * Verified all novelty and provider tests passing 100% green.
   * Verified clean Vite frontend production build (`public_dist/`) with zero warnings.
+
+<br />
+
+## Refine Paper Reader UX, Chat Markdown Formatting, Toolbar Cleanup & Resizable Copilot Sidebar
+
+* **Toolbar Simplification & Cleanup (`frontend/src/views/PaperReaderView.jsx`)**:
+  * Removed non-functional Highlight and Annotation toolbar button stubs and their dividing lines from the secondary reader toolbar.
+  * Cleaned up unused component states (`highlightActive`, `annotationActive`) and Lucide icon imports (`Highlighter`, `FileEdit`), presenting a clean toolbar focused on in-document search and AI Copilot drawer toggling.
+
+* **Chat Markdown Rendering & KaTeX Protection (`frontend/src/components/common/MarkdownRenderer.jsx`, `frontend/src/styles/styles.css`)**:
+  * Enabled natural line break preservation (`breaks: true`) in `marked.setOptions`, preventing conversational replies and bullet lists from collapsing into run-on paragraphs.
+  * Implemented pre-parsing code shield stashing (```` ``` ```` and `` `code` ``), preventing KaTeX math regex from mangling bash environment variables (`$PATH`, `$HOME`) or code dollar signs.
+  * Added styled code block containers with syntax header, language badge, and a one-click clipboard copy button.
+  * Wrapped markdown tables in a dedicated horizontal scroll container (`.chat-table-wrapper`) to ensure wide tables render responsively without breaking layout.
+  * Tuned chat heading typography (`h1`–`h4`) to chat-appropriate proportions (13px–15px) with clean margins.
+  * Removed destructive legacy PDF regexes that erroneously stripped double newlines `\n\n` before lowercase letters in AI responses.
+
+* **Expanded & Draggable AI Copilot Sidebar (`frontend/src/components/reader/PaperReaderSidebar.jsx`, `frontend/src/styles/styles.css`)**:
+  * Increased default AI Assistant panel width from 400px to 480px, eliminating cramped button clipping and text wrapping.
+  * Built an interactive `.copilot-resize-handle` on the left border of `PaperReaderSidebar`, enabling click-and-drag width adjustments (between 380px and 800px) with persistent `localStorage` width storage.
+  * Redesigned bottom composer mode buttons (`Auto`, `Paper Only`, `Web Research`) into a modern segmented pill control with crisp light/dark theme contrast.
+  * Added `white-space: nowrap` and `flex-shrink: 0` to `.copilot-active-context-badge` so the active context badge (`Paper + Searqon`) stays cleanly on a single line.
+
+* **Build & Test Verification**:
+  * Verified frontend production bundle builds cleanly in 6.88s via Vite (`public_dist/`) with 0 errors.
+  * Verified all backend unit test suites passing 10/10 green.

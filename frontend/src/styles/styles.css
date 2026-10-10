@@ -2786,9 +2786,10 @@ body.dark-theme .reader-empty-sheet {
 
 /* Right AI Assistant Panel */
 .reader-assistant-panel {
-  width: 360px;
-  min-width: 340px;
-  max-width: 400px;
+  position: relative;
+  width: var(--sidebar-width, 480px);
+  min-width: 380px;
+  max-width: 800px;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -2797,6 +2798,22 @@ body.dark-theme .reader-empty-sheet {
   flex-shrink: 0;
   box-sizing: border-box;
   overflow: hidden;
+}
+
+.copilot-resize-handle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 5px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 25;
+  transition: background 0.15s ease;
+}
+
+.copilot-resize-handle:hover,
+.copilot-resize-handle:active {
+  background: var(--accent-violet, #6366f1);
 }
 
 .copilot-header {
@@ -2956,11 +2973,11 @@ body.dark-theme .reader-empty-sheet {
    TASK 2 — Paper Chatbot UX Design System
    ========================================================================== */
 
-/* Right AI Panel adjustments (380-420px width) */
+/* Right AI Panel adjustments (responsive width default 480px) */
 .reader-assistant-panel {
-  width: 400px !important;
-  min-width: 380px !important;
-  max-width: 420px !important;
+  width: var(--sidebar-width, 480px);
+  min-width: 380px;
+  max-width: 800px;
 }
 
 /* Copilot Context Bar under header */
@@ -3381,6 +3398,195 @@ body.dark-theme .copilot-quick-action-btn:hover {
   border: 1px solid rgba(99, 102, 241, 0.18);
   border-radius: 10px;
   padding: 1px 7px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* Copilot Mode Segmented Control */
+.copilot-mode-segmented-control {
+  display: inline-flex;
+  align-items: center;
+  background: var(--bg-subtle, #f4f4f5);
+  border: 1px solid var(--border-subtle, #e4e4e7);
+  border-radius: 6px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.copilot-mode-btn {
+  background: transparent;
+  color: var(--text-secondary, #71717a);
+  border: none;
+  border-radius: 4px;
+  padding: 2px 7px;
+  cursor: pointer;
+  font-size: 10.5px;
+  font-weight: 500;
+  transition: all 0.12s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+}
+
+.copilot-mode-btn:hover {
+  color: var(--text-primary, #09090b);
+  background: rgba(0, 0, 0, 0.04);
+}
+
+[data-theme='dark'] .copilot-mode-btn:hover,
+body.dark-theme .copilot-mode-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f4f4f5;
+}
+
+.copilot-mode-btn.active {
+  background: var(--bg-card, #ffffff);
+  color: var(--accent-violet, #6366f1);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.copilot-mode-btn.active.research-mode {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+[data-theme='dark'] .copilot-mode-btn.active,
+body.dark-theme .copilot-mode-btn.active {
+  background: #27272a;
+  color: #a5b4fc;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+[data-theme='dark'] .copilot-mode-btn.active.research-mode,
+body.dark-theme .copilot-mode-btn.active.research-mode {
+  background: rgba(37, 99, 235, 0.25);
+  color: #93c5fd;
+}
+
+/* Chat Markdown Formatting Upgrades */
+.chat-code-block {
+  margin: 10px 0;
+  border-radius: 7px;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  background: #18181b;
+  color: #fafafa;
+}
+
+[data-theme='light'] .chat-code-block,
+body:not(.dark-theme) .chat-code-block {
+  background: #1e1e24;
+  border-color: #e4e4e7;
+}
+
+.chat-code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px;
+  background: rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 10.5px;
+  color: #a1a1aa;
+}
+
+.chat-code-lang {
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  font-family: var(--font-code, monospace);
+}
+
+.chat-code-copy-btn {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  color: #d4d4d8;
+  font-size: 10px;
+  padding: 1px 6px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.chat-code-copy-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+.chat-code-block pre {
+  margin: 0 !important;
+  padding: 10px 12px !important;
+  background: transparent !important;
+  border: none !important;
+  overflow-x: auto;
+  font-size: 12px !important;
+  line-height: 1.5;
+  color: #e4e4e7 !important;
+}
+
+.chat-code-block code {
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  color: inherit !important;
+  font-family: var(--font-code, monospace);
+}
+
+.chat-table-wrapper {
+  margin: 10px 0;
+  overflow-x: auto;
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  border-radius: 6px;
+  background: var(--bg-card, #ffffff);
+}
+
+.chat-markdown-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  text-align: left;
+}
+
+.chat-markdown-table th {
+  background: var(--bg-subtle, #f8fafc);
+  padding: 6px 10px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border-subtle, #e2e8f0);
+  color: var(--text-primary, #09090b);
+}
+
+.chat-markdown-table td {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border-subtle, #e2e8f0);
+  color: var(--text-secondary, #3f3f46);
+}
+
+.chat-markdown-table tr:last-child td {
+  border-bottom: none;
+}
+
+.chat-markdown-heading {
+  margin: 12px 0 6px !important;
+  font-weight: 700 !important;
+  line-height: 1.35 !important;
+  color: var(--text-primary, #09090b) !important;
+}
+
+.chat-markdown-heading.chat-h1 { font-size: 15px !important; }
+.chat-markdown-heading.chat-h2 { font-size: 14px !important; }
+.chat-markdown-heading.chat-h3 { font-size: 13px !important; }
+.chat-markdown-heading.chat-h4 { font-size: 12.5px !important; }
+
+.chat-markdown-link {
+  color: var(--accent-violet, #6366f1);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.chat-markdown-link:hover {
+  color: #4f46e5;
 }
 
 .copilot-composer-input-wrapper {

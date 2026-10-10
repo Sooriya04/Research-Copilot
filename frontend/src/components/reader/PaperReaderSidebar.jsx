@@ -569,7 +569,7 @@ function AskTab({ paper, onJumpToPage, onClearContext, onHighlightEvidence }) {
         )}
 
         <div className="copilot-composer-top-row">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
             <button
               type="button"
               className="copilot-attach-btn"
@@ -579,70 +579,30 @@ function AskTab({ paper, onJumpToPage, onClearContext, onHighlightEvidence }) {
               <Paperclip size={11} />
               <span>+ Attach</span>
             </button>
-            <div
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                background: 'rgba(255,255,255,0.04)',
-                border: '1px solid rgba(255,255,255,0.08)',
-                borderRadius: '6px',
-                padding: '1px 2px',
-                fontSize: '10px',
-              }}
-            >
+            <div className="copilot-mode-segmented-control">
               <button
                 type="button"
+                className={`copilot-mode-btn ${researchMode === 'auto' ? 'active' : ''}`}
                 onClick={() => setResearchMode('auto')}
-                style={{
-                  background: researchMode === 'auto' ? 'rgba(255,255,255,0.12)' : 'transparent',
-                  color: researchMode === 'auto' ? '#fff' : '#a1a1aa',
-                  border: 'none',
-                  borderRadius: '4px',
-                  padding: '2px 6px',
-                  cursor: 'pointer',
-                  fontSize: '10px',
-                  fontWeight: researchMode === 'auto' ? 600 : 400,
-                }}
                 title="Auto-detect if external research is needed"
               >
                 Auto
               </button>
               <button
                 type="button"
+                className={`copilot-mode-btn ${researchMode === 'paper' ? 'active' : ''}`}
                 onClick={() => setResearchMode('paper')}
-                style={{
-                  background: researchMode === 'paper' ? 'rgba(255,255,255,0.12)' : 'transparent',
-                  color: researchMode === 'paper' ? '#fff' : '#a1a1aa',
-                  border: 'none',
-                  borderRadius: '4px',
-                  padding: '2px 6px',
-                  cursor: 'pointer',
-                  fontSize: '10px',
-                  fontWeight: researchMode === 'paper' ? 600 : 400,
-                }}
                 title="Ground strictly inside paper only"
               >
                 Paper Only
               </button>
               <button
                 type="button"
+                className={`copilot-mode-btn ${researchMode === 'research' ? 'active research-mode' : ''}`}
                 onClick={() => setResearchMode('research')}
-                style={{
-                  background: researchMode === 'research' ? 'rgba(59, 130, 246, 0.25)' : 'transparent',
-                  color: researchMode === 'research' ? '#60a5fa' : '#a1a1aa',
-                  border: 'none',
-                  borderRadius: '4px',
-                  padding: '2px 6px',
-                  cursor: 'pointer',
-                  fontSize: '10px',
-                  fontWeight: researchMode === 'research' ? 600 : 400,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '3px',
-                }}
                 title="Deep research with Searqon external web"
               >
-                <Globe size={10} />
+                <Globe size={11} />
                 <span>Web Research</span>
               </button>
             </div>
@@ -1190,9 +1150,56 @@ export default function PaperReaderSidebar({
   onHighlightEvidence,
 }) {
   const [activeTab, setActiveTab] = useState('ask'); // 'ask' | 'benchmarks' | 'details'
+  const [panelWidth, setPanelWidth] = useState(() => {
+    try {
+      const saved = localStorage.getItem('rc_reader_sidebar_width');
+      return saved ? Math.max(380, Math.min(800, Number(saved))) : 480;
+    } catch {
+      return 480;
+    }
+  });
+  const isDragging = useRef(false);
+
+  const handleMouseDown = (e) => {
+    e.preventDefault();
+    isDragging.current = true;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    const handleMouseMove = (moveEvent) => {
+      if (!isDragging.current) return;
+      const calculated = window.innerWidth - moveEvent.clientX;
+      const clamped = Math.max(380, Math.min(800, calculated));
+      setPanelWidth(clamped);
+    };
+
+    const handleMouseUp = () => {
+      isDragging.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+      try {
+        localStorage.setItem('rc_reader_sidebar_width', String(panelWidth));
+      } catch {}
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+  };
 
   return (
-    <aside className="reader-assistant-panel" aria-label="AI Copilot">
+    <aside
+      className="reader-assistant-panel"
+      style={{ width: panelWidth }}
+      aria-label="AI Copilot"
+    >
+      {/* Draggable border handle */}
+      <div
+        className="copilot-resize-handle"
+        onMouseDown={handleMouseDown}
+        title="Drag to resize panel width"
+      />
       {/* Navigation Tab Bar */}
       <div
         style={{

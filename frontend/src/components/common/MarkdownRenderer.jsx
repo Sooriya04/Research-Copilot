@@ -3,7 +3,7 @@ import { marked } from 'marked';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
 
-// Configure custom marked renderer
+// Configure custom marked renderer for chat and academic reading
 const customRenderer = {
   heading(token) {
     const depth = token?.depth || 2;
@@ -15,14 +15,50 @@ const customRenderer = {
       .replace(/<[^>]*>/g, '')
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/(^-|-$)/g, '');
-    return `<h${depth} id="${cleanId}" class="academic-heading academic-h${depth}">${cleanText}</h${depth}>`;
+    return `<h${depth} id="${cleanId}" class="chat-markdown-heading chat-h${depth}">${cleanText}</h${depth}>`;
+  },
+
+  code(token) {
+    const codeText = token?.text || '';
+    const lang = (token?.lang || '').trim();
+    const escaped = codeText
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    return `<div class="chat-code-block">
+      <div class="chat-code-header">
+        <span class="chat-code-lang">${lang || 'code'}</span>
+        <button type="button" class="chat-code-copy-btn" onclick="navigator.clipboard.writeText(this.closest('.chat-code-block').querySelector('code').textContent); this.textContent='Copied!'; setTimeout(()=>this.textContent='Copy', 1500)">Copy</button>
+      </div>
+      <pre><code class="language-${lang}">${escaped}</code></pre>
+    </div>`;
+  },
+
+  table(token) {
+    const header = (token?.header || [])
+      .map((cell) => `<th>${this.parser.parseInline(cell.tokens || [])}</th>`)
+      .join('');
+    const rows = (token?.rows || [])
+      .map((row) => {
+        const cells = row
+          .map((cell) => `<td>${this.parser.parseInline(cell.tokens || [])}</td>`)
+          .join('');
+        return `<tr>${cells}</tr>`;
+      })
+      .join('');
+    return `<div class="chat-table-wrapper"><table class="chat-markdown-table"><thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table></div>`;
+  },
+
+  link(token) {
+    const href = token?.href || '#';
+    const text = this.parser.parseInline(token?.tokens || []);
+    return `<a href="${href}" target="_blank" rel="noopener noreferrer" class="chat-markdown-link">${text}</a>`;
   },
 
   image(token) {
     const rawHref = token?.href ? token.href.trim() : '';
     let href = rawHref;
     if (href && !href.startsWith('data:') && !href.startsWith('http://') && !href.startsWith('https://')) {
-      // Strip accidental router subpaths from relative links
       href = href.replace(/^(\.\/|\/?library\/|\/?reader\/)+/, '');
       if (href.startsWith('dump_extract/')) {
         href = '/' + href;
@@ -64,95 +100,113 @@ export default function MarkdownRenderer({ content, className = '', onImageClick
   const renderedHtml = useMemo(() => {
     if (!content) return '';
 
-    let processed = String(content);
+    let text = String(content);
 
-    // Strip OCR picture text comments
-    processed = processed.replace(/<!-- Start of picture text -->[\s\S]*?<!-- End of picture text -->/g, '');
+    // 1. Stash code blocks and inline code to shield them from math parsing
+    const codeStash = [];
+    text = text.replace(/```[\s\S]*?```/g, (match) => {
+      const ph = `@@@CODE_BLOCK_${codeStash.length}@@@`;
+      codeStash.push(match);
+      return ph;
+    });
+    text = text.replace(/`[^`\n]+?`/g, (match) => {
+      const ph = `@@@CODE_BLOCK_${codeStash.length}@@@`;
+      codeStash.push(match);
+      return ph;
+    });
 
-    // Strip running page headers and author banners (e.g., '2 Laiq et al.', 'Agentic AI for contextualized...')
-    processed = processed.replace(/\n\n(?:\-\s*)?\d{1,3}\s+[A-Za-z\s\.,\-]+et al\.\s*\n\n/g, '\n\n');
-    processed = processed.replace(/\n\n(?:\-\s*)?(?:Agentic AI for contextualized and multifaceted code review|[A-Za-z\s\.,\-]+et al\.)(?:\s+\d{1,3})?\s*\n\n/gi, '\n\n');
-    // Rejoin sentences split across page breaks
-    processed = processed.replace(/(?<=[a-zA-Z,–—\(\)])\s*\n\n\s*(?=[a-z])/g, ' ');
+    // 2. Pre-process LaTeX Math formulas into mathStash
+    const mathStash = [];
 
-    // Clean asterisks from markdown headings so they never render literal **
-    processed = processed.replace(/^(#{1,6}\s+)\*\*(.*?)\*\*\s*$/gm, '$1$2');
-    processed = processed.replace(/^(#{1,6}\s+\d+(?:\.\d+)*)([A-Za-z])/gm, '$1 $2');
-
-    // Collapse blank lines between Markdown table rows so GFM parses them as native tables
-    processed = processed.replace(/(\|[^\n]+\|)\n\s*\n(?=\s*\|)/g, '$1\n');
-    processed = processed.replace(/(\|[^\n]+\|)\n\s*\n(?=\s*\|)/g, '$1\n');
-
-    // Normalize image paths in markdown to absolute /dump_extract/images/
-    processed = processed.replace(
-      /!\[(.*?)\]\((?:(?:\/)?dump_extract\/)?images\/([^)]+)\)/g,
-      '![$1](/dump_extract/images/$2)'
-    );
-
-    // 1. Clean any whitespace or newline artifacts inside base64 data URLs
-    processed = processed.replace(
-      /\(data:image\/([a-zA-Z0-9]+);base64,\s*([A-Za-z0-9+/=\s]+?)\s*\)/g,
-      (match, format, b64) => `(data:image/${format};base64,${b64.replace(/\s+/g, '')})`
-    );
-
-    // 2. Pre-process LaTeX Math formulas before Markdown parsing
-    // Display Math: $$ ... $$ or \[ ... \] or \begin{equation}...\end{equation}
-    processed = processed.replace(/\$\$([\s\S]*?)\$\$/g, (match, formula) => {
+    // Display math: $$ ... $$
+    text = text.replace(/\$\$([\s\S]*?)\$\$/g, (match, formula) => {
       try {
-        return `<div class="katex-block-wrapper">${katex.renderToString(formula.trim(), { displayMode: true, throwOnError: false })}</div>`;
-      } catch (e) {
+        const rendered = `<div class="katex-block-wrapper">${katex.renderToString(formula.trim(), { displayMode: true, throwOnError: false })}</div>`;
+        const ph = `@@@MATH_DISPLAY_${mathStash.length}@@@`;
+        mathStash.push(rendered);
+        return `\n\n${ph}\n\n`;
+      } catch {
         return match;
       }
     });
 
-    processed = processed.replace(/\\\[([\s\S]*?)\\\]/g, (match, formula) => {
+    // Display math: \[ ... \] or \begin{equation} ... \end{equation}
+    text = text.replace(/\\\[([\s\S]*?)\\\]/g, (match, formula) => {
       try {
-        return `<div class="katex-block-wrapper">${katex.renderToString(formula.trim(), { displayMode: true, throwOnError: false })}</div>`;
-      } catch (e) {
+        const rendered = `<div class="katex-block-wrapper">${katex.renderToString(formula.trim(), { displayMode: true, throwOnError: false })}</div>`;
+        const ph = `@@@MATH_DISPLAY_${mathStash.length}@@@`;
+        mathStash.push(rendered);
+        return `\n\n${ph}\n\n`;
+      } catch {
         return match;
       }
     });
-
-    processed = processed.replace(/\\begin\{equation\}([\s\S]*?)\\end\{equation\}/g, (match, formula) => {
+    text = text.replace(/\\begin\{equation\}([\s\S]*?)\\end\{equation\}/g, (match, formula) => {
       try {
-        return `<div class="katex-block-wrapper">${katex.renderToString(formula.trim(), { displayMode: true, throwOnError: false })}</div>`;
-      } catch (e) {
+        const rendered = `<div class="katex-block-wrapper">${katex.renderToString(formula.trim(), { displayMode: true, throwOnError: false })}</div>`;
+        const ph = `@@@MATH_DISPLAY_${mathStash.length}@@@`;
+        mathStash.push(rendered);
+        return `\n\n${ph}\n\n`;
+      } catch {
         return match;
       }
     });
 
     // Inline math: \( ... \)
-    processed = processed.replace(/\\\(([\s\S]*?)\\\)/g, (match, formula) => {
+    text = text.replace(/\\\(([\s\S]*?)\\\)/g, (match, formula) => {
       try {
-        return katex.renderToString(formula.trim(), { displayMode: false, throwOnError: false });
-      } catch (e) {
+        const rendered = katex.renderToString(formula.trim(), { displayMode: false, throwOnError: false });
+        const ph = `@@@MATH_INLINE_${mathStash.length}@@@`;
+        mathStash.push(rendered);
+        return ph;
+      } catch {
         return match;
       }
     });
 
-    // Inline math: $ ... $ (avoiding currency $10)
-    processed = processed.replace(/(?<!\\)\$([^\$\n]+?)\$/g, (match, formula) => {
+    // Inline math: $ ... $ (guarding against currency amounts like $50 or $10.99)
+    text = text.replace(/(?<!\\)\$([^\$\n]+?)\$(?!\d)/g, (match, formula) => {
+      const trimmed = formula.trim();
+      if (!trimmed || /^\d+(?:\.\d+)?$/.test(trimmed)) return match;
       try {
-        return katex.renderToString(formula.trim(), { displayMode: false, throwOnError: false });
-      } catch (e) {
+        const rendered = katex.renderToString(trimmed, { displayMode: false, throwOnError: false });
+        const ph = `@@@MATH_INLINE_${mathStash.length}@@@`;
+        mathStash.push(rendered);
+        return ph;
+      } catch {
         return match;
       }
     });
 
-    // Configure marked options
-    // NOTE: breaks: false is intentional — academic prose requires single newlines
-    // within paragraphs to flow naturally instead of inserting <br> tags.
+    // Clean asterisks from markdown headings so they never render literal **
+    text = text.replace(/^(#{1,6}\s+)\*\*(.*?)\*\*\s*$/gm, '$1$2');
+
+    // Collapse blank lines between Markdown table rows so GFM parses them as native tables
+    text = text.replace(/(\|[^\n]+\|)\n\s*\n(?=\s*\|)/g, '$1\n');
+
+    // 3. Restore code blocks back to markdown text
+    text = text.replace(/@@@CODE_BLOCK_(\d+)@@@/g, (_, idx) => codeStash[Number(idx)]);
+
+    // Configure marked options with line breaks enabled for natural conversational chat
     marked.setOptions({
       gfm: true,
-      breaks: false,
+      breaks: true,
     });
 
+    let html = '';
     try {
-      return marked.parse(processed);
+      html = marked.parse(text);
     } catch (e) {
       console.error('Markdown parse error:', e);
-      return processed;
+      html = text;
     }
+
+    // 4. Restore math placeholders into final HTML
+    html = html.replace(/<p>\s*(@@@MATH_DISPLAY_\d+@@@)\s*<\/p>/g, '$1');
+    html = html.replace(/@@@MATH_DISPLAY_(\d+)@@@/g, (_, idx) => mathStash[Number(idx)] || '');
+    html = html.replace(/@@@MATH_INLINE_(\d+)@@@/g, (_, idx) => mathStash[Number(idx)] || '');
+
+    return html;
   }, [content]);
 
   // Click handler to catch figure image clicks for modal lightbox
@@ -168,7 +222,7 @@ export default function MarkdownRenderer({ content, className = '', onImageClick
 
   return (
     <div
-      className={`markdown-body ${className}`}
+      className={`markdown-body chat-markdown-body ${className}`}
       onClick={handleClick}
       dangerouslySetInnerHTML={{ __html: renderedHtml }}
     />

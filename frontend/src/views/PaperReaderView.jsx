@@ -17,8 +17,6 @@ import {
   ZoomIn,
   ZoomOut,
   Maximize2,
-  Highlighter,
-  FileEdit,
   Copy,
   Check,
 } from 'lucide-react';
@@ -120,8 +118,6 @@ export default function PaperReaderView() {
   const [zoom, setZoom] = useState(100);
   const [fitWidth, setFitWidth] = useState(false);
   const [inDocSearch, setInDocSearch] = useState('');
-  const [highlightActive, setHighlightActive] = useState(false);
-  const [annotationActive, setAnnotationActive] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [copiedBibtex, setCopiedBibtex] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
@@ -764,30 +760,6 @@ export default function PaperReaderView() {
                 placeholder="Find in paper..."
               />
             </div>
-
-            <div className="toolbar-divider" />
-
-            {/* Highlight Tool */}
-            <button
-              type="button"
-              className={`toolbar-btn ${highlightActive ? 'active' : ''}`}
-              onClick={() => setHighlightActive((h) => !h)}
-              title="Highlight text mode"
-            >
-              <Highlighter size={13} />
-              <span>Highlight</span>
-            </button>
-
-            {/* Annotation Tool */}
-            <button
-              type="button"
-              className={`toolbar-btn ${annotationActive ? 'active' : ''}`}
-              onClick={() => setAnnotationActive((a) => !a)}
-              title="Add note or annotation"
-            >
-              <FileEdit size={13} />
-              <span>Annotation</span>
-            </button>
 
             <div className="toolbar-divider" />
 
