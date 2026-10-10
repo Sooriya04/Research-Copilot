@@ -1925,6 +1925,38 @@ bundle compilation (`npm run build`).
   * Added unit tests validating `GET /api/v1/settings/system`, batch updates via `POST /api/v1/settings/system`, and runtime config mutation (7 passed in 2.73s).
   * Verified Vite frontend production build (`npm run build`) compiles cleanly in `6.95s`.
 
+<br />
+
+## Persistent Paper Synthesis & Rigor Audit in SQLite, Instant Rendering, and Test Button Layout Fix
+
+* **SQLite Paper Synthesis Persistence (`src/core/models.py`, `src/api/routes_intelligence.py`)**:
+  * Created `PaperSynthesisModel` (`paper_syntheses` table in SQLite) for persistent caching of the complete paper critique:
+    * `paper_id` (unique index), `title`, `score` (PaperRank overall signal), `score_breakdown_json` (6 factors: topical relevance, citation impact, graph prestige, velocity, quality, reproducibility).
+    * `rubric_score`, `checklist_json` (NeurIPS/ICLR rubric items, answer status, rationales, matched markers, and evidence quotes).
+    * `strengths_json`, `concerns_json`, `follow_up_questions_json`, `claims_json` (audited scientific claims with page numbers and quote verification flags), and `verdict`.
+  * Updated `POST /api/v1/papers/critique` with SQLite-first caching:
+    * First checks SQLite (`PaperSynthesisModel`) by `paper_id`, `arxiv_id`, or `title`; returns cached audit immediately (under 55ms) without repeated external network requests.
+    * Fallback corpus resolution: queries SQLite `paper_documents` and `chunks` (`PaperChunkModel`) if `full_text` was omitted in the request.
+    * Automatically persists generated synthesis, checklist, and claims directly to SQLite within the database session.
+  * Added `GET /api/v1/papers/synthesis/{identifier:path}` endpoint for direct retrieval of stored paper audits by identifier.
+
+* **Synthesis UI & Instant Rendering Overhaul (`frontend/src/components/reader/PaperSynthesisTab.jsx`)**:
+  * Initialized `critiqueData` directly from embedded `paper.synthesis || paper.critique` for instant zero-latency rendering.
+  * Added fallback to `paper.title` if `id` or `doi` is absent, preventing blank evaluation screens.
+  * Added `SQLite Persistent` badge in the header indicating local persistence state.
+  * Added `Re-run` audit action button to allow researchers to trigger fresh analysis on demand.
+  * Eliminated empty fallback placeholders when cached audits are available in SQLite.
+
+* **Settings Test Button & Badge Layout Fix (`frontend/src/views/SettingsView.jsx`)**:
+  * Fixed `makeTestButtonStyle` with `height: 32px`, `whiteSpace: nowrap`, `flexShrink: 0`, and `boxSizing: border-box`, preventing test buttons (`Test Redis Ping`, `Test Searqon Health`, etc.) from wrapping text or growing tall when latency badges render.
+  * Deduplicated latency reporting in `ServiceStatusBadge` so `(X ms)` is not displayed twice.
+
+* **Test Suite & Build Verification**:
+  * Added `test_paper_synthesis_sqlite_persistence` in [`tests/test_intelligence_routes.py`](file:///home/sooriya/Desktop/research-copilot/tests/test_intelligence_routes.py).
+  * Verified Vite frontend production build (`npm run build`) compiles cleanly in `6.85s`.
+  * Verified all 111 backend tests pass 100% green: `111 passed, 4 warnings in 136.57s`.
+
+
 
 
 

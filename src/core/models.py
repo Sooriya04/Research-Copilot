@@ -204,3 +204,24 @@ class GraphRelationshipModel(Base):
     confidence = Column(Float, default=1.0)
     metadata_json = Column(JSON, default=dict)
     created_at = Column(DateTime, default=utcnow)
+
+
+class PaperSynthesisModel(Base):
+    """Complete synthesized research audit, NeurIPS rubric checklist, and verified claims stored in SQLite."""
+    __tablename__ = "paper_syntheses"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    paper_id = Column(String, index=True, nullable=False, unique=True)
+    title = Column(String, nullable=True)
+    score = Column(Float, default=55.0)
+    score_breakdown_json = Column(JSON, default=dict)
+    rubric_score = Column(Float, default=0.0)
+    checklist_json = Column(JSON, default=dict)
+    strengths_json = Column(JSON, default=list)
+    concerns_json = Column(JSON, default=list)
+    follow_up_questions_json = Column(JSON, default=list)
+    claims_json = Column(JSON, default=list)
+    verdict = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+

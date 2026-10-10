@@ -25,7 +25,7 @@ import {
 
 export default function PaperSynthesisTab({ paper }) {
   const [loading, setLoading] = useState(false);
-  const [critiqueData, setCritiqueData] = useState(null);
+  const [critiqueData, setCritiqueData] = useState(() => paper?.synthesis || paper?.critique || null);
   const [copied, setCopied] = useState(false);
   const [expandedSnippets, setExpandedSnippets] = useState({});
   const [claimReviews, setClaimReviews] = useState({});
@@ -66,43 +66,44 @@ export default function PaperSynthesisTab({ paper }) {
     }
   };
 
+  const loadSynthesis = async (forceRefresh = false) => {
+    if (!paper) return;
+    setLoading(true);
+    try {
+      const identifier = paper.doi || paper.arxiv_id || paper.id || paper.title || 'paper-synthesis';
+      const paperFullText = paper.full_text || paper.markdown || paper.markdown_content || paper.sections?.map((s) => `${s.title}\n${s.content}`).join('\n\n') || paper.abstract || '';
+      
+      const res = await fetch('/api/v1/papers/critique', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          identifier: identifier,
+          title: paper.title || '',
+          abstract: paper.abstract || '',
+          full_text: paperFullText,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setCritiqueData(data);
+      }
+    } catch (err) {
+      console.warn('Failed to load critique synthesis:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Fetch or generate critique synthesis on mount or when paper changes
   useEffect(() => {
     if (!paper) return;
-
-    let isMounted = true;
-    async function loadSynthesis() {
-      setLoading(true);
-      try {
-        const identifier = paper.doi || paper.arxiv_id || paper.id || '';
-        const paperFullText = paper.full_text || paper.markdown || paper.markdown_content || paper.sections?.map((s) => `${s.title}\n${s.content}`).join('\n\n') || paper.abstract || '';
-        const res = await fetch('/api/v1/papers/critique', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            identifier: identifier,
-            title: paper.title || '',
-            abstract: paper.abstract || '',
-            full_text: paperFullText,
-          }),
-        });
-
-        if (res.ok) {
-          const data = await res.json();
-          if (isMounted) setCritiqueData(data);
-        }
-      } catch (err) {
-        console.warn('Failed to load critique synthesis:', err);
-      } finally {
-        if (isMounted) setLoading(false);
-      }
+    if (paper?.synthesis || paper?.critique) {
+      setCritiqueData(paper.synthesis || paper.critique);
+      return;
     }
-
     loadSynthesis();
-    return () => {
-      isMounted = false;
-    };
-  }, [paper?.id, paper?.title]);
+  }, [paper?.id, paper?.title, paper?.arxiv_id]);
 
   const toggleSnippet = (id) => {
     setExpandedSnippets((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -154,27 +155,68 @@ export default function PaperSynthesisTab({ paper }) {
           <h3 style={{ fontSize: 13.5, fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
             Paper Synthesis & Rigor Audit
           </h3>
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+              padding: '1px 6px',
+              borderRadius: 4,
+              backgroundColor: 'rgba(16, 185, 129, 0.12)',
+              color: '#059669',
+              border: '1px solid rgba(16, 185, 129, 0.25)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 3,
+            }}
+          >
+            {loading ? <RefreshCw size={10} className="animate-spin" /> : <Database size={10} />}
+            {loading ? 'Evaluating...' : 'SQLite Persistent'}
+          </span>
         </div>
-        <button
-          type="button"
-          onClick={copySynthesisMarkdown}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 4,
-            padding: '4px 8px',
-            fontSize: 11,
-            borderRadius: 5,
-            border: '1px solid var(--border-subtle, #e2e8f0)',
-            background: 'var(--bg-card, #ffffff)',
-            color: 'var(--text-muted, #64748b)',
-            cursor: 'pointer',
-          }}
-          title="Copy Synthesis Report as Markdown"
-        >
-          {copied ? <Check size={12} color="#059669" /> : <Copy size={12} />}
-          <span>{copied ? 'Copied' : 'Copy Report'}</span>
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button
+            type="button"
+            onClick={() => loadSynthesis(true)}
+            disabled={loading}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '4px 8px',
+              fontSize: 11,
+              borderRadius: 5,
+              border: '1px solid var(--border-subtle, #e2e8f0)',
+              background: 'var(--bg-card, #ffffff)',
+              color: 'var(--text-muted, #64748b)',
+              cursor: loading ? 'not-allowed' : 'pointer',
+              opacity: loading ? 0.6 : 1,
+            }}
+            title="Re-run NeurIPS Rigor Audit"
+          >
+            <RefreshCw size={11} className={loading ? 'animate-spin' : ''} />
+            <span>Re-run</span>
+          </button>
+          <button
+            type="button"
+            onClick={copySynthesisMarkdown}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '4px 8px',
+              fontSize: 11,
+              borderRadius: 5,
+              border: '1px solid var(--border-subtle, #e2e8f0)',
+              background: 'var(--bg-card, #ffffff)',
+              color: 'var(--text-muted, #64748b)',
+              cursor: 'pointer',
+            }}
+            title="Copy Synthesis Report as Markdown"
+          >
+            {copied ? <Check size={12} color="#059669" /> : <Copy size={12} />}
+            <span>{copied ? 'Copied' : 'Copy Report'}</span>
+          </button>
+        </div>
       </div>
 
       {/* 1. PAPERRANK SCORING CARD */}

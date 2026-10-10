@@ -635,7 +635,7 @@ function AcademicTabContent({
             </p>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingTop: 8, minHeight: 34 }}>
             <button
               type="button"
               onClick={() =>
@@ -651,7 +651,9 @@ function AcademicTabContent({
               )}
               Test Semantic Scholar
             </button>
-            <ServiceStatusBadge result={testResults.semantic_scholar} isDark={isDark} />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', flex: 1, minWidth: 0 }}>
+              <ServiceStatusBadge result={testResults.semantic_scholar} isDark={isDark} />
+            </div>
           </div>
         </div>
 
@@ -767,7 +769,7 @@ function AcademicTabContent({
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingTop: 8, minHeight: 34 }}>
             <button
               type="button"
               onClick={() =>
@@ -782,7 +784,9 @@ function AcademicTabContent({
               {testingService.openalex ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
               Test OpenAlex
             </button>
-            <ServiceStatusBadge result={testResults.openalex} isDark={isDark} />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', flex: 1, minWidth: 0 }}>
+              <ServiceStatusBadge result={testResults.openalex} isDark={isDark} />
+            </div>
           </div>
         </div>
       </div>
@@ -1233,7 +1237,7 @@ function InfrastructureTabContent({
             </p>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingTop: 6, minHeight: 34 }}>
             <button
               type="button"
               onClick={() => onTest('redis', { target_url: formValues.redis_url || undefined })}
@@ -1243,7 +1247,9 @@ function InfrastructureTabContent({
               {testingService.redis ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
               Test Redis Ping
             </button>
-            <ServiceStatusBadge result={testResults.redis} isDark={isDark} />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', flex: 1, minWidth: 0 }}>
+              <ServiceStatusBadge result={testResults.redis} isDark={isDark} />
+            </div>
           </div>
         </div>
 
@@ -1342,7 +1348,7 @@ function InfrastructureTabContent({
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingTop: 6, minHeight: 34 }}>
             <button
               type="button"
               onClick={() => onTest('searqon', { target_url: formValues.searqon_base_url || undefined })}
@@ -1352,7 +1358,9 @@ function InfrastructureTabContent({
               {testingService.searqon ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
               Test Searqon Health
             </button>
-            <ServiceStatusBadge result={testResults.searqon} isDark={isDark} />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', flex: 1, minWidth: 0 }}>
+              <ServiceStatusBadge result={testResults.searqon} isDark={isDark} />
+            </div>
           </div>
         </div>
       </div>
@@ -1511,6 +1519,8 @@ function ReasoningTabContent({ settings, formValues, onChange, onSave, saving, t
 function ServiceStatusBadge({ result, isDark }) {
   if (!result) return null;
   if (result.success) {
+    const rawMsg = result.message || 'Connected';
+    const displayMsg = rawMsg.includes('ms') ? rawMsg : `${rawMsg} (${result.latency_ms} ms)`;
     return (
       <span
         style={{
@@ -1521,13 +1531,21 @@ function ServiceStatusBadge({ result, isDark }) {
           color: isDark ? '#34d399' : '#059669',
           fontWeight: 600,
           backgroundColor: isDark ? 'rgba(16, 185, 129, 0.18)' : '#ecfdf5',
-          padding: '3px 8px',
+          padding: '4px 9px',
           borderRadius: 6,
           border: isDark ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid #a7f3d0',
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          maxWidth: '100%',
+          flexShrink: 1,
         }}
+        title={result.message}
       >
-        <CheckCircle2 size={13} />
-        {result.message || 'Connected'} ({result.latency_ms} ms)
+        <CheckCircle2 size={13} style={{ flexShrink: 0 }} />
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {displayMsg}
+        </span>
       </span>
     );
   }
@@ -1541,14 +1559,21 @@ function ServiceStatusBadge({ result, isDark }) {
         color: isDark ? '#f87171' : '#dc2626',
         fontWeight: 600,
         backgroundColor: isDark ? 'rgba(239, 68, 68, 0.18)' : '#fef2f2',
-        padding: '3px 8px',
+        padding: '4px 9px',
         borderRadius: 6,
         border: isDark ? '1px solid rgba(239, 68, 68, 0.35)' : '1px solid #fecaca',
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        maxWidth: '100%',
+        flexShrink: 1,
       }}
       title={result.error}
     >
-      <XCircle size={13} />
-      {result.error?.substring(0, 35) || 'Failed'}
+      <XCircle size={13} style={{ flexShrink: 0 }} />
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {result.error?.substring(0, 45) || 'Failed'}
+      </span>
     </span>
   );
 }
@@ -1604,7 +1629,8 @@ function makeTestButtonStyle(t) {
     display: 'inline-flex',
     alignItems: 'center',
     gap: 6,
-    padding: '6px 12px',
+    padding: '0 12px',
+    height: '32px',
     borderRadius: '6px',
     border: `1px solid ${t.btnSecondaryBorder}`,
     backgroundColor: t.btnSecondaryBg,
@@ -1612,6 +1638,9 @@ function makeTestButtonStyle(t) {
     fontSize: '12px',
     fontWeight: 600,
     cursor: 'pointer',
+    whiteSpace: 'nowrap',
+    flexShrink: 0,
+    boxSizing: 'border-box',
     transition: 'all 0.15s ease',
   };
 }

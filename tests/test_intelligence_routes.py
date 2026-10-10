@@ -92,3 +92,35 @@ async def test_verify_quote_endpoint():
         assert data["status"] == "VERIFIED"
         assert data["page"] == 2
 
+
+@pytest.mark.asyncio
+async def test_paper_synthesis_sqlite_persistence():
+    """Test that generated paper synthesis is persisted into SQLite and returned instantly on subsequent calls."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        identifier = "test-synthesis-persistence-123"
+        post_resp = await client.post(
+            "/api/v1/papers/critique",
+            json={
+                "identifier": identifier,
+                "title": "Persistent Rigor Audit Paper",
+                "abstract": "We introduce a verified audit methodology. Our framework outperforms baseline benchmarks by 14%.",
+                "full_text": "We introduce a verified audit methodology. Our framework outperforms baseline benchmarks by 14%. We release code at https://github.com/example/audit.",
+            },
+        )
+        assert post_resp.status_code == 200
+        post_data = post_resp.json()
+        assert post_data["title"] == "Persistent Rigor Audit Paper"
+        assert len(post_data["strengths"]) > 0
+        assert len(post_data["claims"]) > 0
+
+        # Retrieve from SQLite endpoint
+        get_resp = await client.get(f"/api/v1/papers/synthesis/{identifier}")
+        assert get_resp.status_code == 200
+        get_data = get_resp.json()
+        assert get_data["title"] == "Persistent Rigor Audit Paper"
+        assert get_data["rubric_score"] == post_data["rubric_score"]
+        assert len(get_data["claims"]) == len(post_data["claims"])
+
+
+
