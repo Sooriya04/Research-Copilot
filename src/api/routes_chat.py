@@ -23,6 +23,7 @@ class ResearchChatRequest(BaseModel):
     workspace_topic: Optional[str] = None
     workspace_id: Optional[str] = None
     workspace_memories: Optional[List[Dict[str, Any]]] = None
+    provider: Optional[str] = None
     model: Optional[str] = "gemini-2.0-flash-lite"
     mode: Optional[str] = "auto"  # "auto" | "paper" | "research"
 
@@ -78,7 +79,17 @@ async def chat_message_endpoint(req: ResearchChatRequest, db: AsyncSession = Dep
                 logger.warning("[ChatEndpoint] RAG pipeline fallback: %s", ex)
 
     # 2. Standard Workspace / Augmented Prompt Synthesis
-    provider = get_llm_provider(model=req.model or "")
+    from src.core.provider_settings import resolve_provider_credentials
+    resolved_creds = await resolve_provider_credentials(
+        provider_id=req.provider or ("gemini" if "gemini" in (req.model or "") else ""),
+        explicit_model=req.model,
+    )
+    provider = get_llm_provider(
+        provider_name=resolved_creds.get("provider_id"),
+        model=resolved_creds.get("model"),
+        api_key=resolved_creds.get("api_key"),
+        base_url=resolved_creds.get("base_url"),
+    )
     augmented_messages: List[ChatMessage] = []
 
     # Build Grounding System Prompt

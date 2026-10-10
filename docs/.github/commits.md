@@ -1841,6 +1841,41 @@ bundle compilation (`npm run build`).
   * Added integration tests for `/api/v1/papers/claims/review`, `/api/v1/papers/claims/reviews`, and `/api/v1/papers/claims/verify-quote`.
   * Verified Vite frontend production build (`npm run build`) in 6.96s (`public_dist/`).
 
+<br />
+
+## Implement Light-Mode Chat Composer, Provider Selector Dropdown, and AI Model Configuration Modal
+
+* **Unified Light-Mode Chat Composer (`frontend/src/components/reader/PaperReaderSidebar.jsx`)**:
+  * Removed legacy `+ Attach` button and resolved `<form>` descendant DOM nesting warnings.
+  * Redesigned the chat input into a sleek, unified light-mode container card with auto-expanding textarea and responsive bottom toolbar.
+  * Designed streamlined single-row bottom toolbar housing mode pills (`Auto`, `Paper`, `Web`), provider selector pill, and Send button.
+  * Integrated provider selector dropdown displaying active provider names (`Google Gemini`, `Groq`, `Ollama`, `NVIDIA NIM`, `OpenRouter`, `DeepSeek AI`, `OpenAI`) with colored icon badges, active model sublabels, and checkmark indicators.
+  * Added prominent `⚠️ No Key` warning badge when a provider has no API key configured, locking chat dispatch and prompting immediate setup.
+  * Anchored dropdown popover within the sidebar container boundaries (`left: 12px; right: 12px; width: auto;`) with real-time `Search providers...` filtering, eliminating clipping and overflow.
+
+* **Dedicated AI Model Configuration Modal (`frontend/src/components/modals/ModelConfigModal.jsx`)**:
+  * Built a two-column light-mode modal for managing all AI providers and model preferences.
+  * **Left Sidebar**: Provider navigation with credential status badges (`● Active` vs `⚠️ No Key`) and `+ Add Provider ⌵` dropdown.
+  * **Right Configuration Panel**:
+    * Editable display name input.
+    * Masked API key input with `👁` visibility toggle and live `Test` button connected to `/api/v1/settings/test-connection` with latency reporting.
+    * Custom Base URL input with provider defaults.
+    * Custom Model ID input with `+ Add` button.
+    * Clickable suggested model chips tailored to each provider (`gemini-2.0-flash`, `qwen/qwen3.8-27b`, `phi4-mini`, `deepseek-chat`, `claude-3.5-sonnet`, `llama-3.3-70b`, etc.).
+    * `🗑 Delete Provider` option to clear stored credentials from SQLite.
+  * **Footer Bar**: Toggle switch for `Show unvalidated models` and `🔒 API keys are securely stored in SQLite database` storage guarantee.
+  * Integrated seamless access from both the chat composer (`⚙ Configure Providers & Models...`) and the main Settings view ([`SettingsView.jsx`](file:///home/sooriya/Desktop/research-copilot/frontend/src/views/SettingsView.jsx)).
+
+* **Backend Provider Credential Resolution & Chat Routing (`src/api/routes_chat.py`, `src/providers/factory.py`)**:
+  * Extended `ResearchChatRequest` in `routes_chat.py` with `provider: Optional[str] = None`.
+  * Integrated `resolve_provider_credentials` into `/api/v1/chat/message` to automatically load stored API keys, base URLs, and model IDs from the SQLite `user_settings` table.
+  * Enhanced `get_llm_provider` in `src/providers/factory.py` with native support for `gemini` (`GeminiFlashLiteProvider`) and `openai` (`OpenRouterProvider`), routing completions dynamically to the user's selected provider.
+
+* **Build & Test Verification**:
+  * Verified Vite frontend production build (`npm run build`) compiles cleanly with zero warnings or errors in `6.85s` (`public_dist/`).
+  * Verified all backend unit and integration tests passing 100% green: **108 passed, 0 failed** in `154.91s`.
+
+
 
 
 

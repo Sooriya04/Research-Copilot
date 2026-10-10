@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   MessageSquare,
   Award,
@@ -19,6 +19,10 @@ import {
   ChevronUp,
   Paperclip,
   Globe,
+  Sliders,
+  Search,
+  Settings,
+  AlertTriangle,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import MarkdownRenderer from '../common/MarkdownRenderer';
@@ -29,9 +33,9 @@ import {
   EvidenceDrawer,
   ContextQuoteBlock,
   MissingEvidenceAlert,
-  AttachExcerptPopover,
 } from './EvidenceDrawer';
 import PaperSynthesisTab from './PaperSynthesisTab';
+import ModelConfigModal, { KNOWN_PROVIDER_DEFS } from '../modals/ModelConfigModal';
 
 // Helper to provide deterministic, paper-grounded source citations with diverse source types and confidence levels
 function enrichPaperGrounding(content, paper, query = '') {
@@ -241,12 +245,99 @@ function AskTab({ paper, onJumpToPage, onClearContext, onHighlightEvidence }) {
   const [researchMode, setResearchMode] = useState('auto'); // 'auto' | 'paper' | 'research'
   const [selectedCitation, setSelectedCitation] = useState(null);
   const [drawerSources, setDrawerSources] = useState(null);
-  const [attachPopoverOpen, setAttachPopoverOpen] = useState(false);
   const messagesEndRef = useRef(null);
+
+  // AI Provider & Model selection state
+  const [providers, setProviders] = useState([]);
+  const [selectedProviderId, setSelectedProviderId] = useState('gemini');
+  const [selectedModel, setSelectedModel] = useState('gemini-2.0-flash-lite');
+  const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
+  const [configModalOpen, setConfigModalOpen] = useState(false);
+  const [modelSearchQuery, setModelSearchQuery] = useState('');
+  const modelSelectorRef = useRef(null);
+
+  // Fetch provider credentials & active status from SQLite backend
+  const loadProviders = async () => {
+    try {
+      const res = await fetch('/api/v1/settings/providers');
+      if (res.ok) {
+        const data = await res.json();
+        const provs = data.providers || [];
+        setProviders(provs);
+        // Find if current selected provider has a key
+        const cur = provs.find((p) => p.provider_id === selectedProviderId);
+        if (!cur || !cur.has_key) {
+          const withKey = provs.find((p) => p.has_key);
+          if (withKey) {
+            setSelectedProviderId(withKey.provider_id);
+            setSelectedModel(withKey.model || 'default');
+          }
+        } else if (cur && cur.model && (!selectedModel || selectedModel === 'gemini-2.0-flash-lite')) {
+          setSelectedModel(cur.model);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching providers in AskTab:', err);
+    }
+  };
+
+  useEffect(() => {
+    loadProviders();
+  }, []);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (modelSelectorRef.current && !modelSelectorRef.current.contains(event.target)) {
+        setModelSelectorOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
+
+  const currentSavedProvider = providers.find((p) => p.provider_id === selectedProviderId);
+  const currentDef = KNOWN_PROVIDER_DEFS.find((d) => d.id === selectedProviderId) || {
+    id: selectedProviderId,
+    name: selectedProviderId.toUpperCase(),
+    short: selectedProviderId.substring(0, 2).toUpperCase(),
+    color: '#6366f1',
+    bg: '#eff6ff',
+    border: '#bfdbfe',
+    isLocal: false,
+  };
+  const hasKey = Boolean(currentSavedProvider?.has_key);
+
+  const availableProviders = useMemo(() => {
+    return KNOWN_PROVIDER_DEFS.map((pDef) => {
+      const saved = providers.find((p) => p.provider_id === pDef.id);
+      const isProviderActive = Boolean(saved?.has_key);
+      const activeModel = saved?.model || pDef.modelPlaceholder || 'default';
+      return {
+        id: pDef.id,
+        name: pDef.name,
+        short: pDef.short,
+        color: pDef.color,
+        bg: pDef.bg,
+        border: pDef.border,
+        hasKey: isProviderActive,
+        activeModel,
+        isCurrent: selectedProviderId === pDef.id,
+      };
+    });
+  }, [providers, selectedProviderId]);
+
+  const filteredProviders = useMemo(() => {
+    if (!modelSearchQuery.trim()) return availableProviders;
+    const q = modelSearchQuery.toLowerCase();
+    return availableProviders.filter(
+      (item) => item.name.toLowerCase().includes(q) || item.id.toLowerCase().includes(q) || item.activeModel.toLowerCase().includes(q)
+    );
+  }, [availableProviders, modelSearchQuery]);
 
   const handleOpenPaper = (citation) => {
     if (onHighlightEvidence) {
@@ -259,6 +350,12 @@ function AskTab({ paper, onJumpToPage, onClearContext, onHighlightEvidence }) {
   const handleSend = async (textToSend, overrideMode) => {
     const rawQuery = (textToSend || input).trim();
     if (!rawQuery || loading) return;
+
+    if (!hasKey) {
+      setConfigModalOpen(true);
+      return;
+    }
+
     const modeToUse = overrideMode || researchMode;
 
     const parsed = parseAttachedContext(rawQuery);
@@ -285,7 +382,8 @@ function AskTab({ paper, onJumpToPage, onClearContext, onHighlightEvidence }) {
         workspace_topic: activeWorkspace?.title || null,
         workspace_id: activeWorkspace?.id || null,
         workspace_memories: workspaceMemories || [],
-        model: 'gemini-2.0-flash-lite',
+        provider: selectedProviderId,
+        model: selectedModel || currentSavedProvider?.model || 'gemini-2.0-flash-lite',
         mode: modeToUse,
       };
 
@@ -550,37 +648,280 @@ function AskTab({ paper, onJumpToPage, onClearContext, onHighlightEvidence }) {
         />
       )}
 
-      {/* ── Sticky Bottom Composer ── */}
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          handleSend();
-        }}
+      {/* ── Sticky Bottom Composer (Light-mode unified card with Provider Selector) ── */}
+      <div
         className="copilot-sticky-composer"
-        style={{ position: 'relative' }}
+        ref={modelSelectorRef}
+        style={{ position: 'relative', padding: '8px 12px 12px 12px' }}
       >
-        {attachPopoverOpen && (
-          <AttachExcerptPopover
-            currentPage={paper?.currentPage || 1}
-            onAttach={(data) => {
-              setInput((prev) => `[Context from page ${data.page} · ${data.section}]:\n> "${data.text}"\n\n` + prev);
+        {/* Provider Selector Popover Dropdown (Positioned safely within sidebar) */}
+        {modelSelectorOpen && (
+          <div
+            style={{
+              position: 'absolute',
+              bottom: 'calc(100% - 4px)',
+              left: 12,
+              right: 12,
+              backgroundColor: '#ffffff',
+              border: '1px solid #cbd5e1',
+              borderRadius: 12,
+              boxShadow: '0 12px 30px -4px rgba(0, 0, 0, 0.16)',
+              zIndex: 1050,
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
+              fontFamily: 'var(--font-main, sans-serif)',
             }}
-            onClose={() => setAttachPopoverOpen(false)}
-          />
+          >
+            {/* Search Bar at Top */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '10px 12px',
+                borderBottom: '1px solid #f1f5f9',
+              }}
+            >
+              <Search size={13} style={{ color: '#94a3b8' }} />
+              <input
+                type="text"
+                placeholder="Search providers..."
+                value={modelSearchQuery}
+                onChange={(e) => setModelSearchQuery(e.target.value)}
+                style={{
+                  width: '100%',
+                  border: 'none',
+                  outline: 'none',
+                  fontSize: 12,
+                  color: '#0f172a',
+                  background: 'transparent',
+                }}
+              />
+              {modelSearchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setModelSearchQuery('')}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: 2,
+                    color: '#94a3b8',
+                  }}
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+
+            {/* Scrollable Provider List */}
+            <div style={{ maxHeight: 240, overflowY: 'auto', padding: '6px' }}>
+              {filteredProviders.length === 0 ? (
+                <div style={{ padding: '12px', fontSize: 12, color: '#94a3b8', textAlign: 'center' }}>
+                  No providers found
+                </div>
+              ) : (
+                filteredProviders.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedProviderId(item.id);
+                      setSelectedModel(item.activeModel);
+                      setModelSelectorOpen(false);
+                      if (!item.hasKey) {
+                        setConfigModalOpen(true);
+                      }
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      width: '100%',
+                      padding: '8px 10px',
+                      borderRadius: 7,
+                      border: item.isCurrent ? '1px solid #c7d2fe' : '1px solid transparent',
+                      backgroundColor: item.isCurrent ? '#eef2ff' : 'transparent',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      transition: 'all 0.12s ease',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                      {item.isCurrent ? (
+                        <Check size={14} color="#4f46e5" style={{ flexShrink: 0 }} />
+                      ) : (
+                        <span
+                          style={{
+                            width: 20,
+                            height: 20,
+                            borderRadius: 5,
+                            backgroundColor: item.bg,
+                            color: item.color,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: 9.5,
+                            fontWeight: 800,
+                            flexShrink: 0,
+                            border: `1px solid ${item.border}`,
+                          }}
+                        >
+                          {item.short}
+                        </span>
+                      )}
+                      <div style={{ minWidth: 0 }}>
+                        <div
+                          style={{
+                            fontSize: 12.5,
+                            fontWeight: item.isCurrent ? 600 : 500,
+                            color: item.isCurrent ? '#312e81' : '#1e293b',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                          }}
+                        >
+                          {item.name}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 10.5,
+                            color: '#64748b',
+                            fontFamily: 'var(--font-code, monospace)',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                          }}
+                        >
+                          {item.activeModel}
+                        </div>
+                      </div>
+                    </div>
+
+                    {!item.hasKey && (
+                      <span
+                        style={{
+                          fontSize: 9.5,
+                          fontWeight: 700,
+                          color: '#b45309',
+                          backgroundColor: '#fef3c7',
+                          padding: '1px 5px',
+                          borderRadius: 4,
+                          flexShrink: 0,
+                        }}
+                      >
+                        No Key
+                      </span>
+                    )}
+                  </button>
+                ))
+              )}
+            </div>
+
+            {/* Configure Providers Button */}
+            <div style={{ borderTop: '1px solid #f1f5f9', padding: '4px' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setModelSelectorOpen(false);
+                  setConfigModalOpen(true);
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  width: '100%',
+                  padding: '8px 10px',
+                  borderRadius: 6,
+                  border: 'none',
+                  background: 'transparent',
+                  color: '#4f46e5',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                }}
+              >
+                <Sliders size={13} />
+                <span>Configure Providers & Models...</span>
+              </button>
+            </div>
+
+            {/* Footnote Caption */}
+            <div
+              style={{
+                padding: '6px 12px',
+                borderTop: '1px solid #f1f5f9',
+                fontSize: 10.5,
+                color: '#94a3b8',
+                backgroundColor: '#f8fafc',
+              }}
+            >
+              Only verified models are shown
+            </div>
+          </div>
         )}
 
-        <div className="copilot-composer-top-row">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            <button
-              type="button"
-              className="copilot-attach-btn"
-              onClick={() => setAttachPopoverOpen((v) => !v)}
-              title="Attach paper excerpt or section"
-            >
-              <Paperclip size={11} />
-              <span>+ Attach</span>
-            </button>
-            <div className="copilot-mode-segmented-control">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleSend();
+          }}
+          style={{
+            backgroundColor: '#ffffff',
+            border: '1.5px solid #e2e8f0',
+            borderRadius: 12,
+            padding: '10px 12px 8px 12px',
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
+            transition: 'border-color 0.15s ease, box-shadow 0.15s ease',
+          }}
+        >
+          {/* Top Textarea */}
+          <textarea
+            rows={2}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
+            placeholder="Ask anything about this paper..."
+            disabled={loading}
+            style={{
+              width: '100%',
+              border: 'none',
+              outline: 'none',
+              resize: 'none',
+              fontSize: 13,
+              lineHeight: 1.5,
+              color: '#0f172a',
+              backgroundColor: 'transparent',
+              fontFamily: 'var(--font-main, sans-serif)',
+              padding: 0,
+              minHeight: 42,
+              maxHeight: 180,
+            }}
+          />
+
+          {/* Bottom Toolbar Row */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              borderTop: '1px solid #f1f5f9',
+              paddingTop: 8,
+              gap: 6,
+            }}
+          >
+            {/* Left: Mode Segmented Control */}
+            <div className="copilot-mode-segmented-control" style={{ flexShrink: 0 }}>
               <button
                 type="button"
                 className={`copilot-mode-btn ${researchMode === 'auto' ? 'active' : ''}`}
@@ -595,7 +936,7 @@ function AskTab({ paper, onJumpToPage, onClearContext, onHighlightEvidence }) {
                 onClick={() => setResearchMode('paper')}
                 title="Ground strictly inside paper only"
               >
-                Paper Only
+                Paper
               </button>
               <button
                 type="button"
@@ -604,44 +945,138 @@ function AskTab({ paper, onJumpToPage, onClearContext, onHighlightEvidence }) {
                 title="Deep research with Searqon external web"
               >
                 <Globe size={11} />
-                <span>Web Research</span>
+                <span>Web</span>
+              </button>
+            </div>
+
+            {/* Right: Provider Selector Pill Button & Send Button */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+              <button
+                type="button"
+                onClick={() => setModelSelectorOpen((v) => !v)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  padding: '5px 8px',
+                  borderRadius: 7,
+                  border: !hasKey ? '1.5px solid #f59e0b' : '1px solid #e2e8f0',
+                  backgroundColor: !hasKey ? '#fffbeb' : '#f8fafc',
+                  color: '#1e293b',
+                  fontSize: 11.5,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+                  transition: 'all 0.15s ease',
+                }}
+                title={!hasKey ? `API Key required for ${currentDef.name}. Click to configure` : `Provider: ${currentDef.name} (${selectedModel})`}
+              >
+                <span
+                  style={{
+                    width: 16,
+                    height: 16,
+                    borderRadius: 4,
+                    backgroundColor: currentDef.bg,
+                    color: currentDef.color,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: 8.5,
+                    fontWeight: 800,
+                    border: `1px solid ${currentDef.border}`,
+                    flexShrink: 0,
+                  }}
+                >
+                  {currentDef.short}
+                </span>
+                <span
+                  style={{
+                    maxWidth: 110,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    fontSize: 11.5,
+                    fontWeight: 600,
+                  }}
+                >
+                  {currentDef.name}
+                </span>
+                {!hasKey ? (
+                  <span
+                    style={{
+                      backgroundColor: '#fef3c7',
+                      color: '#b45309',
+                      fontSize: 9.5,
+                      fontWeight: 700,
+                      padding: '1px 4px',
+                      borderRadius: 4,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 2,
+                    }}
+                  >
+                    <AlertTriangle size={9} />
+                    <span>No Key</span>
+                  </span>
+                ) : (
+                  <ChevronDown size={11} style={{ opacity: 0.6 }} />
+                )}
+              </button>
+
+              {/* Send Button */}
+              <button
+                type="submit"
+                disabled={loading || !input.trim() || !hasKey}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  padding: '5px 12px',
+                  borderRadius: 7,
+                  backgroundColor: !hasKey || !input.trim() || loading ? '#e2e8f0' : '#4f46e5',
+                  color: !hasKey || !input.trim() || loading ? '#94a3b8' : '#ffffff',
+                  border: 'none',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: !hasKey || !input.trim() || loading ? 'not-allowed' : 'pointer',
+                  transition: 'all 0.15s ease',
+                  boxShadow: hasKey && input.trim() && !loading ? '0 1px 3px rgba(79, 70, 229, 0.3)' : 'none',
+                }}
+                title={!hasKey ? 'Configure API key first' : 'Send message (Enter)'}
+              >
+                {loading ? (
+                  <Loader2 size={12} className="spin-animation" />
+                ) : (
+                  <>
+                    <Send size={12} />
+                    <span>Send</span>
+                  </>
+                )}
               </button>
             </div>
           </div>
-          <div className="copilot-active-context-badge">
-            <span className="copilot-status-dot" style={{ width: 5, height: 5 }} />
-            <span>{researchMode === 'research' ? 'Paper + Searqon' : 'Current Paper'}</span>
-          </div>
-        </div>
+        </form>
 
-        <div className="copilot-composer-input-wrapper">
-          <textarea
-            rows={1}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                handleSend();
-              }
-            }}
-            placeholder="Ask anything about this paper..."
-            disabled={loading}
-            className="copilot-composer-textarea"
-          />
-          <button
-            type="submit"
-            disabled={loading || !input.trim()}
-            className="copilot-composer-send-btn"
-            title="Send (Enter)"
-          >
-            <Send size={12} />
-          </button>
-        </div>
-        <div className="copilot-shortcut-hint">
+        <div className="copilot-shortcut-hint" style={{ marginTop: 6, textAlign: 'center', fontSize: 11, color: '#94a3b8' }}>
           Enter to send · Shift + Enter for new line
         </div>
-      </form>
+
+        {/* AI Model Configuration Modal */}
+        <ModelConfigModal
+          isOpen={configModalOpen}
+          onClose={() => setConfigModalOpen(false)}
+          initialProviderId={selectedProviderId}
+          onConfigUpdated={async (updated) => {
+            await loadProviders();
+            if (updated?.provider_id) {
+              setSelectedProviderId(updated.provider_id);
+            }
+            if (updated?.model) {
+              setSelectedModel(updated.model);
+            }
+          }}
+        />
+      </div>
     </div>
   );
 }

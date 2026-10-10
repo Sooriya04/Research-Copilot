@@ -20,7 +20,17 @@ def get_llm_provider(
             return DeepSeekProvider(api_key=api_key or None, model=model, base_url=base_url or None)
 
     name = (provider_name or settings.default_llm_provider or "ollama").lower()
-    if name == "ollama":
+    if not provider_name and model:
+        m_lower = model.lower()
+        if "gemini" in m_lower:
+            name = "gemini"
+        elif "deepseek" in m_lower and "/" not in m_lower:
+            name = "deepseek"
+
+    if name == "gemini":
+        from src.providers.gemini import GeminiFlashLiteProvider
+        return GeminiFlashLiteProvider(api_key=api_key or None, model=model or "gemini-2.0-flash-lite")
+    elif name == "ollama":
         return LocalOllamaProvider(model=model or getattr(settings, "ollama_model", "phi4-mini"), base_url=base_url or None)
     elif name == "nvidia":
         return NvidiaProvider(api_key=api_key or None, model=model or None, base_url=base_url or None)
@@ -32,4 +42,7 @@ def get_llm_provider(
         if api_key or settings.openrouter_api_key:
             return OpenRouterProvider(api_key=api_key or None, model=model or None)
         return LocalOllamaProvider(model=model or getattr(settings, "ollama_model", "phi4-mini"), base_url=base_url or None)
+    elif name == "openai":
+        from src.providers.openrouter import OpenRouterProvider
+        return OpenRouterProvider(api_key=api_key or None, model=model or "gpt-4o", base_url=base_url or "https://api.openai.com/v1")
     return LocalOllamaProvider(model=model or getattr(settings, "ollama_model", "phi4-mini"), base_url=base_url or None)

@@ -17,7 +17,9 @@ import {
   ShieldCheck,
   Zap,
   Activity,
+  Sliders,
 } from 'lucide-react';
+import ModelConfigModal from '../components/modals/ModelConfigModal';
 
 const API = 'http://localhost:8000/api/v1/settings';
 
@@ -650,6 +652,7 @@ export default function SettingsView() {
   const [saved, setSaved] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [configModalOpen, setConfigModalOpen] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -716,15 +719,26 @@ export default function SettingsView() {
             </p>
           </div>
 
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={load}
-            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
-          >
-            <RefreshCw size={13} />
-            <span>Refresh Status</span>
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={() => setConfigModalOpen(true)}
+              style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+            >
+              <Cpu size={13} />
+              <span>Configure AI Models</span>
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={load}
+              style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+            >
+              <RefreshCw size={13} />
+              <span>Refresh Status</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -854,6 +868,12 @@ export default function SettingsView() {
           </div>
         ))}
       </div>
+
+      <ModelConfigModal
+        isOpen={configModalOpen}
+        onClose={() => setConfigModalOpen(false)}
+        onConfigUpdated={load}
+      />
     </section>
   );
 }
