@@ -125,7 +125,7 @@ All long-term research state, topological nodes, cached proposals, and user prov
 | **PaperRank Scoring Skill** | 6-factor score ($S \in [0, 100]$: relevance, impact, prestige, velocity, rigor, reproducibility) + Sensitivity Profiles | **Implemented** (`src/skills/paper_rank.py`, `skills/paper-rank/SKILL.md`, `/api/v1/rank/profiles`) | ✅ Done |
 | **Methodology Checklist Skill** | Section-aware NeurIPS rubric, empirical evidence snippet extraction, rubric gaps & recommendations | **Implemented** (`src/skills/methodology_checklist.py`, `skills/methodology-checklist/SKILL.md`, `/api/v1/rank/checklist`) | ✅ Done |
 | **Scientific Skill Registry** | Dynamic registry & dispatcher for modular research skills | **Implemented** (`src/skills/registry.py`, `/api/v1/rank/skills`) | ✅ Done |
-| **Structured Paper Critique** | 3-part critique: Core Strengths, Limitations, Author Follow-up Questions | **Not Implemented** (Novelty Studio exists, but no dedicated critique endpoint) | 🚀 Next |
+| **Structured Paper Critique** | 3-part critique: Core Strengths, Limitations, Author Follow-up Questions + Executive Synthesis | **Implemented** (`src/api/routes_intelligence.py`, `PaperSynthesisTab.jsx`, `/api/v1/papers/critique`) | ✅ Done |
 | **Paper-Code Audit Skill** | Verifies paper claims & metrics against linked GitHub repos | **Not Implemented** (GitHub resolver exists; audit comparison does not) | 🚀 Next |
 | **Notebook Kernel Runner** | Sandboxed Jupyter kernel session, cell execution, stdout/stderr capture | **Not Implemented** | ⏳ Next Phase |
 | **Cloud Compute Dispatch** | Remote Modal / RunPod / SSH execution | **Not Implemented** | ⏳ Next Phase |

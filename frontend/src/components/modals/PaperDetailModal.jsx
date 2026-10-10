@@ -16,6 +16,10 @@ import {
   Activity,
   Globe,
   GitBranch,
+  Sparkles,
+  Quote,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 
@@ -25,6 +29,7 @@ export default function PaperDetailModal() {
 
   const [artifacts, setArtifacts] = useState(null);
   const [loadingArtifacts, setLoadingArtifacts] = useState(false);
+  const [expandedEvidence, setExpandedEvidence] = useState({});
 
   const identifier = selectedPaper?.arxiv_id || selectedPaper?.doi || selectedPaper?.title || selectedPaper?.id;
 
@@ -273,6 +278,127 @@ export default function PaperDetailModal() {
                   {checklist.has_empirical_eval ? <CheckCircle2 size={11} /> : <AlertCircle size={11} />}
                   <span>Empirical Evaluation</span>
                 </span>
+              </div>
+            )}
+
+            {/* Paper Synthesis & NeurIPS Rigor Audit Details */}
+            {checklist.items && checklist.items.length > 0 && (
+              <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--border-subtle)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <Sparkles size={12} style={{ color: 'var(--accent-primary)' }} />
+                    Paper Synthesis & NeurIPS Rigor Audit
+                  </span>
+                  {checklist.rubric_score != null && (
+                    <span style={{ fontSize: 10.5, fontWeight: 700, color: '#059669' }}>
+                      Rubric: {checklist.rubric_score}/100
+                    </span>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {checklist.items.map((item) => {
+                    const isPresent = item.answer === 'present';
+                    const isPartial = item.answer === 'partial';
+                    const isExpanded = expandedEvidence[item.id];
+
+                    return (
+                      <div
+                        key={item.id}
+                        style={{
+                          border: '1px solid var(--border-subtle)',
+                          borderRadius: 6,
+                          background: 'var(--bg-card)',
+                          padding: '7px 9px',
+                          fontSize: 11,
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontWeight: 600, color: 'var(--text-primary)' }}>
+                            {isPresent ? (
+                              <CheckCircle2 size={12} color="#059669" />
+                            ) : isPartial ? (
+                              <AlertCircle size={12} color="#d97706" />
+                            ) : (
+                              <AlertCircle size={12} color="#94a3b8" />
+                            )}
+                            <span>{item.label}</span>
+                          </div>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                            <span
+                              style={{
+                                fontSize: 9.5,
+                                fontWeight: 700,
+                                textTransform: 'uppercase',
+                                padding: '1px 5px',
+                                borderRadius: 3,
+                                background: isPresent ? 'rgba(16,185,129,0.1)' : isPartial ? 'rgba(217,119,6,0.1)' : 'var(--bg-subtle)',
+                                color: isPresent ? '#059669' : isPartial ? '#d97706' : 'var(--text-muted)',
+                              }}
+                            >
+                              {item.answer}
+                            </span>
+                            {item.evidence_snippet && (
+                              <button
+                                type="button"
+                                onClick={() => setExpandedEvidence((p) => ({ ...p, [item.id]: !p[item.id] }))}
+                                style={{
+                                  background: 'none',
+                                  border: 'none',
+                                  color: 'var(--text-muted)',
+                                  cursor: 'pointer',
+                                  padding: 1,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                }}
+                                title="Toggle evidence quote"
+                              >
+                                {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        <div style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 2 }}>
+                          {item.rationale}
+                        </div>
+
+                        {item.evidence_snippet && isExpanded && (
+                          <div
+                            style={{
+                              marginTop: 5,
+                              padding: '5px 8px',
+                              background: 'rgba(99,102,241,0.05)',
+                              borderLeft: '2px solid var(--accent-primary)',
+                              borderRadius: '0 4px 4px 0',
+                              fontSize: 10.5,
+                              color: 'var(--text-secondary)',
+                              fontStyle: 'italic',
+                              lineHeight: 1.35,
+                            }}
+                          >
+                            <Quote size={9} style={{ display: 'inline', marginRight: 3, opacity: 0.6 }} />
+                            {item.evidence_snippet}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {checklist.recommendations && checklist.recommendations.length > 0 && (
+                  <div style={{ marginTop: 8, padding: '7px 9px', background: 'rgba(217,119,6,0.06)', border: '1px solid rgba(217,119,6,0.2)', borderRadius: 6, fontSize: 10.5 }}>
+                    <div style={{ fontWeight: 600, color: '#d97706', marginBottom: 3 }}>
+                      ⚠ Methodology Recommendations:
+                    </div>
+                    <ul style={{ margin: 0, paddingLeft: 14 }}>
+                      {checklist.recommendations.map((rec, i) => (
+                        <li key={i} style={{ color: 'var(--text-secondary)', marginBottom: 2 }}>{rec}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
             )}
           </div>

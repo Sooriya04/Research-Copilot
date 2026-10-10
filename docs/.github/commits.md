@@ -1784,4 +1784,32 @@ bundle compilation (`npm run build`).
   * Verified full test suite passing 100% green: **102 passed, 0 failed** in `97.01s` across 27 test files.
   * Verified clean Vite frontend production build (`npm run build`) in `6.65s` (`public_dist/`).
 
+<br />
+
+## Implement Dedicated Paper Synthesis Section in Reader Sidebar & Details Modal
+
+* **Dedicated Paper Synthesis Component (`frontend/src/components/reader/PaperSynthesisTab.jsx`)**:
+  * Built `PaperSynthesisTab` integrating the complete multi-factor PaperRank score signal, NeurIPS/ICLR methodology rigor checklist, and evidence-grounded critique.
+  * Rendered dynamic 6-factor score progress bars (`topical_relevance`, `citation_impact`, `graph_prestige`, `citation_velocity`, `methodology_quality`, `reproducibility`).
+  * Added interactive collapsible cards for each NeurIPS checklist criterion with status badges (`Present`, `Partial`, `Missing`), confidence indicators, matched empirical marker chips, rationale summaries, and toggleable verbatim evidence quote blocks.
+  * Added actionable rigor gaps alert listing peer review recommendations.
+  * Added evidence-grounded peer review synthesis cards: Core Methodological Strengths, Methodological Threats & Limitations, and Author Follow-Up Questions for replication.
+  * Implemented one-click "Copy Report" button copying structured Markdown synthesis to clipboard.
+
+* **Paper Reader Copilot Sidebar Integration (`frontend/src/components/reader/PaperReaderSidebar.jsx`)**:
+  * Added dedicated `Synthesis` navigation tab with Lucide `Sparkles` icon alongside `Chat`, `Benchmarks`, and `Details`.
+  * Connected active paper state to `PaperSynthesisTab` for seamless instant access while reading PDFs.
+
+* **Paper Detail Modal Rigor Section (`frontend/src/components/modals/PaperDetailModal.jsx`)**:
+  * Enhanced paper details modal with an embedded "Paper Synthesis & NeurIPS Rigor Audit" card displaying itemized checklist statuses, rationale, and toggleable evidence snippets.
+
+* **Backend Critique Synthesis Enrichment (`src/api/routes_intelligence.py`)**:
+  * Updated `POST /api/v1/papers/critique` to return full `ChecklistRubric` metadata (`items`, `evidence_snippet`, `rubric_gaps`, `recommendations`) and dynamic scientific verdicts.
+  * Enabled direct synthesis fallback using request `title` and `abstract` if paper identifiers are not indexed in OpenAlex.
+
+* **Build & Test Verification**:
+  * Verified Vite frontend production build (`npm run build`) compiles cleanly in 7.01s (`public_dist/`).
+  * Verified all backend unit tests pass 100% green: `tests/test_intelligence_routes.py` and `tests/test_skills.py` (9/9 passed).
+
+
 

@@ -31,6 +31,7 @@ import {
   MissingEvidenceAlert,
   AttachExcerptPopover,
 } from './EvidenceDrawer';
+import PaperSynthesisTab from './PaperSynthesisTab';
 
 // Helper to provide deterministic, paper-grounded source citations with diverse source types and confidence levels
 function enrichPaperGrounding(content, paper, query = '') {
@@ -1238,6 +1239,30 @@ export default function PaperReaderSidebar({
 
           <button
             type="button"
+            onClick={() => setActiveTab('synthesis')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: '6px 11px',
+              borderRadius: 6,
+              border: 'none',
+              background: activeTab === 'synthesis' ? 'var(--bg-card, #ffffff)' : 'transparent',
+              color: activeTab === 'synthesis' ? 'var(--accent-violet, #6366f1)' : 'var(--text-muted, #64748b)',
+              fontWeight: activeTab === 'synthesis' ? 600 : 500,
+              fontSize: 12,
+              cursor: 'pointer',
+              boxShadow: activeTab === 'synthesis' ? '0 1px 3px rgba(0,0,0,0.06)' : 'none',
+              transition: 'all 0.12s ease',
+            }}
+            title="Paper Synthesis & Rigor Audit"
+          >
+            <Sparkles size={13} />
+            <span>Synthesis</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setActiveTab('benchmarks')}
             style={{
               display: 'flex',
@@ -1314,9 +1339,11 @@ export default function PaperReaderSidebar({
             onHighlightEvidence={onHighlightEvidence}
           />
         )}
+        {activeTab === 'synthesis' && <PaperSynthesisTab paper={paper} />}
         {activeTab === 'benchmarks' && <BenchmarksTab paper={paper} />}
         {activeTab === 'details' && <DetailsTab paper={paper} />}
       </div>
     </aside>
   );
+
 }

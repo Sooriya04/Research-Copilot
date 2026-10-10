@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.database import get_db
 from src.core.models import PaperCacheModel
-from src.core.schemas import Paper, ScoreBreakdown
+from src.core.schemas import ChecklistRubric, Paper, ScoreBreakdown
 from src.engines.access_resolver import AccessResolver
 from src.engines.paper_rank import PaperRankEngine
 from src.engines.rubric_evaluator import RubricEvaluator
@@ -40,6 +40,9 @@ class CompareResponse(BaseModel):
 
 class CritiqueRequest(BaseModel):
     identifier: str
+    title: Optional[str] = None
+    abstract: Optional[str] = None
+    full_text: Optional[str] = None
 
 class CritiqueResponse(BaseModel):
     identifier: str
@@ -48,6 +51,8 @@ class CritiqueResponse(BaseModel):
     concerns_and_limitations: List[str]
     follow_up_questions: List[str]
     rubric_score: float
+    checklist: Optional[ChecklistRubric] = None
+    verdict: Optional[str] = "Promising empirical method with key areas for verification."
 
 class HypothesisRequest(BaseModel):
     topic: str
@@ -96,13 +101,25 @@ async def compare_papers(req: CompareRequest):
 
 @router.post("/papers/critique", response_model=CritiqueResponse)
 async def critique_paper(req: CritiqueRequest):
-    """Generate an evidence-based research critique with strengths, limitations, and follow-up questions."""
-    res = await resolver.resolve_identifier(req.identifier)
-    if not res.paper:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Paper '{req.identifier}' not found.")
+    """Generate an evidence-based research critique with strengths, limitations, follow-up questions, and rubric items."""
+    p = None
+    if req.identifier:
+        res = await resolver.resolve_identifier(req.identifier)
+        if res and res.paper:
+            p = res.paper
+
+    if not p:
+        if req.title or req.abstract:
+            from src.core.schemas import Paper
+            p = Paper(
+                id=req.identifier or "paper-synthesis",
+                title=req.title or "Untitled Research Document",
+                abstract=req.abstract or "",
+            )
+        else:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Paper '{req.identifier}' not found.")
     
-    p = res.paper
-    rubric = rubric_evaluator.evaluate(p)
+    rubric = rubric_evaluator.evaluate(p, full_text=req.full_text)
 
     strengths = []
     if rubric.has_empirical_eval:
@@ -113,6 +130,8 @@ async def critique_paper(req: CritiqueRequest):
         strengths.append(f"Open-source implementation provided ({rubric.code_url or 'GitHub link'}).")
     if p.citation_count > 500:
         strengths.append(f"High scientific impact with {p.citation_count} field citations.")
+    if any(item.id == "statistical-significance" and item.answer == "present" for item in rubric.items):
+        strengths.append("Rigorous statistical uncertainty quantification reported with confidence intervals/error bars.")
 
     concerns = []
     if not rubric.has_code_repo:
@@ -121,20 +140,31 @@ async def critique_paper(req: CritiqueRequest):
         concerns.append("Hardware compute budget (GPU/TPU hours) is not disclosed.")
     if not rubric.has_uncertainty_quant:
         concerns.append("Lacks statistical significance testing, random seed variances, or error bars.")
+    if any(item.id == "limitations" and item.answer == "missing" for item in rubric.items):
+        concerns.append("Assumptions, bounds of validity, and negative failure cases are not explicitly documented.")
 
     follow_ups = [
-        "How sensitive is the model performance to hyperparameter initialization?",
-        "Does the method maintain efficiency when evaluated on out-of-distribution datasets?",
+        "How sensitive is the model performance to hyperparameter initialization and seed variance?",
+        "Does the method maintain efficiency when evaluated on out-of-distribution or noisy datasets?",
+        "Are the empirical gains robust across varying compute and parameter budgets?",
     ]
+
+    verdict = (
+        "High-rigor methodology with strong empirical validation." if rubric.rubric_score >= 70
+        else "Promising research direction with key methodology gaps to verify before reproduction."
+    )
 
     return CritiqueResponse(
         identifier=req.identifier,
         title=p.title,
-        strengths=strengths or ["Novel research framing."],
-        concerns_and_limitations=concerns or ["Standard computational limits."],
+        strengths=strengths or ["Novel research framing and theoretical motivation."],
+        concerns_and_limitations=concerns or ["Standard computational bounds."],
         follow_up_questions=follow_ups,
-        rubric_score=rubric.rubric_score
+        rubric_score=rubric.rubric_score,
+        checklist=rubric,
+        verdict=verdict,
     )
+
 
 from src.graph.novelty_engine import GraphNoveltyEngine
 
