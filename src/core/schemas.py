@@ -65,6 +65,19 @@ class ScoreBreakdown(BaseModel):
     reproducibility: float = 0.0
     total_score: float = 0.0
 
+class RubricItemAssessment(BaseModel):
+    id: str  # limitations, reproducibility-path, experimental-details, statistical-significance, compute-resources
+    label: str
+    source: str = "NeurIPS Paper Checklist Guidelines"
+    question: str
+    answer: str = "missing"  # present, partial, missing, not_evaluated
+    confidence: float = 1.0  # 0.0 to 1.0
+    sections_inspected: List[str] = Field(default_factory=list)
+    missing_sections: List[str] = Field(default_factory=list)
+    matched_markers: List[str] = Field(default_factory=list)
+    rationale: str = ""
+    evidence_snippet: Optional[str] = None
+
 class ChecklistRubric(BaseModel):
     has_ablation: bool = False
     has_baselines: bool = False
@@ -78,6 +91,9 @@ class ChecklistRubric(BaseModel):
     compute_details: Optional[str] = None
     has_limitations: bool = False
     rubric_score: float = 0.0
+    items: List[RubricItemAssessment] = Field(default_factory=list)
+    rubric_gaps: int = 0
+    recommendations: List[str] = Field(default_factory=list)
 
 class PaperSection(BaseModel):
     title: str

@@ -1749,3 +1749,39 @@ bundle compilation (`npm run build`).
 * **Build & Test Verification**:
   * Verified frontend production bundle builds cleanly in 6.88s via Vite (`public_dist/`) with 0 errors.
   * Verified all backend unit test suites passing 10/10 green.
+
+<br />
+
+## Implement PaperRank Multi-Factor Literature Scoring Skill & Section-Aware Methodology Rigor Checklist
+
+* **PaperRank Multi-Factor Literature Scoring Skill (`src/skills/paper_rank.py`, `skills/paper-rank/SKILL.md`)**:
+  * Implemented `PaperRankSkill` executing the transparent 6-factor literature ranking algorithm ($S \in [0, 100]$) to answer *"What should a researcher read first?"*.
+  * Built 5 sensitivity weighting profiles: `balanced` (default), `reproducibility` (35% reproducibility weight), `empirical_rigor` (35% methodology weight), `recent_velocity` (35% velocity momentum), and `prestige` (35% PageRank prestige).
+  * Integrated multi-source candidate harvesting across OpenAlex and arXiv with cross-source deduplication, NetworkX directed citation graph construction, and PageRank prestige computation ($\alpha=0.85$).
+  * Added automated `recommended_first_read` synthesis with full 6-factor score breakdowns (`topical_relevance`, `citation_impact`, `graph_prestige`, `citation_velocity`, `methodology_quality`, `reproducibility`).
+
+* **Full-Text Methodology Checklist & Rigor Rubrics Skill (`src/skills/methodology_checklist.py`, `skills/methodology-checklist/SKILL.md`, `src/engines/rubric_evaluator.py`)**:
+  * Implemented `MethodologyChecklistSkill` auditing research papers against the 5 core NeurIPS/ICLR empirical rigor criteria: (1) Assumptions & Limitations, (2) Reproducibility Path, (3) Experimental Details & Baselines, (4) Statistical Significance & Uncertainty, and (5) Compute Resources & Budget.
+  * Enhanced `RubricEvaluator` with section-aware inspection across canonical section aliases (`abstract`, `introduction`, `methodology`, `experiments`, `results`, `discussion`, `limitations`, `reproducibility`, `conclusion`).
+  * Implemented verbatim evidence snippet extraction around matched empirical markers, confidence scoring ($0.0$–$1.0$) based on section specificity, rationale generation, and automated recommendations for missing criteria.
+  * Maintained 100% backward compatibility for legacy boolean flags (`has_ablation`, `has_baselines`, `has_code_repo`, `has_compute_budget`, etc.) while adding itemized rubrics and gap counts.
+
+* **Dynamic Scientific Skill Registry & Architecture (`src/skills/registry.py`, `src/skills/__init__.py`)**:
+  * Created extensible `BaseSkill` abstraction with typed `SkillMetadata` and asynchronous `execute()` interface.
+  * Built central `SkillRegistry` singleton (`skill_registry`) for dynamic skill discovery, parameter validation, and execution.
+
+* **REST API Endpoints & Skill Invocation (`src/api/routes_rank.py`)**:
+  * Added `GET /api/v1/rank/profiles` returning sensitivity weighting presets.
+  * Added `POST /api/v1/rank/checklist` allowing researchers to directly evaluate papers or raw text against the NeurIPS methodology rubric.
+  * Added `GET /api/v1/rank/skills` and `POST /api/v1/rank/skills/{skill_name}` for dynamic invocation of registered skills.
+
+* **Data Contracts & Schemas (`src/core/schemas.py`)**:
+  * Added [`RubricItemAssessment`](file:///home/sooriya/Desktop/research-copilot/src/core/schemas.py#L68) schema (`id`, `label`, `question`, `answer`, `confidence`, `sections_inspected`, `matched_markers`, `rationale`, `evidence_snippet`).
+  * Extended [`ChecklistRubric`](file:///home/sooriya/Desktop/research-copilot/src/core/schemas.py#L81) with `items`, `rubric_gaps`, and `recommendations`.
+
+* **Comprehensive Test Suite & Build Verification (`tests/test_skills.py`)**:
+  * Added unit and integration tests covering skill registration, checklist evaluation, snippet context extraction, sensitivity profiles, and REST endpoints.
+  * Verified full test suite passing 100% green: **102 passed, 0 failed** in `97.01s` across 27 test files.
+  * Verified clean Vite frontend production build (`npm run build`) in `6.65s` (`public_dist/`).
+
+
