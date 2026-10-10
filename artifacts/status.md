@@ -126,9 +126,11 @@ All long-term research state, topological nodes, cached proposals, and user prov
 | **Methodology Checklist Skill** | Section-aware NeurIPS rubric, empirical evidence snippet extraction, rubric gaps & recommendations | **Implemented** (`src/skills/methodology_checklist.py`, `skills/methodology-checklist/SKILL.md`, `/api/v1/rank/checklist`) | ✅ Done |
 | **Scientific Skill Registry** | Dynamic registry & dispatcher for modular research skills | **Implemented** (`src/skills/registry.py`, `/api/v1/rank/skills`) | ✅ Done |
 | **Structured Paper Critique** | 3-part critique: Core Strengths, Limitations, Author Follow-up Questions + Executive Synthesis | **Implemented** (`src/api/routes_intelligence.py`, `PaperSynthesisTab.jsx`, `/api/v1/papers/critique`) | ✅ Done |
+| **Mechanical Quote Checker & Reviewer Sign-Off** | Ligature/hyphenation normalization, exact per-page quote matching (`ClaimVerifier`), SQLite `claim_reviews` table, reviewer approve/reject sign-off | **Implemented** (`src/engines/claim_verifier.py`, `routes_intelligence.py`, `EvidenceDrawer.jsx`, `PaperSynthesisTab.jsx`) | ✅ Done |
 | **Paper-Code Audit Skill** | Verifies paper claims & metrics against linked GitHub repos | **Not Implemented** (GitHub resolver exists; audit comparison does not) | 🚀 Next |
 | **Notebook Kernel Runner** | Sandboxed Jupyter kernel session, cell execution, stdout/stderr capture | **Not Implemented** | ⏳ Next Phase |
 | **Cloud Compute Dispatch** | Remote Modal / RunPod / SSH execution | **Not Implemented** | ⏳ Next Phase |
+
 
 
 

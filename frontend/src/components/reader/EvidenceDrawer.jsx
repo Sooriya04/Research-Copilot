@@ -16,6 +16,8 @@ import {
   Search,
   Sparkles,
   Globe,
+  ShieldCheck,
+  Check,
 } from 'lucide-react';
 
 // Get matching icon for evidence source type
@@ -217,6 +219,33 @@ export function CitationChip({ citation, onOpenEvidence, onOpenPaper }) {
 export function EvidenceInspectionPanel({ citation, onClose, onOpenPaper, onBackToAnswer }) {
   if (!citation) return null;
 
+  const [reviewerStatus, setReviewerStatus] = useState(citation.reviewer_status || null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleReview = async (status) => {
+    const next = reviewerStatus === status ? null : status;
+    setReviewerStatus(next);
+    setIsSubmitting(true);
+    try {
+      const claimId = citation.id || citation.claim_id || `cite-${citation.page || 1}-${(citation.quote || '').slice(0, 16).replace(/\s+/g, '_')}`;
+      await fetch('/api/v1/papers/claims/review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          claim_id: claimId,
+          paper_id: citation.paper_id || null,
+          reviewer_status: next || 'pending',
+          note: `Reviewed in inspection panel on page ${citation.page || 1}`,
+          reviewer: 'researcher',
+        }),
+      });
+    } catch (err) {
+      console.warn('Failed to submit reviewer sign-off:', err);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   return (
     <div className="evidence-modal-backdrop" onClick={onClose}>
       <div className="evidence-modal-card" onClick={(e) => e.stopPropagation()}>
@@ -240,24 +269,47 @@ export function EvidenceInspectionPanel({ citation, onClose, onOpenPaper, onBack
           </button>
         </div>
 
-        {/* Confidence Label */}
-        <div className="evidence-confidence-row">
-          {citation.confidence === 'direct' && (
+        {/* Confidence & Mechanical Verification Label */}
+        <div className="evidence-confidence-row" style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+          {citation.mechanically_verified ? (
+            <span className="evidence-confidence-tag direct" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
+              <ShieldCheck size={12} />
+              <span>✓ Mechanically Verified Quote · Page {citation.page || 1}</span>
+            </span>
+          ) : citation.confidence === 'direct' ? (
             <span className="evidence-confidence-tag direct">
               <CheckCircle2 size={11} />
               <span>✓ Direct evidence · p.{citation.page || 1}</span>
             </span>
-          )}
-          {citation.confidence === 'inferred' && (
+          ) : citation.confidence === 'inferred' ? (
             <span className="evidence-confidence-tag inferred">
               <HelpCircle size={11} />
               <span>~ Inferred from paper · p.{citation.page || 1}</span>
             </span>
-          )}
-          {citation.confidence === 'unsupported' && (
+          ) : (
             <span className="evidence-confidence-tag unsupported">
               <AlertTriangle size={11} />
               <span>⚠ Not explicitly stated in the paper</span>
+            </span>
+          )}
+
+          {reviewerStatus && (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                fontSize: '11px',
+                fontWeight: 600,
+                padding: '2px 8px',
+                borderRadius: '12px',
+                background: reviewerStatus === 'approved' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                color: reviewerStatus === 'approved' ? '#10b981' : '#ef4444',
+                border: reviewerStatus === 'approved' ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(239, 68, 68, 0.3)',
+              }}
+            >
+              {reviewerStatus === 'approved' ? <Check size={11} /> : <X size={11} />}
+              <span>Reviewer: {reviewerStatus.toUpperCase()}</span>
             </span>
           )}
         </div>
@@ -271,6 +323,83 @@ export function EvidenceInspectionPanel({ citation, onClose, onOpenPaper, onBack
           <blockquote className="evidence-passage-quote">
             "{citation.quote || 'No direct text excerpt available.'}"
           </blockquote>
+        </div>
+
+        {/* Human Reviewer Sign-Off Controls */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '8px 12px',
+            background: 'var(--bg-subtle, rgba(255,255,255,0.03))',
+            borderRadius: '6px',
+            border: '1px solid var(--border-subtle, rgba(255,255,255,0.08))',
+            marginTop: '10px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-muted)' }}>
+            <span>Reviewer Sign-Off:</span>
+            {reviewerStatus === 'approved' && (
+              <span style={{ color: '#10b981', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '3px' }}>
+                <Check size={11} /> Verified Valid
+              </span>
+            )}
+            {reviewerStatus === 'rejected' && (
+              <span style={{ color: '#ef4444', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '3px' }}>
+                <X size={11} /> Rejected (Out of context)
+              </span>
+            )}
+            {!reviewerStatus && (
+              <span style={{ fontStyle: 'italic' }}>Pending sign-off</span>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: '6px' }}>
+            <button
+              type="button"
+              disabled={isSubmitting}
+              onClick={() => handleReview('approved')}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                padding: '3px 8px',
+                borderRadius: '4px',
+                fontSize: '11px',
+                fontWeight: 500,
+                cursor: 'pointer',
+                border: reviewerStatus === 'approved' ? '1px solid #10b981' : '1px solid var(--border-subtle, rgba(255,255,255,0.15))',
+                background: reviewerStatus === 'approved' ? 'rgba(16, 185, 129, 0.2)' : 'transparent',
+                color: reviewerStatus === 'approved' ? '#10b981' : 'var(--text-primary)',
+              }}
+              title="Approve this quote as faithful grounding"
+            >
+              <Check size={11} />
+              <span>Approve</span>
+            </button>
+            <button
+              type="button"
+              disabled={isSubmitting}
+              onClick={() => handleReview('rejected')}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                padding: '3px 8px',
+                borderRadius: '4px',
+                fontSize: '11px',
+                fontWeight: 500,
+                cursor: 'pointer',
+                border: reviewerStatus === 'rejected' ? '1px solid #ef4444' : '1px solid var(--border-subtle, rgba(255,255,255,0.15))',
+                background: reviewerStatus === 'rejected' ? 'rgba(239, 68, 68, 0.2)' : 'transparent',
+                color: reviewerStatus === 'rejected' ? '#ef4444' : 'var(--text-primary)',
+              }}
+              title="Reject this quote as ungrounded or misattributed"
+            >
+              <X size={11} />
+              <span>Reject</span>
+            </button>
+          </div>
         </div>
 
         {/* Actions Bar */}
@@ -307,6 +436,31 @@ export function EvidenceInspectionPanel({ citation, onClose, onOpenPaper, onBack
 export function EvidenceDrawer({ sources, activeCitation, onClose, onOpenPaper, onBackToAnswer }) {
   if (!sources || sources.length === 0) return null;
 
+  const [cardReviews, setCardReviews] = useState({});
+
+  const handleCardReview = async (src, status) => {
+    const key = src.id || `${src.page}-${(src.quote || '').slice(0, 16)}`;
+    const current = cardReviews[key] !== undefined ? cardReviews[key] : src.reviewer_status;
+    const next = current === status ? null : status;
+    setCardReviews((prev) => ({ ...prev, [key]: next }));
+    try {
+      const claimId = src.id || src.claim_id || `cite-${src.page || 1}-${(src.quote || '').slice(0, 16).replace(/\s+/g, '_')}`;
+      await fetch('/api/v1/papers/claims/review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          claim_id: claimId,
+          paper_id: src.paper_id || null,
+          reviewer_status: next || 'pending',
+          note: `Reviewed in drawer on page ${src.page || 1}`,
+          reviewer: 'researcher',
+        }),
+      });
+    } catch (err) {
+      console.warn('Failed to submit reviewer sign-off:', err);
+    }
+  };
+
   return (
     <div className="evidence-drawer-overlay">
       <div className="evidence-drawer-header">
@@ -340,6 +494,9 @@ export function EvidenceDrawer({ sources, activeCitation, onClose, onOpenPaper, 
       <div className="evidence-drawer-body">
         {sources.map((src, idx) => {
           const isSelected = activeCitation && activeCitation.id === src.id;
+          const reviewKey = src.id || `${src.page}-${(src.quote || '').slice(0, 16)}`;
+          const currentReview = cardReviews[reviewKey] !== undefined ? cardReviews[reviewKey] : src.reviewer_status;
+
           return (
             <div
               key={src.id || idx}
@@ -355,21 +512,40 @@ export function EvidenceDrawer({ sources, activeCitation, onClose, onOpenPaper, 
                   </span>
                 </div>
 
-                {src.confidence === 'direct' && (
-                  <span className="evidence-confidence-pill direct">
-                    ✓ Direct
-                  </span>
-                )}
-                {src.confidence === 'inferred' && (
-                  <span className="evidence-confidence-pill inferred">
-                    ~ Inferred
-                  </span>
-                )}
-                {src.confidence === 'unsupported' && (
-                  <span className="evidence-confidence-pill unsupported">
-                    ⚠ Unstated
-                  </span>
-                )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  {src.mechanically_verified ? (
+                    <span className="evidence-confidence-pill direct" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
+                      ✓ Verified
+                    </span>
+                  ) : src.confidence === 'direct' ? (
+                    <span className="evidence-confidence-pill direct">
+                      ✓ Direct
+                    </span>
+                  ) : src.confidence === 'inferred' ? (
+                    <span className="evidence-confidence-pill inferred">
+                      ~ Inferred
+                    </span>
+                  ) : (
+                    <span className="evidence-confidence-pill unsupported">
+                      ⚠ Unstated
+                    </span>
+                  )}
+
+                  {currentReview && (
+                    <span
+                      style={{
+                        fontSize: '9.5px',
+                        fontWeight: 700,
+                        padding: '1px 5px',
+                        borderRadius: '4px',
+                        background: currentReview === 'approved' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+                        color: currentReview === 'approved' ? '#10b981' : '#ef4444',
+                      }}
+                    >
+                      {currentReview === 'approved' ? '✓ SIGNED' : '✕ REJECTED'}
+                    </span>
+                  )}
+                </div>
               </div>
 
               {/* Distinct Original Paper Text */}
@@ -377,7 +553,50 @@ export function EvidenceDrawer({ sources, activeCitation, onClose, onOpenPaper, 
                 "{src.quote}"
               </div>
 
-              <div className="evidence-card-bottom">
+              <div className="evidence-card-bottom" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  <button
+                    type="button"
+                    onClick={() => handleCardReview(src, 'approved')}
+                    style={{
+                      background: currentReview === 'approved' ? 'rgba(16, 185, 129, 0.2)' : 'transparent',
+                      border: currentReview === 'approved' ? '1px solid #10b981' : '1px solid var(--border-subtle, rgba(255,255,255,0.1))',
+                      color: currentReview === 'approved' ? '#10b981' : 'var(--text-muted)',
+                      padding: '2px 6px',
+                      borderRadius: '4px',
+                      fontSize: '10px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '3px',
+                    }}
+                    title="Sign off as approved"
+                  >
+                    <Check size={10} />
+                    <span>Approve</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleCardReview(src, 'rejected')}
+                    style={{
+                      background: currentReview === 'rejected' ? 'rgba(239, 68, 68, 0.2)' : 'transparent',
+                      border: currentReview === 'rejected' ? '1px solid #ef4444' : '1px solid var(--border-subtle, rgba(255,255,255,0.1))',
+                      color: currentReview === 'rejected' ? '#ef4444' : 'var(--text-muted)',
+                      padding: '2px 6px',
+                      borderRadius: '4px',
+                      fontSize: '10px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '3px',
+                    }}
+                    title="Sign off as rejected"
+                  >
+                    <X size={10} />
+                    <span>Reject</span>
+                  </button>
+                </div>
+
                 <button
                   type="button"
                   className="evidence-card-open-btn"

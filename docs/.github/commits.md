@@ -1811,5 +1811,36 @@ bundle compilation (`npm run build`).
   * Verified Vite frontend production build (`npm run build`) compiles cleanly in 7.01s (`public_dist/`).
   * Verified all backend unit tests pass 100% green: `tests/test_intelligence_routes.py` and `tests/test_skills.py` (9/9 passed).
 
+<br />
+
+## Implement Mechanical Per-Page Quote Checker & Reviewer Sign-Off Workflow
+
+* **Mechanical Per-Page Quote Matching & Normalization Engine (`src/engines/claim_verifier.py`)**:
+  * Implemented `normalize_text` to strip Unicode ligatures (`ﬁ` -> `fi`, `ﬂ` -> `fl`, etc.), resolve hyphenated line-breaks (`multi-\nhead` -> `multihead`), and collapse irregular PDF whitespace layers.
+  * Added `verify_excerpt_on_page(page_text, excerpt)` executing deterministic substring matching for mechanical verification, alongside token overlap calculation for inferred quotes.
+  * Added `verify_claims_against_pages(claims, pages_text)` mapping claims to exact source pages with automatic page detection across PDF text layers.
+  * Updated `ClaimVerifier.verify_claims` with normalized corpus checks setting `mechanically_verified = True` for verbatim textual citations.
+
+* **Reviewer Sign-Off Persistence & Models (`src/core/normalized_models.py`, `src/core/canonical_models.py`, `src/core/paper_repository.py`)**:
+  * Added `ClaimReviewModel` (`claim_reviews` table in SQLite) tracking `claim_id`, `paper_id`, `reviewer_status` (`approved` | `rejected`), notes, and reviewer attribution.
+  * Extended `ExtractedClaim` in canonical models with `id`, `page`, `mechanically_verified`, `reviewer_status`, and `reviewer_note`.
+  * Added `PaperRepository.record_claim_review` and `PaperRepository.get_claim_reviews` with bi-directional synchronization between `claim_reviews` and `paper_summaries.claims_json`.
+
+* **Intelligence API Endpoints (`src/api/routes_intelligence.py`)**:
+  * Added `POST /api/v1/papers/claims/review` allowing researchers to sign off (approve or reject) evidence quotes with persistent SQLite storage.
+  * Added `GET /api/v1/papers/claims/reviews` for retrieving audit decisions.
+  * Added `POST /api/v1/papers/claims/verify-quote` providing instant mechanical per-page quote verification against paper text layers.
+
+* **Interactive Evidence UI & Reviewer Controls (`frontend/src/components/reader/EvidenceDrawer.jsx`, `frontend/src/components/reader/PaperSynthesisTab.jsx`)**:
+  * Enhanced `EvidenceInspectionPanel` with `ShieldCheck` status badges (`✓ Mechanically Verified Quote · Page X`) and inline `Approve` / `Reject` reviewer sign-off actions with optimistic state updates.
+  * Enhanced `EvidenceDrawer` with per-source mechanical verification pills and one-click `Approve` / `Reject` sign-off controls.
+  * Enhanced `PaperSynthesisTab` with an "Audited Claims & Mechanical Quote Verifier" deck detailing per-claim quote verification, page locators, and researcher sign-off buttons.
+
+* **Test Suite & Build Verification (`tests/test_claim_verifier.py`, `tests/test_intelligence_routes.py`)**:
+  * Added unit test suite in `tests/test_claim_verifier.py` validating ligature normalization, exact substring matching, fuzzy token overlap, and per-page claim verification.
+  * Added integration tests for `/api/v1/papers/claims/review`, `/api/v1/papers/claims/reviews`, and `/api/v1/papers/claims/verify-quote`.
+  * Verified Vite frontend production build (`npm run build`) in 6.96s (`public_dist/`).
+
+
 
 

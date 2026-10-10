@@ -10,7 +10,7 @@ from src.core.canonical_models import (
 )
 from src.core.logger import logger
 from src.core.normalized_models import (
-    BenchmarkModel, CodeRepositoryModel, NormalizedPaperModel,
+    BenchmarkModel, ClaimReviewModel, CodeRepositoryModel, NormalizedPaperModel,
     PaperSectionModel, PaperSourceModel, PaperSummaryModel, ResearchGapModel
 )
 
@@ -441,3 +441,72 @@ class PaperRepository:
             clean_arxiv,
             clean_doi,
         )
+
+    @staticmethod
+    async def record_claim_review(
+        db: AsyncSession,
+        claim_id: str,
+        reviewer_status: str,
+        note: Optional[str] = None,
+        paper_id: Optional[str] = None,
+        reviewer: str = "researcher",
+    ) -> ClaimReviewModel:
+        """Upsert reviewer decision (approved/rejected) in SQLite and sync to paper summary if present."""
+        stmt = select(ClaimReviewModel).where(ClaimReviewModel.claim_id == claim_id)
+        res = await db.execute(stmt)
+        record = res.scalar_one_or_none()
+
+        if not record:
+            record = ClaimReviewModel(
+                claim_id=claim_id,
+                paper_id=paper_id,
+                reviewer_status=reviewer_status,
+                note=note,
+                reviewer=reviewer,
+            )
+            db.add(record)
+        else:
+            record.reviewer_status = reviewer_status
+            if note is not None:
+                record.note = note
+            if paper_id is not None:
+                record.paper_id = paper_id
+            record.reviewer = reviewer
+
+        # If paper_id is given, also update cached summary claims_json
+        if paper_id:
+            s_stmt = select(PaperSummaryModel).where(PaperSummaryModel.paper_id == paper_id)
+            s_res = await db.execute(s_stmt)
+            summary_rec = s_res.scalar_one_or_none()
+            if summary_rec and summary_rec.claims_json:
+                updated_claims = []
+                for c in summary_rec.claims_json:
+                    c_dict = dict(c)
+                    if c_dict.get("id") == claim_id or (
+                        claim_id in c_dict.get("claim", "")
+                    ):
+                        c_dict["reviewer_status"] = reviewer_status
+                        c_dict["reviewer_note"] = note
+                    updated_claims.append(c_dict)
+                summary_rec.claims_json = updated_claims
+
+        await db.commit()
+        await db.refresh(record)
+        logger.info("[PaperRepository] Recorded reviewer signoff '%s' for claim '%s'", reviewer_status, claim_id)
+        return record
+
+    @staticmethod
+    async def get_claim_reviews(
+        db: AsyncSession,
+        paper_id: Optional[str] = None,
+        claim_id: Optional[str] = None,
+    ) -> List[ClaimReviewModel]:
+        """Retrieve stored reviewer sign-off decisions from SQLite."""
+        stmt = select(ClaimReviewModel)
+        if claim_id:
+            stmt = stmt.where(ClaimReviewModel.claim_id == claim_id)
+        if paper_id:
+            stmt = stmt.where(ClaimReviewModel.paper_id == paper_id)
+        res = await db.execute(stmt)
+        return list(res.scalars().all())
+

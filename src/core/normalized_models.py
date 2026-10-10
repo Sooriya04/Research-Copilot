@@ -126,3 +126,17 @@ class ResearchGapModel(Base):
     proposed_direction = Column(Text, nullable=True)
 
     paper = relationship("NormalizedPaperModel", back_populates="research_gaps")
+
+class ClaimReviewModel(Base):
+    """Normalized human reviewer sign-off decisions for claims and evidence quotes."""
+    __tablename__ = "claim_reviews"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    claim_id = Column(String, nullable=False, index=True)
+    paper_id = Column(String, nullable=True, index=True)
+    reviewer_status = Column(String, nullable=False)  # approved, rejected, pending
+    note = Column(Text, nullable=True)
+    reviewer = Column(String, default="researcher")
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+

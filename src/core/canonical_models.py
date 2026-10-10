@@ -1,3 +1,4 @@
+import hashlib
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
@@ -65,6 +66,7 @@ class PaperSectionEntity(BaseModel):
     token_count: int = 0
 
 class ExtractedClaim(BaseModel):
+    id: Optional[str] = None
     claim: str
     evidence: str = ""
     section: Optional[str] = None
@@ -74,6 +76,15 @@ class ExtractedClaim(BaseModel):
     confidence: float = 0.0
     verification_status: VerificationStatus = VerificationStatus.UNVERIFIED
     verification_notes: Optional[str] = None
+    page: Optional[int] = None
+    mechanically_verified: bool = False
+    reviewer_status: Optional[str] = None  # "approved" | "rejected" | None
+    reviewer_note: Optional[str] = None
+
+    def model_post_init(self, __context: Any) -> None:
+        if not self.id:
+            raw_hash = hashlib.sha256((self.claim + (self.evidence or "")).encode()).hexdigest()[:10]
+            self.id = f"claim-{raw_hash}"
 
 class ResearchGapEntity(BaseModel):
     category: str  # compute_bottleneck, ood_generalization, dataset_bias, theoretical_bound, scaling_limit
