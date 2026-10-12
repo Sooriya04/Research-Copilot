@@ -25,6 +25,12 @@ import {
   MessageSquare,
   Lock,
   Unlock,
+  ZoomIn,
+  ZoomOut,
+  ChevronUp,
+  ChevronDown,
+  PanelRightClose,
+  PanelRightOpen,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
@@ -85,8 +91,8 @@ function computeSpaciousSeedPositions(rawNodes, rawEdges) {
   });
 
   const N = paperNodes.length;
-  // Expansive radius: at least 380px, expanding with paper count so chord distance is >= 340px
-  const paperRadius = Math.max(380, N * 65);
+  // Compact, well-spaced radial orbit so nodes remain comfortably large and readable on screen
+  const paperRadius = Math.max(240, N * 42);
 
   paperNodes.forEach((paper, i) => {
     const angle = (2 * Math.PI * i) / Math.max(1, N) - Math.PI / 2;
@@ -112,7 +118,7 @@ function computeSpaciousSeedPositions(rawNodes, rawEdges) {
   });
 
   const placedEntities = new Set();
-  const entityRadius = paperRadius + 190;
+  const entityRadius = paperRadius + 115;
 
   paperNodes.forEach(paper => {
     const attached = (paperEntities[paper.id] || []).filter(eId => !placedEntities.has(eId));
@@ -121,11 +127,11 @@ function computeSpaciousSeedPositions(rawNodes, rawEdges) {
     const count = attached.length;
 
     // Spread attached entities along an outward arc centered on paper's angle
-    const totalArc = Math.min(1.4, count * 0.28);
+    const totalArc = Math.min(1.2, count * 0.24);
     attached.forEach((eId, j) => {
       const offset = count === 1 ? 0 : (j - (count - 1) / 2) * (totalArc / Math.max(1, count - 1));
       const entAngle = baseAngle + offset;
-      const r = entityRadius + ((j % 2 === 0) ? 0 : 50); // Stagger radially to avoid pill collisions
+      const r = entityRadius + ((j % 2 === 0) ? 0 : 35); // Slight radial stagger
       positions[eId] = {
         x: Math.round(r * Math.cos(entAngle)),
         y: Math.round(r * Math.sin(entAngle)),
@@ -138,7 +144,7 @@ function computeSpaciousSeedPositions(rawNodes, rawEdges) {
   const remaining = rawNodes.filter(n => !positions[n.id]);
   remaining.forEach((rem, idx) => {
     const angle = (2 * Math.PI * idx) / Math.max(1, remaining.length);
-    const r = entityRadius + 90;
+    const r = entityRadius + 45;
     positions[rem.id] = {
       x: Math.round(r * Math.cos(angle)),
       y: Math.round(r * Math.sin(angle)),
@@ -420,9 +426,45 @@ export default function KnowledgeGraphView() {
   const [isPhysicsFrozen, setIsPhysicsFrozen] = useState(false);
   const [layoutMode, setLayoutMode] = useState('organic'); // 'organic' | 'hierarchical'
   const [showCitations, setShowCitations] = useState(false); // Hide dense citation hairball by default
+  const [isInspectorOpen, setIsInspectorOpen] = useState(true);
+  const [isSearchOpen, setIsSearchOpen] = useState(false); // Collapsed by default when papers already added
 
   const containerRef = useRef(null);
   const networkRef = useRef(null);
+
+  // Trigger smooth vis-network redraw and auto-fit when panels toggle
+  useEffect(() => {
+    if (networkRef.current) {
+      const handleResize = () => {
+        networkRef.current.redraw();
+        networkRef.current.fit({ animation: { duration: 250, easingFunction: 'easeInOutQuad' } });
+      };
+      const t1 = setTimeout(handleResize, 60);
+      const t2 = setTimeout(handleResize, 200);
+      return () => {
+        clearTimeout(t1);
+        clearTimeout(t2);
+      };
+    }
+  }, [isInspectorOpen, isSearchOpen]);
+
+  const handleZoomIn = () => {
+    if (networkRef.current) {
+      networkRef.current.moveTo({
+        scale: networkRef.current.getScale() * 1.3,
+        animation: { duration: 250, easingFunction: 'easeInOutQuad' },
+      });
+    }
+  };
+
+  const handleZoomOut = () => {
+    if (networkRef.current) {
+      networkRef.current.moveTo({
+        scale: networkRef.current.getScale() * 0.75,
+        animation: { duration: 250, easingFunction: 'easeInOutQuad' },
+      });
+    }
+  };
 
   const handleToggleFreeze = () => {
     if (!networkRef.current) return;
@@ -1204,14 +1246,14 @@ export default function KnowledgeGraphView() {
       let edgeSpringConstant = 0.025;
 
       if (isTopicEdge) {
-        edgeLength = 340; // Expand papers far out from central topic
-        edgeSpringConstant = 0.035;
-      } else if (isCite || isCrossPaper) {
-        edgeLength = 380; // Keep papers far apart from each other
-        edgeSpringConstant = 0.008; // Very loose spring so cross-paper links don't drag papers into a clump!
-      } else if (rel === 'uses_method' || rel === 'uses_dataset' || rel === 'evaluates_on' || rel === 'proposes_method') {
-        edgeLength = 170; // Branch entities neatly outside parent paper
+        edgeLength = 240; // Expand papers comfortably out from central topic
         edgeSpringConstant = 0.04;
+      } else if (isCite || isCrossPaper) {
+        edgeLength = 270; // Keep papers well-spaced
+        edgeSpringConstant = 0.01;
+      } else if (rel === 'uses_method' || rel === 'uses_dataset' || rel === 'evaluates_on' || rel === 'proposes_method') {
+        edgeLength = 120; // Neat outward branches
+        edgeSpringConstant = 0.045;
       }
 
       return {
@@ -1250,10 +1292,10 @@ export default function KnowledgeGraphView() {
         enabled: !isPhysicsFrozen && !isHierarchical,
         solver: 'barnesHut',
         barnesHut: {
-          gravitationalConstant: -16000, // Massive repulsion so cards never touch
-          centralGravity: 0.03,          // Gentle centering, avoids crushing radial orbit
-          springLength: 260,
-          springConstant: 0.02,
+          gravitationalConstant: -10000, // Strong repulsion preventing card collision
+          centralGravity: 0.05,          // Natural centering
+          springLength: 200,
+          springConstant: 0.025,
           damping: 0.7,
           avoidOverlap: 1.0,             // Vis.js strictly enforces bounding box clearance
         },
@@ -1391,10 +1433,12 @@ export default function KnowledgeGraphView() {
         const nodeId = params.nodes[0];
         const foundNode = filteredData.nodes.find(n => n.id === nodeId) || rawNodes.find(n => n.id === nodeId);
         if (foundNode) {
+          setIsInspectorOpen(true);
           setInspectorTab('inspector');
           handleSelectNode(foundNode);
         }
       } else if (params.edges.length > 0) {
+        setIsInspectorOpen(true);
         setInspectorTab('inspector');
         const edgeId = params.edges[0];
         const foundEdge = filteredData.edges.find(e => `${e.source}->${e.target}:${e.relation}` === edgeId) ||
@@ -1641,6 +1685,15 @@ export default function KnowledgeGraphView() {
                 <span>Fit</span>
               </button>
               <button
+                className={`btn btn-sm ${isSearchOpen ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setIsSearchOpen(!isSearchOpen)}
+                style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                title={isSearchOpen ? "Collapse paper search" : "Search & add more papers to graph"}
+              >
+                {isSearchOpen ? <ChevronUp size={13} /> : <Plus size={13} />}
+                <span>{isSearchOpen ? 'Collapse Search' : 'Add Papers'}</span>
+              </button>
+              <button
                 className="btn btn-secondary btn-sm"
                 onClick={handleClearGraph}
                 style={{ display: 'flex', alignItems: 'center', gap: 6 }}
@@ -1655,7 +1708,7 @@ export default function KnowledgeGraphView() {
       </div>
 
       {/* Search Literature to Add to Knowledge Graph */}
-      {graphMode === 'graph' && (
+      {graphMode === 'graph' && (addedToGraphPaperIds.length === 0 || isSearchOpen) && (
         <div
           className="card"
           style={{
@@ -2063,12 +2116,46 @@ export default function KnowledgeGraphView() {
             <button
               type="button"
               className="btn btn-secondary btn-sm"
+              onClick={handleZoomIn}
+              style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', fontSize: 12 }}
+              title="Zoom In"
+            >
+              <ZoomIn size={12} />
+              <span>In</span>
+            </button>
+
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={handleZoomOut}
+              style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', fontSize: 12 }}
+              title="Zoom Out"
+            >
+              <ZoomOut size={12} />
+              <span>Out</span>
+            </button>
+
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
               onClick={handleResetFit}
               style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', fontSize: 12 }}
               title="Reset Zoom and Fit to Screen"
             >
               <Maximize2 size={12} />
               <span>Fit</span>
+            </button>
+
+            {/* Toggle Inspector Panel */}
+            <button
+              type="button"
+              className={`btn btn-sm ${isInspectorOpen ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setIsInspectorOpen(!isInspectorOpen)}
+              style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 9px', fontSize: 12 }}
+              title={isInspectorOpen ? "Hide Inspector to expand canvas full width" : "Show Inspector"}
+            >
+              {isInspectorOpen ? <PanelRightClose size={12} /> : <PanelRightOpen size={12} />}
+              <span>{isInspectorOpen ? 'Inspector' : 'Show Inspector'}</span>
             </button>
 
             <span className="badge badge-neutral" style={{ fontSize: 11 }}>
@@ -2122,91 +2209,164 @@ export default function KnowledgeGraphView() {
 
       {/* 1. Graph Canvas View */}
       {graphMode === 'graph' && (
-        <div className="graph-workspace" id="graph-workspace-view">
-          <div className="card graph-canvas-box" style={{ height: 620, position: 'relative' }}>
-            {loading && (
-              <div
-                style={{
-                  position: 'absolute',
-                  inset: 0,
-                  background: 'rgba(15, 23, 42, 0.45)',
-                  backdropFilter: 'blur(2px)',
-                  zIndex: 20,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  borderRadius: 'inherit',
-                }}
-              >
-                <Loader2 size={28} className="animate-spin" style={{ color: 'var(--accent-blue)', marginBottom: 8 }} />
-                <p style={{ fontSize: 13, color: '#f8fafc', fontWeight: 500, margin: 0 }}>
-                  Loading Knowledge Graph entities & semantic relationships...
-                </p>
-              </div>
-            )}
-            {filteredData.nodes.length > 0 ? (
-              <>
+        <div
+          className="graph-workspace"
+          id="graph-workspace-view"
+          style={{
+            height: 'calc(100vh - 165px)',
+            minHeight: 740,
+            display: 'grid',
+            gridTemplateColumns: isInspectorOpen ? '1fr 340px' : '1fr',
+            gap: 14,
+          }}
+        >
+            <div className="card graph-canvas-box" style={{ height: '100%', position: 'relative' }}>
+              {loading && (
                 <div
                   style={{
                     position: 'absolute',
-                    top: 12,
-                    right: 12,
-                    zIndex: 10,
+                    inset: 0,
+                    background: 'rgba(15, 23, 42, 0.45)',
+                    backdropFilter: 'blur(2px)',
+                    zIndex: 20,
                     display: 'flex',
+                    flexDirection: 'column',
                     alignItems: 'center',
-                    gap: 6,
-                    background: 'rgba(15, 23, 42, 0.8)',
-                    backdropFilter: 'blur(8px)',
-                    padding: '4px 8px',
-                    borderRadius: 'var(--radius-sm)',
-                    border: '1px solid rgba(255, 255, 255, 0.15)',
-                    boxShadow: '0 2px 6px rgba(0, 0, 0, 0.25)',
+                    justifyContent: 'center',
+                    borderRadius: 'inherit',
                   }}
                 >
-                  <button
-                    type="button"
-                    onClick={handleToggleFreeze}
-                    style={{
-                      background: isPhysicsFrozen ? 'rgba(255, 255, 255, 0.1)' : 'var(--accent-primary)',
-                      color: '#ffffff',
-                      border: 'none',
-                      borderRadius: 4,
-                      padding: '3px 8px',
-                      fontSize: 11.5,
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 4,
-                      cursor: 'pointer',
-                      fontWeight: 500,
-                    }}
-                    title={isPhysicsFrozen ? "Physics is frozen. Click to unfreeze motion." : "Physics is active. Click to freeze motion."}
-                  >
-                    {isPhysicsFrozen ? <Lock size={11} /> : <Unlock size={11} />}
-                    <span>{isPhysicsFrozen ? 'Motion Frozen' : 'Live Motion'}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleResetFit}
-                    style={{
-                      background: 'rgba(255, 255, 255, 0.1)',
-                      color: '#ffffff',
-                      border: 'none',
-                      borderRadius: 4,
-                      padding: '3px 8px',
-                      fontSize: 11.5,
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 4,
-                      cursor: 'pointer',
-                    }}
-                    title="Fit to Screen"
-                  >
-                    <Maximize2 size={11} />
-                    <span>Fit</span>
-                  </button>
+                  <Loader2 size={28} className="animate-spin" style={{ color: 'var(--accent-blue)', marginBottom: 8 }} />
+                  <p style={{ fontSize: 13, color: '#f8fafc', fontWeight: 500, margin: 0 }}>
+                    Loading Knowledge Graph entities & semantic relationships...
+                  </p>
                 </div>
+              )}
+              {filteredData.nodes.length > 0 ? (
+                <>
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 12,
+                      right: 12,
+                      zIndex: 10,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      background: 'rgba(15, 23, 42, 0.8)',
+                      backdropFilter: 'blur(8px)',
+                      padding: '4px 8px',
+                      borderRadius: 'var(--radius-sm)',
+                      border: '1px solid rgba(255, 255, 255, 0.15)',
+                      boxShadow: '0 2px 6px rgba(0, 0, 0, 0.25)',
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={handleToggleFreeze}
+                      style={{
+                        background: isPhysicsFrozen ? 'rgba(255, 255, 255, 0.1)' : 'var(--accent-primary)',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: 4,
+                        padding: '3px 8px',
+                        fontSize: 11.5,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        cursor: 'pointer',
+                        fontWeight: 500,
+                      }}
+                      title={isPhysicsFrozen ? "Physics is frozen. Click to unfreeze motion." : "Physics is active. Click to freeze motion."}
+                    >
+                      {isPhysicsFrozen ? <Lock size={11} /> : <Unlock size={11} />}
+                      <span>{isPhysicsFrozen ? 'Motion Frozen' : 'Live Motion'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleZoomIn}
+                      style={{
+                        background: 'rgba(255, 255, 255, 0.1)',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: 4,
+                        padding: '3px 8px',
+                        fontSize: 11.5,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        cursor: 'pointer',
+                      }}
+                      title="Zoom In"
+                    >
+                      <ZoomIn size={11} />
+                      <span>In</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleZoomOut}
+                      style={{
+                        background: 'rgba(255, 255, 255, 0.1)',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: 4,
+                        padding: '3px 8px',
+                        fontSize: 11.5,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        cursor: 'pointer',
+                      }}
+                      title="Zoom Out"
+                    >
+                      <ZoomOut size={11} />
+                      <span>Out</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleResetFit}
+                      style={{
+                        background: 'rgba(255, 255, 255, 0.1)',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: 4,
+                        padding: '3px 8px',
+                        fontSize: 11.5,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        cursor: 'pointer',
+                      }}
+                      title="Fit to Screen"
+                    >
+                      <Maximize2 size={11} />
+                      <span>Fit</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsInspectorOpen(!isInspectorOpen)}
+                      style={{
+                        background: isInspectorOpen ? 'var(--accent-primary)' : 'rgba(255, 255, 255, 0.1)',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: 4,
+                        padding: '3px 8px',
+                        fontSize: 11.5,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        cursor: 'pointer',
+                      }}
+                      title={isInspectorOpen ? "Hide Inspector Panel" : "Show Inspector Panel"}
+                    >
+                      {isInspectorOpen ? <PanelRightClose size={11} /> : <PanelRightOpen size={11} />}
+                      <span>{isInspectorOpen ? 'Inspector' : 'Show Inspector'}</span>
+                    </button>
+                  </div>
                 <div ref={containerRef} style={{ width: '100%', height: '100%' }}></div>
               </>
             ) : addedToGraphPaperIds && addedToGraphPaperIds.length > 0 ? (
@@ -2284,48 +2444,67 @@ export default function KnowledgeGraphView() {
           </div>
 
           {/* Entity & Relationship Inspector Panel */}
-          <div className="card" id="graph-inspector-panel" style={{ height: 620, overflowY: 'auto' }}>
-            {/* Top Inspector Tab Switcher */}
-            <div style={{ display: 'flex', borderBottom: '1px solid var(--border-subtle)', marginBottom: 12, paddingBottom: 8, gap: 8, alignItems: 'center' }}>
-              <button
-                type="button"
-                onClick={() => setInspectorTab('inspector')}
-                className={`btn btn-sm ${inspectorTab === 'inspector' ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ fontSize: 12, padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 6 }}
-              >
-                <NetworkIcon size={12} />
-                <span>Node Inspector</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setInspectorTab('novelty')}
-                className={`btn btn-sm ${inspectorTab === 'novelty' ? 'btn-primary' : 'btn-secondary'}`}
-                style={{
-                  fontSize: 12,
-                  padding: '4px 10px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  ...(inspectorTab === 'novelty' ? { background: '#059669', borderColor: '#059669', color: '#fff' } : {})
-                }}
-              >
-                <Lightbulb size={12} />
-                <span>Novelty Ideas {noveltyList.length > 0 ? `(${noveltyList.length})` : ''}</span>
-              </button>
-              {inspectorTab === 'novelty' && noveltyList.length > 0 && (
+          {isInspectorOpen && (
+            <div className="card" id="graph-inspector-panel" style={{ height: '100%', overflowY: 'auto' }}>
+              {/* Top Inspector Tab Switcher */}
+              <div style={{ display: 'flex', borderBottom: '1px solid var(--border-subtle)', marginBottom: 12, paddingBottom: 8, gap: 8, alignItems: 'center' }}>
                 <button
                   type="button"
-                  onClick={() => handleGenerateNovelty(true)}
-                  disabled={generatingNovelty}
-                  className="btn btn-secondary btn-sm"
-                  style={{ marginLeft: 'auto', fontSize: 11, padding: '2px 8px', display: 'flex', alignItems: 'center', gap: 4 }}
-                  title="Re-synthesize novelties (bypasses SQLite cache)"
+                  onClick={() => setInspectorTab('inspector')}
+                  className={`btn btn-sm ${inspectorTab === 'inspector' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ fontSize: 12, padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 6 }}
                 >
-                  <RotateCw size={11} className={generatingNovelty ? 'animate-spin' : ''} />
-                  <span>Re-run</span>
+                  <NetworkIcon size={12} />
+                  <span>Node Inspector</span>
                 </button>
-              )}
-            </div>
+                <button
+                  type="button"
+                  onClick={() => setInspectorTab('novelty')}
+                  className={`btn btn-sm ${inspectorTab === 'novelty' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{
+                    fontSize: 12,
+                    padding: '4px 10px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    ...(inspectorTab === 'novelty' ? { background: '#059669', borderColor: '#059669', color: '#fff' } : {})
+                  }}
+                >
+                  <Lightbulb size={12} />
+                  <span>Novelty Ideas {noveltyList.length > 0 ? `(${noveltyList.length})` : ''}</span>
+                </button>
+                {inspectorTab === 'novelty' && noveltyList.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => handleGenerateNovelty(true)}
+                    disabled={generatingNovelty}
+                    className="btn btn-secondary btn-sm"
+                    style={{ marginLeft: 'auto', fontSize: 11, padding: '2px 8px', display: 'flex', alignItems: 'center', gap: 4 }}
+                    title="Re-synthesize novelties (bypasses SQLite cache)"
+                  >
+                    <RotateCw size={11} className={generatingNovelty ? 'animate-spin' : ''} />
+                    <span>Re-run</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setIsInspectorOpen(false)}
+                  style={{
+                    marginLeft: inspectorTab === 'novelty' && noveltyList.length > 0 ? 4 : 'auto',
+                    background: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: 'var(--text-muted)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    padding: '2px 4px',
+                    borderRadius: 3,
+                  }}
+                  title="Hide Inspector (Expand Canvas full width)"
+                >
+                  <X size={14} />
+                </button>
+              </div>
 
             {inspectorTab === 'inspector' && (
               <div>
@@ -2899,6 +3078,7 @@ export default function KnowledgeGraphView() {
               </div>
             )}
           </div>
+        )}
         </div>
       )}
 

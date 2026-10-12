@@ -1998,6 +1998,34 @@ bundle compilation (`npm run build`).
   * Verified Vite frontend production build (`npm run build`) compiles cleanly in `6.88s`.
   * Verified all 19 graph engine and workspace backend tests pass (`19 passed in 52.48s`).
 
+<br />
+
+## Full-Viewport Knowledge Graph Workspace, Collapsible Inspector Drawer, Interactive Zoom Controls, and Radial Legibility Tuning
+
+* **Natural Full-Height Viewport Layout & Collapsible Canvas (`frontend/src/views/KnowledgeGraphView.jsx`)**:
+  * Replaced fixed height constraints and invasive fullscreen overlays with a clean viewport-responsive container (`height: calc(100vh - 165px); minHeight: 740px`), eliminating header collisions with `TopHeader.jsx`.
+  * Implemented fluid collapsible Entity Inspector (`isInspectorOpen`): toggling the inspector off expands the graph canvas to 100% full screen width (`gridTemplateColumns: isInspectorOpen ? '1fr 340px' : '1fr'`), with automatic window resize triggers and smooth re-fit centering.
+
+* **In-Canvas Viewport Navigation & Zoom Controls (`frontend/src/views/KnowledgeGraphView.jsx`)**:
+  * Added direct in-canvas and toolbar navigation buttons:
+    * **Zoom In** (`+30%`) with smooth quadratic easing animation.
+    * **Zoom Out** (`-25%`) with smooth quadratic easing animation.
+    * **Fit to Screen** (`Maximize2`) for instant centered framing.
+    * **Motion Frozen / Live Motion** toggle (`isPhysicsFrozen`) allowing users to lock nodes static or allow organic force simulation.
+    * **Inspector Toggle** (`PanelRightClose` / `PanelRightOpen`) accessible from both the header toolbar and the floating canvas overlay.
+  * Completely cleaned up obsolete `Minimize2` and `isFullscreen` state references to prevent runtime `ReferenceError` crashes.
+
+* **Balanced Radial Geometry & Legibility Tuning (`frontend/src/views/KnowledgeGraphView.jsx`)**:
+  * Calibrated orbital radius proportions (`paperRadius = Math.max(240, N * 42)`, `entityRadius = paperRadius + 115`, `totalArc = Math.min(1.2, count * 0.24)`) maintaining an optimal total graph diameter of ~720px.
+  * Prevents auto-fit from shrinking cards down to microscopic scales on standard monitors, keeping card scale at ~0.95–1.0x where paper titles and entity badges remain legible.
+  * Tuned `barnesHut` physics: `gravitationalConstant: -10000`, `centralGravity: 0.05`, `springLength: 200`, `damping: 0.7`, and strict overlap boundary prevention (`avoidOverlap: 1.0`).
+
+* **Verification & Test Suite**:
+  * Verified 0 emojis exist in `KnowledgeGraphView.jsx` across all labels, buttons, and badges.
+  * Verified Vite production build (`npm run build`) compiles cleanly in `7.65s`.
+  * Verified all 19 graph engine and workspace backend tests pass 100% green: `19 passed, 2 warnings in 39.03s`.
+
+
 
 
 
