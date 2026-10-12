@@ -23,27 +23,34 @@ import {
   Zap,
   CheckCircle2,
   MessageSquare,
+  Lock,
+  Unlock,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import MathRenderer from '../components/common/MathRenderer';
 
-function wrapLabel(text, maxChars = 20) {
+function wrapLabel(text, maxChars = 22) {
   if (!text) return 'Paper';
   let clean = String(text).trim();
 
   // If it's a raw Semantic Scholar or internal hash ID
   if (/^s2:[a-f0-9]{20,}/i.test(clean) || /^[a-f0-9]{32,}$/i.test(clean)) {
     const hash = clean.replace(/^s2:/i, '');
-    return `Cited Paper\n[${hash.slice(0, 8)}…]`;
+    return `Cited Paper\n[${hash.slice(0, 8)}...]`;
   }
 
   // Strip verbose raw ID prefixes
   clean = clean.replace(/^(doi:|arxiv:|s2:)/i, '');
 
-  // Truncate monolithic tokens without spaces (e.g. hash or DOI URL)
-  if (clean.length > 24 && !clean.includes(' ')) {
-    clean = clean.slice(0, 10) + '…' + clean.slice(-6);
+  // If it's a gap, method, or dataset slug with hyphens, replace hyphens with spaces for clean text
+  if (/^(gap-|method-|dataset-)/i.test(clean)) {
+    clean = clean.replace(/^(gap-|method-|dataset-)/i, '').replace(/[-_]+/g, ' ');
+  }
+
+  // Truncate monolithic tokens without spaces (e.g. long hashes)
+  if (clean.length > 32 && !clean.includes(' ')) {
+    clean = clean.slice(0, 14) + '...' + clean.slice(-8);
   }
 
   const words = clean.split(/\s+/);
@@ -58,7 +65,87 @@ function wrapLabel(text, maxChars = 20) {
     }
   }
   if (currentLine) lines.push(currentLine);
-  return lines.slice(0, 3).join('\n') || clean.slice(0, 20);
+  return lines.slice(0, 3).join('\n') || clean.slice(0, 24);
+}
+
+function computeSpaciousSeedPositions(rawNodes, rawEdges) {
+  const positions = {};
+  if (!rawNodes || rawNodes.length === 0) return positions;
+
+  // 1. Identify Topic node(s)
+  const topicNodes = rawNodes.filter(n => (n.node_type || '').toLowerCase() === 'topic');
+  topicNodes.forEach((t, idx) => {
+    positions[t.id] = { x: Math.round((idx - (topicNodes.length - 1) / 2) * 220), y: 0 };
+  });
+
+  // 2. Identify Paper nodes (including candidate proposals)
+  const paperNodes = rawNodes.filter(n => {
+    const ntype = (n.node_type || '').toLowerCase();
+    return ntype === 'paper' || n.id.startsWith('cand-') || n.data?.category === 'Proposed Novelty';
+  });
+
+  const N = paperNodes.length;
+  // Expansive radius: at least 380px, expanding with paper count so chord distance is >= 340px
+  const paperRadius = Math.max(380, N * 65);
+
+  paperNodes.forEach((paper, i) => {
+    const angle = (2 * Math.PI * i) / Math.max(1, N) - Math.PI / 2;
+    positions[paper.id] = {
+      x: Math.round(paperRadius * Math.cos(angle)),
+      y: Math.round(paperRadius * Math.sin(angle)),
+      angle,
+    };
+  });
+
+  // 3. Map entities (methods, datasets, gaps) to their connected paper(s)
+  const paperEntities = {};
+  (rawEdges || []).forEach(e => {
+    const sPaper = paperNodes.some(p => p.id === e.source);
+    const tPaper = paperNodes.some(p => p.id === e.target);
+    if (sPaper && !tPaper) {
+      if (!paperEntities[e.source]) paperEntities[e.source] = [];
+      paperEntities[e.source].push(e.target);
+    } else if (tPaper && !sPaper) {
+      if (!paperEntities[e.target]) paperEntities[e.target] = [];
+      paperEntities[e.target].push(e.source);
+    }
+  });
+
+  const placedEntities = new Set();
+  const entityRadius = paperRadius + 190;
+
+  paperNodes.forEach(paper => {
+    const attached = (paperEntities[paper.id] || []).filter(eId => !placedEntities.has(eId));
+    const pPos = positions[paper.id];
+    const baseAngle = pPos ? pPos.angle : 0;
+    const count = attached.length;
+
+    // Spread attached entities along an outward arc centered on paper's angle
+    const totalArc = Math.min(1.4, count * 0.28);
+    attached.forEach((eId, j) => {
+      const offset = count === 1 ? 0 : (j - (count - 1) / 2) * (totalArc / Math.max(1, count - 1));
+      const entAngle = baseAngle + offset;
+      const r = entityRadius + ((j % 2 === 0) ? 0 : 50); // Stagger radially to avoid pill collisions
+      positions[eId] = {
+        x: Math.round(r * Math.cos(entAngle)),
+        y: Math.round(r * Math.sin(entAngle)),
+      };
+      placedEntities.add(eId);
+    });
+  });
+
+  // 4. Any remaining nodes placed along outer perimeter
+  const remaining = rawNodes.filter(n => !positions[n.id]);
+  remaining.forEach((rem, idx) => {
+    const angle = (2 * Math.PI * idx) / Math.max(1, remaining.length);
+    const r = entityRadius + 90;
+    positions[rem.id] = {
+      x: Math.round(r * Math.cos(angle)),
+      y: Math.round(r * Math.sin(angle)),
+    };
+  });
+
+  return positions;
 }
 
 const NODE_THEMES = {
@@ -92,22 +179,22 @@ const FRIENDLY_RELATION_LABELS = {
 };
 
 const EDGE_COLORS = {
-  covers: '#e4e4e7',
-  investigates: '#e4e4e7',
-  has_paper: '#e4e4e7',
-  uses_method: '#a1a1aa',
-  evaluates_on: '#a1a1aa',
-  achieves: '#a1a1aa',
-  cites: '#e4e4e7',
-  has_claim: '#a1a1aa',
-  limited_by: '#a1a1aa',
-  addresses: '#a1a1aa',
-  extends: '#818cf8',
-  compared_to: '#fbbf24',
-  improves_upon: '#34d399',
-  contradicts: '#f87171',
-  has_gap: '#f43f5e',
-  relates_to: '#a1a1aa',
+  covers: '#6366f1', // Rich Indigo
+  investigates: '#8b5cf6', // Violet
+  has_paper: '#6366f1',
+  uses_method: '#10b981', // Emerald Teal
+  evaluates_on: '#f59e0b', // Warm Amber
+  achieves: '#10b981',
+  cites: '#94a3b8', // Subtle Slate
+  has_claim: '#38bdf8',
+  limited_by: '#f43f5e',
+  addresses: '#06b6d4',
+  extends: '#6366f1', // Indigo
+  compared_to: '#f97316', // Orange
+  improves_upon: '#10b981', // Emerald
+  contradicts: '#ef4444', // Red
+  has_gap: '#f43f5e', // Rose
+  relates_to: '#64748b',
 };
 
 function getNodeDescription(entity) {
@@ -314,6 +401,7 @@ export default function KnowledgeGraphView() {
   const [summaryData, setSummaryData] = useState(null);
 
   // AI Graph Synthesis states (with SQLite cache)
+  const [synthesisProvider, setSynthesisProvider] = useState('ollama'); // 'ollama' | 'gemini' | 'groq' | 'deepseek' | 'nvidia' | 'openrouter'
   const [buildingGraph, setBuildingGraph] = useState(false);
   const [buildStatusMessage, setBuildStatusMessage] = useState('');
   const [synthesisInfo, setSynthesisInfo] = useState(null);
@@ -329,9 +417,19 @@ export default function KnowledgeGraphView() {
   const [nodeTypeFilter, setNodeTypeFilter] = useState('all');
   const [relationFilter, setRelationFilter] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
+  const [isPhysicsFrozen, setIsPhysicsFrozen] = useState(false);
+  const [layoutMode, setLayoutMode] = useState('organic'); // 'organic' | 'hierarchical'
+  const [showCitations, setShowCitations] = useState(false); // Hide dense citation hairball by default
 
   const containerRef = useRef(null);
   const networkRef = useRef(null);
+
+  const handleToggleFreeze = () => {
+    if (!networkRef.current) return;
+    const nextState = !isPhysicsFrozen;
+    networkRef.current.setOptions({ physics: { enabled: !nextState } });
+    setIsPhysicsFrozen(nextState);
+  };
 
   const fetchGraphData = async () => {
     setLoading(true);
@@ -445,6 +543,7 @@ export default function KnowledgeGraphView() {
   const handleBuildWorkspaceGraph = async (forceRefresh = false) => {
     if (!addedToGraphPaperIds || addedToGraphPaperIds.length === 0) return;
     setBuildingGraph(true);
+    const providerLabel = synthesisProvider === 'ollama' ? 'Local LLM (Ollama phi4-mini)' : synthesisProvider.toUpperCase();
     setBuildStatusMessage('Checking SQLite cache...');
 
     const activeTopic = (searchQuery || activeWorkspace?.title || graphSearchInput || 'General Literature').trim();
@@ -454,7 +553,7 @@ export default function KnowledgeGraphView() {
       if (!forceRefresh) {
         setBuildStatusMessage('Checking SQLite cache for pre-built graph...');
       } else {
-        setBuildStatusMessage('Synthesizing relationships with Gemini Flash-Lite...');
+        setBuildStatusMessage(`Synthesizing relationships with ${providerLabel}...`);
       }
 
       const res = await fetch('/api/v1/graph/build-workspace-graph', {
@@ -465,6 +564,7 @@ export default function KnowledgeGraphView() {
           topic: activeTopic,
           paper_ids: addedToGraphPaperIds,
           force_refresh: forceRefresh,
+          provider: synthesisProvider,
         }),
       });
 
@@ -475,6 +575,8 @@ export default function KnowledgeGraphView() {
         setSynthesisInfo({
           cached: data.cached,
           llm_called: data.llm_called,
+          engine: data.engine || synthesisProvider,
+          model: data.model || (synthesisProvider === 'ollama' ? 'phi4-mini' : ''),
           cross_paper_relations_count: data.cross_paper_relations_count || 0,
           gaps_count: data.gaps_count || 0,
           synthesis_summary: data.synthesis_summary || '',
@@ -705,8 +807,55 @@ export default function KnowledgeGraphView() {
     );
     const topicLabel = existingTopicNode?.label || existingTopicNode?.data?.name || activeTopicStr || 'Research Topic';
 
-    // 2. Separate papers from other entities
-    const paperNodes = rawNodes.filter(n => (n.node_type || '').toLowerCase() === 'paper');
+    // 2. Separate papers from other entities and deduplicate by canonical keys (DOI, arXiv, OpenAlex, Title)
+    const rawPaperNodes = rawNodes.filter(n => (n.node_type || '').toLowerCase() === 'paper');
+
+    const getCanonicalPaperKey = (node) => {
+      if (!node) return '';
+      const d = node.data || {};
+      const rawDoi = d.doi || node.doi || (String(node.id || '').startsWith('10.') || String(node.id || '').startsWith('doi:') ? node.id : '');
+      if (rawDoi) {
+        const m = String(rawDoi).toLowerCase().match(/10\.\d{4,9}\/[-._;()/:a-z0-9]+/);
+        if (m) return `doi:${m[0].replace(/[.;,]$/, '')}`;
+      }
+      const rawArxiv = d.arxiv_id || node.arxiv_id || node.id || '';
+      const mArxiv = String(rawArxiv).match(/(\d{4}\.\d{4,5})/);
+      if (mArxiv) return `arxiv:${mArxiv[1]}`;
+
+      const rawOa = d.openalex_id || node.openalex_id || node.id || '';
+      const mOa = String(rawOa).toLowerCase().match(/w\d+/);
+      if (mOa && !mOa[0].startsWith('ws-')) return `oa:${mOa[0]}`;
+
+      const title = d.title || d.name || node.label || node.title || '';
+      const normTitle = String(title).toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (normTitle.length >= 15) return `title:${normTitle}`;
+
+      return node.id;
+    };
+
+    const paperNodeMap = new Map();
+    const paperAliasMap = new Map();
+
+    rawPaperNodes.forEach(p => {
+      const key = getCanonicalPaperKey(p);
+      if (!paperNodeMap.has(key)) {
+        paperNodeMap.set(key, p);
+        paperAliasMap.set(p.id, p.id);
+      } else {
+        const existing = paperNodeMap.get(key);
+        paperAliasMap.set(p.id, existing.id);
+        // Merge attributes if existing node lacks year/doi/authors/abstract
+        if (!existing.data) existing.data = {};
+        if (p.data) {
+          if (!existing.data.year && p.data.year) existing.data.year = p.data.year;
+          if (!existing.data.doi && p.data.doi) existing.data.doi = p.data.doi;
+          if (!existing.data.abstract && p.data.abstract) existing.data.abstract = p.data.abstract;
+          if (!existing.data.authors && p.data.authors) existing.data.authors = p.data.authors;
+        }
+      }
+    });
+
+    const paperNodes = Array.from(paperNodeMap.values());
     const paperIds = new Set(paperNodes.map(n => n.id));
 
     // If no papers have been added yet, return empty
@@ -723,7 +872,7 @@ export default function KnowledgeGraphView() {
       data: existingTopicNode?.data || { name: topicLabel, id: topicId, query: topicLabel },
     };
 
-    // 4. Edges pool: remap any old/stale topic references to the unified topicId
+    // 4. Edges pool: remap any old/stale topic references and duplicate paper aliases
     const topicNodeIds = new Set(
       rawNodes.filter(n => (n.node_type || '').toLowerCase() === 'topic').map(n => n.id)
     );
@@ -733,10 +882,11 @@ export default function KnowledgeGraphView() {
     const existingEdgeKeys = new Set();
 
     rawEdges.forEach(e => {
-      let s = e.source;
-      let t = e.target;
+      let s = paperAliasMap.get(e.source) || e.source;
+      let t = paperAliasMap.get(e.target) || e.target;
       if (topicNodeIds.has(s)) s = topicId;
       if (topicNodeIds.has(t)) t = topicId;
+      if (s === t) return; // Prevent self-loops
       const key = `${s}->${t}:${(e.relation || '').toLowerCase()}`;
       if (!existingEdgeKeys.has(key)) {
         existingEdgeKeys.add(key);
@@ -773,7 +923,12 @@ export default function KnowledgeGraphView() {
       }
     });
 
-    const bridgeNodes = [];
+    // 6. Retain connected entity nodes (methods, datasets, gaps, candidates)
+    // Shared entities (connecting >= 2 papers) and research gaps are always prioritized.
+    // Distinct paper-specific entities are also kept (up to 4 per paper) so each paper has its methods & benchmarks visible!
+    const sharedEntities = [];
+    const paperSpecificEntities = [];
+
     rawNodes.forEach(n => {
       const ntype = (n.node_type || '').toLowerCase();
       if (ntype === 'topic' || ntype === 'paper') return;
@@ -782,13 +937,28 @@ export default function KnowledgeGraphView() {
         const count = connectedPapers ? connectedPapers.size : 0;
         const isCandidate = n.id.startsWith('cand-') || n.data?.category === 'Proposed Novelty';
         if (ntype === 'gap' || isCandidate) {
+          sharedEntities.push(n);
+        } else if (count >= 2) {
+          sharedEntities.push(n);
+        } else if (count >= 1) {
+          paperSpecificEntities.push(n);
+        }
+      }
+    });
+
+    const bridgeNodes = [...sharedEntities];
+    const bridgeNodeIds = new Set(bridgeNodes.map(n => n.id));
+
+    // Distribute up to 4 methods and datasets per paper for clean satellite presentation
+    const perPaperEntityCounts = new Map();
+    paperSpecificEntities.forEach(n => {
+      const connectedPapers = paperConnectionCount.get(n.id) || new Set();
+      for (const pId of connectedPapers) {
+        const currentCount = perPaperEntityCounts.get(pId) || 0;
+        if (currentCount < 4 && !bridgeNodeIds.has(n.id)) {
+          perPaperEntityCounts.set(pId, currentCount + 1);
           bridgeNodes.push(n);
-        } else if (paperIds.size >= 2) {
-          if (count >= 2) {
-            bridgeNodes.push(n);
-          }
-        } else if (count >= 1 && bridgeNodes.length < 4) {
-          bridgeNodes.push(n);
+          bridgeNodeIds.add(n.id);
         }
       }
     });
@@ -798,7 +968,12 @@ export default function KnowledgeGraphView() {
     const validNodeIds = new Set(finalNodes.map(n => n.id));
 
     // 8. Filter edges strictly between valid nodes
-    const finalEdges = remappedEdges.filter(e => validNodeIds.has(e.source) && validNodeIds.has(e.target));
+    let finalEdges = remappedEdges.filter(e => validNodeIds.has(e.source) && validNodeIds.has(e.target));
+
+    // If showCitations is false, remove 'cites' edges to prevent the unreadable criss-crossing hairball
+    if (!showCitations) {
+      finalEdges = finalEdges.filter(e => (e.relation || '').toLowerCase() !== 'cites');
+    }
 
     // 9. Apply user UI filters (nodeTypeFilter, relationFilter, searchTerm)
     let filteredNodes = finalNodes;
@@ -825,7 +1000,7 @@ export default function KnowledgeGraphView() {
       nodes: filteredNodes,
       edges: displayEdges,
     };
-  }, [rawNodes, rawEdges, nodeTypeFilter, relationFilter, searchTerm, searchQuery, activeWorkspace?.title]);
+  }, [rawNodes, rawEdges, nodeTypeFilter, relationFilter, searchTerm, searchQuery, activeWorkspace?.title, showCitations]);
 
   const paperNodesCount = useMemo(() => {
     return (filteredData.nodes || []).filter(n => (n.node_type || '').toLowerCase() === 'paper').length;
@@ -849,7 +1024,7 @@ export default function KnowledgeGraphView() {
         networkRef.current = null;
       }
     };
-  }, [graphMode, theme, filteredData, loading]);
+  }, [graphMode, theme, filteredData, loading, layoutMode]);
 
   const renderVisGraph = () => {
     if (!containerRef.current || filteredData.nodes.length === 0) return;
@@ -862,6 +1037,10 @@ export default function KnowledgeGraphView() {
     }
 
     const isDark = theme === 'dark';
+    const isHierarchical = layoutMode === 'hierarchical';
+
+    // Compute spacious seed positions so nodes start well-spaced in a radial layout
+    const seedPositions = computeSpaciousSeedPositions(filteredData.nodes, filteredData.edges);
 
     const nodes = filteredData.nodes.map(n => {
       const ntype = (n.node_type || 'paper').toLowerCase();
@@ -870,61 +1049,92 @@ export default function KnowledgeGraphView() {
 
       let formattedLabel;
       let shape = 'box';
-      let borderRadius = 4;
+      let borderRadius = 6;
       let mass = 1;
       let bg, border, textColor, highlightBg, highlightBorder;
+      let level = 3;
 
       if (ntype === 'topic') {
         formattedLabel = wrapLabel(rawLabel, 20);
         shape = 'box';
-        borderRadius = 22; // Pill capsule matching sketch
-        mass = 6; // Central anchor
+        borderRadius = 20; // Pill capsule matching sketch
+        mass = 8; // Central anchor
+        level = 1;
         bg = isDark ? '#312e81' : '#1e1b4b'; // Deep rich indigo
         border = isDark ? '#818cf8' : '#3730a3';
-        textColor = '#ffffff'; // Pure white bold text in both themes
+        textColor = '#ffffff'; // Pure white bold text
         highlightBg = isDark ? '#4338ca' : '#312e81';
         highlightBorder = '#a5b4fc';
       } else if (isCandidate) {
-        formattedLabel = `⭐ PROPOSED:\n${wrapLabel(rawLabel, 20)}`;
+        formattedLabel = `PROPOSED:\n${wrapLabel(rawLabel, 18)}`;
         shape = 'box';
         borderRadius = 8;
         mass = 3;
+        level = 2;
         bg = isDark ? '#064e3b' : '#ecfdf5';
-        border = isDark ? '#34d399' : '#059669';
+        border = isDark ? '#059669' : '#86efac';
         textColor = isDark ? '#ecfdf5' : '#065f46';
         highlightBg = isDark ? '#047857' : '#d1fae5';
         highlightBorder = '#10b981';
       } else if (ntype === 'paper') {
         const yearPart = n.data?.year ? `\n(${n.data.year})` : '';
-        formattedLabel = wrapLabel(rawLabel, 22) + yearPart;
+        formattedLabel = wrapLabel(rawLabel, 20) + yearPart;
         shape = 'box';
-        borderRadius = 6; // Crisp card-like rectangle
-        mass = 2;
-        bg = isDark ? '#27272a' : '#ffffff';
-        border = isDark ? '#52525b' : '#94a3b8';
-        textColor = isDark ? '#f4f4f5' : '#0f172a';
-        highlightBg = isDark ? '#3f3f46' : '#f8fafc';
+        borderRadius = 6; // Crisp publication card
+        mass = 3;
+        level = 2;
+        bg = isDark ? '#1c1917' : '#ffffff';
+        border = isDark ? '#44403c' : '#cbd5e1';
+        textColor = isDark ? '#fafaf9' : '#0f172a';
+        highlightBg = isDark ? '#292524' : '#f8fafc';
         highlightBorder = isDark ? '#818cf8' : '#4f46e5';
+      } else if (ntype === 'method') {
+        formattedLabel = wrapLabel(rawLabel, 16);
+        shape = 'box';
+        borderRadius = 14;
+        mass = 1.2;
+        level = 3;
+        bg = isDark ? '#064e3b' : '#f0fdf4';
+        border = isDark ? '#059669' : '#86efac';
+        textColor = isDark ? '#a7f3d0' : '#166534';
+        highlightBg = isDark ? '#047857' : '#dcfce7';
+        highlightBorder = '#10b981';
+      } else if (ntype === 'dataset') {
+        formattedLabel = wrapLabel(rawLabel, 16);
+        shape = 'box';
+        borderRadius = 14;
+        mass = 1.2;
+        level = 3;
+        bg = isDark ? '#451a03' : '#fefce8';
+        border = isDark ? '#d97706' : '#fde047';
+        textColor = isDark ? '#fde68a' : '#854d0e';
+        highlightBg = isDark ? '#78350f' : '#fef9c3';
+        highlightBorder = '#f59e0b';
+      } else if (ntype === 'gap') {
+        formattedLabel = `GAP:\n${wrapLabel(rawLabel, 18)}`;
+        shape = 'box';
+        borderRadius = 8;
+        mass = 2;
+        level = 4;
+        bg = isDark ? '#4c0519' : '#fff1f2';
+        border = isDark ? '#e11d48' : '#fecdd3';
+        textColor = isDark ? '#fecdd3' : '#9f1239';
+        highlightBg = isDark ? '#881337' : '#ffe4e6';
+        highlightBorder = '#e11d48';
       } else {
-        // Method, dataset, gap: circular / diamond bridge node
-        formattedLabel = wrapLabel(rawLabel, 14);
-        shape = ntype === 'gap' ? 'diamond' : 'circle';
-        borderRadius = 0;
+        formattedLabel = wrapLabel(rawLabel, 16);
+        shape = 'box';
+        borderRadius = 10;
         mass = 1;
-        if (ntype === 'gap') {
-          bg = isDark ? '#881337' : '#ffe4e6';
-          border = isDark ? '#f43f5e' : '#e11d48';
-          textColor = isDark ? '#ffe4e6' : '#9f1239';
-          highlightBg = isDark ? '#9f1239' : '#fecdd3';
-          highlightBorder = isDark ? '#fda4af' : '#be123c';
-        } else {
-          bg = isDark ? '#1e293b' : '#f1f5f9';
-          border = isDark ? '#64748b' : '#94a3b8';
-          textColor = isDark ? '#e2e8f0' : '#1e293b';
-          highlightBg = isDark ? '#334155' : '#e2e8f0';
-          highlightBorder = isDark ? '#94a3b8' : '#475569';
-        }
+        level = 3;
+        bg = isDark ? '#1e293b' : '#f1f5f9';
+        border = isDark ? '#475569' : '#cbd5e1';
+        textColor = isDark ? '#e2e8f0' : '#1e293b';
+        highlightBg = isDark ? '#334155' : '#e2e8f0';
+        highlightBorder = isDark ? '#94a3b8' : '#475569';
       }
+
+      const seed = seedPositions[n.id];
 
       return {
         id: n.id,
@@ -933,6 +1143,9 @@ export default function KnowledgeGraphView() {
         shape,
         borderRadius,
         mass,
+        level,
+        x: seed ? seed.x : undefined,
+        y: seed ? seed.y : undefined,
         color: {
           background: bg,
           border: border,
@@ -941,30 +1154,32 @@ export default function KnowledgeGraphView() {
         },
         font: {
           color: textColor,
-          size: ntype === 'topic' ? 13 : ntype === 'paper' ? 11.5 : 10,
+          size: ntype === 'topic' ? 12.5 : ntype === 'paper' ? 11 : 10,
           face: 'Plus Jakarta Sans, -apple-system, sans-serif',
           bold: {
             color: textColor,
-            size: ntype === 'topic' ? 13 : 11.5,
+            size: ntype === 'topic' ? 12.5 : 11,
             face: 'Plus Jakarta Sans, -apple-system, sans-serif',
             mod: 'bold',
           },
         },
         widthConstraint: ntype === 'topic'
-          ? { minimum: 150, maximum: 240 }
+          ? { minimum: 140, maximum: 200 }
           : (ntype === 'paper' || isCandidate)
-          ? { minimum: 150, maximum: 230 }
-          : { maximum: 90 },
+          ? { minimum: 150, maximum: 200 }
+          : (ntype === 'method' || ntype === 'dataset')
+          ? { minimum: 70, maximum: 140 }
+          : { minimum: 100, maximum: 150 },
         margin: ntype === 'topic'
-          ? { top: 12, right: 20, bottom: 12, left: 20 }
+          ? { top: 8, right: 16, bottom: 8, left: 16 }
           : (ntype === 'paper' || isCandidate)
-          ? { top: 12, right: 14, bottom: 12, left: 14 }
-          : 8,
-        borderWidth: (ntype === 'topic' || isCandidate) ? 2.5 : 1.5,
+          ? { top: 8, right: 12, bottom: 8, left: 12 }
+          : { top: 5, right: 9, bottom: 5, left: 9 },
+        borderWidth: ntype === 'topic' ? 2 : 1.5,
         shadow: {
           enabled: true,
-          color: 'rgba(0, 0, 0, 0.1)',
-          size: ntype === 'topic' ? 8 : 4,
+          color: 'rgba(0, 0, 0, 0.05)',
+          size: ntype === 'topic' ? 6 : 3,
           x: 0,
           y: 2,
         },
@@ -976,56 +1191,99 @@ export default function KnowledgeGraphView() {
     const edges = filteredData.edges.map(e => {
       const rel = (e.relation || 'relates_to').toLowerCase();
       const isTopicEdge = rel === 'covers' || rel === 'investigates' || rel === 'has_paper';
-      const friendlyLabel = FRIENDLY_RELATION_LABELS[rel] || (e.label || rel.replace(/_/g, ' '));
+      const isCite = rel === 'cites';
+      const isCrossPaper = rel === 'cross_paper' || rel === 'builds_upon' || rel === 'compares_with';
+      // Suppress spammy 'References' text label to avoid criss-crossing clutter
+      const friendlyLabel = isCite ? '' : (FRIENDLY_RELATION_LABELS[rel] || (e.label || rel.replace(/_/g, ' ')));
       const edgeLineColor = EDGE_COLORS[rel] || (isDark
         ? (isTopicEdge ? '#818cf8' : '#a1a1aa')
         : (isTopicEdge ? '#4f46e5' : '#64748b'));
+
+      // Determine spring length and spring strength by relation type
+      let edgeLength = 220;
+      let edgeSpringConstant = 0.025;
+
+      if (isTopicEdge) {
+        edgeLength = 340; // Expand papers far out from central topic
+        edgeSpringConstant = 0.035;
+      } else if (isCite || isCrossPaper) {
+        edgeLength = 380; // Keep papers far apart from each other
+        edgeSpringConstant = 0.008; // Very loose spring so cross-paper links don't drag papers into a clump!
+      } else if (rel === 'uses_method' || rel === 'uses_dataset' || rel === 'evaluates_on' || rel === 'proposes_method') {
+        edgeLength = 170; // Branch entities neatly outside parent paper
+        edgeSpringConstant = 0.04;
+      }
 
       return {
         id: `${e.source}->${e.target}:${e.relation}`,
         from: e.source,
         to: e.target,
         label: friendlyLabel,
+        length: edgeLength,
+        springConstant: edgeSpringConstant,
+        dashes: isCite ? [4, 6] : false,
         color: {
           color: edgeLineColor,
           highlight: isDark ? '#ffffff' : '#000000',
           hover: isDark ? '#ffffff' : '#000000',
-          opacity: isTopicEdge ? 0.9 : 0.75,
+          opacity: isCite ? 0.35 : (isTopicEdge ? 0.95 : 0.85),
         },
-        font: {
+        font: friendlyLabel ? {
           color: isDark ? '#d4d4d8' : '#334155',
-          size: 9.5,
+          size: 9,
           face: 'Plus Jakarta Sans, sans-serif',
           align: 'middle',
           background: isDark ? '#141416' : '#ffffff',
           strokeWidth: 0,
-        },
+        } : undefined,
         arrows: {
-          to: { enabled: true, scaleFactor: isTopicEdge ? 0.7 : 0.6 },
+          to: { enabled: true, scaleFactor: isCite ? 0.45 : (isTopicEdge ? 0.75 : 0.65) },
         },
         smooth: { type: 'continuous', roundness: 0.15 },
-        width: isTopicEdge ? 2.0 : 1.6,
+        width: isCite ? 1.0 : (isTopicEdge ? 2.2 : 1.8),
       };
     });
 
-    // forceAtlas2 with balanced, stable physics
+    // Graph physics & layout options - spacious non-overlapping layout
     const options = {
       physics: {
-        solver: 'forceAtlas2Based',
-        forceAtlas2Based: {
-          gravitationalConstant: -90,
-          centralGravity: 0.02,
-          springLength: 140,
-          springConstant: 0.05,
-          damping: 0.6,
-          avoidOverlap: 0.9,
+        enabled: !isPhysicsFrozen && !isHierarchical,
+        solver: 'barnesHut',
+        barnesHut: {
+          gravitationalConstant: -16000, // Massive repulsion so cards never touch
+          centralGravity: 0.03,          // Gentle centering, avoids crushing radial orbit
+          springLength: 260,
+          springConstant: 0.02,
+          damping: 0.7,
+          avoidOverlap: 1.0,             // Vis.js strictly enforces bounding box clearance
         },
+        maxVelocity: 25,
+        minVelocity: 0.5,
         stabilization: {
           enabled: true,
-          iterations: 200,
+          iterations: isHierarchical ? 100 : 350,
           updateInterval: 25,
+          fit: true,
         },
       },
+      layout: isHierarchical
+        ? {
+            hierarchical: {
+              enabled: true,
+              direction: 'UD',
+              sortMethod: 'directed',
+              levelSeparation: 190,
+              nodeSpacing: 240,
+              treeSpacing: 280,
+              blockShifting: true,
+              edgeMinimization: true,
+              parentCentralization: true,
+            },
+          }
+        : {
+            hierarchical: { enabled: false },
+            improvedLayout: false, // Don't let vis-network override our pre-calculated radial seed positions
+          },
       interaction: {
         hover: true,
         tooltipDelay: 150,
@@ -1033,20 +1291,30 @@ export default function KnowledgeGraphView() {
         selectConnectedEdges: true,
         navigationButtons: false,
       },
-      layout: {
-        improvedLayout: true,
-      },
     };
 
     const network = new Network(containerRef.current, { nodes, edges }, options);
     networkRef.current = network;
 
-    // Auto-fit smoothly on stabilization so all nodes are cleanly framed
+    // Auto-fit and FREEZE physics upon stabilization to prevent unwanted continuous motion
     network.once('stabilizationIterationsDone', () => {
+      network.setOptions({ physics: { enabled: false } });
+      setIsPhysicsFrozen(true);
       network.fit({
         nodes: filteredData.nodes.map(n => n.id),
-        animation: { duration: 400, easingFunction: 'easeInOutQuad' },
+        animation: { duration: 350, easingFunction: 'easeInOutQuad' },
       });
+    });
+
+    network.on('stabilized', () => {
+      network.setOptions({ physics: { enabled: false } });
+      setIsPhysicsFrozen(true);
+    });
+
+    network.on('dragEnd', () => {
+      // Keep physics frozen when dragging ends so nodes don't endlessly drift or wobble
+      network.setOptions({ physics: { enabled: false } });
+      setIsPhysicsFrozen(true);
     });
 
     const handleSelectNode = async (foundNode) => {
@@ -1259,6 +1527,29 @@ export default function KnowledgeGraphView() {
           </button>
           {graphMode === 'graph' && (
             <>
+              <select
+                value={synthesisProvider}
+                onChange={(e) => setSynthesisProvider(e.target.value)}
+                style={{
+                  background: 'var(--bg-secondary)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '4px 8px',
+                  fontSize: 12,
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                }}
+                title="AI Engine for Knowledge Graph synthesis"
+              >
+                <option value="ollama">Local LLM (Ollama phi4-mini)</option>
+                <option value="gemini">Gemini (Flash-Lite)</option>
+                <option value="groq">Groq</option>
+                <option value="deepseek">DeepSeek</option>
+                <option value="nvidia">NVIDIA NIM</option>
+                <option value="openrouter">OpenRouter</option>
+              </select>
+
               <button
                 className="btn btn-primary btn-sm"
                 onClick={() => handleBuildWorkspaceGraph(false)}
@@ -1272,7 +1563,7 @@ export default function KnowledgeGraphView() {
                   fontWeight: 600,
                   boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
                 }}
-                title="Synthesize cross-paper connections (EXTENDS, COMPARED_TO, gaps) with Gemini Flash-Lite & SQLite cache"
+                title="Synthesize cross-paper connections (EXTENDS, COMPARED_TO, shared methods, benchmarks, gaps) with selected AI Engine & SQLite cache"
               >
                 {buildingGraph ? (
                   <>
@@ -1293,7 +1584,7 @@ export default function KnowledgeGraphView() {
                   onClick={() => handleBuildWorkspaceGraph(true)}
                   disabled={buildingGraph || addedToGraphPaperIds.length === 0}
                   style={{ display: 'flex', alignItems: 'center', gap: 6 }}
-                  title="Force re-synthesis with Gemini (bypasses SQLite cache)"
+                  title="Force re-synthesis with selected AI Engine (bypasses SQLite cache)"
                 >
                   <RotateCw size={12} className={buildingGraph ? 'animate-spin' : ''} />
                   <span>Re-synthesize</span>
@@ -1550,16 +1841,18 @@ export default function KnowledgeGraphView() {
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 260 }}>
-            <span style={{ fontSize: 18 }}>{synthesisInfo.cached ? '⚡' : '✨'}</span>
+            <span style={{ display: 'flex', alignItems: 'center' }}>
+              {synthesisInfo.cached ? <Zap size={16} style={{ color: 'var(--success)' }} /> : <Sparkles size={16} style={{ color: 'var(--accent-primary)' }} />}
+            </span>
             <div>
               <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span>
                   {synthesisInfo.cached
-                    ? 'Retrieved from SQLite Cache (0 Gemini tokens consumed)'
-                    : 'Synthesized with Gemini Flash-Lite & Cached in SQLite'}
+                    ? `Retrieved from SQLite Cache (0 API Cost • ${synthesisInfo.engine === 'ollama' ? 'Local Ollama' : (synthesisInfo.engine ? synthesisInfo.engine.toUpperCase() : 'Cache')})`
+                    : `Synthesized with ${synthesisInfo.engine === 'ollama' ? 'Local LLM (Ollama phi4-mini)' : (synthesisInfo.engine ? synthesisInfo.engine.toUpperCase() : 'AI Engine')} & Cached in SQLite`}
                 </span>
                 <span className="badge badge-neutral" style={{ fontSize: 10 }}>
-                  {synthesisInfo.cached ? 'Zero API Cost' : 'Batch Synthesized'}
+                  {synthesisInfo.cached ? 'Zero API Cost' : (synthesisInfo.engine === 'ollama' ? 'Local & Private' : 'Batch Synthesized')}
                 </span>
               </div>
               <div style={{ color: 'var(--text-muted)', fontSize: 11.5, marginTop: 2 }}>
@@ -1581,15 +1874,15 @@ export default function KnowledgeGraphView() {
       )}
 
       {/* Filter & Control Bar */}
-      {graphMode === 'graph' && rawNodes.length > 0 && (
-        <div className="search-bar-box" style={{ padding: '10px 14px', marginBottom: 12, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 200 }}>
+      {graphMode === 'graph' && (
+        <div className="search-bar-box" style={{ padding: '10px 14px', marginBottom: 12, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 180 }}>
             <Search size={14} style={{ color: 'var(--text-muted)' }} />
             <input
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Filter nodes by name or keyword..."
+              placeholder="Filter nodes by name..."
               style={{
                 background: 'none',
                 border: 'none',
@@ -1606,7 +1899,7 @@ export default function KnowledgeGraphView() {
             )}
           </div>
 
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
               <Filter size={12} />
               Type:
@@ -1654,8 +1947,132 @@ export default function KnowledgeGraphView() {
               </select>
             </label>
 
-            <span className="badge badge-neutral" style={{ fontSize: 11.5 }}>
-              {filteredData.nodes.length} Nodes • {filteredData.edges.length} Relations
+            {/* Prominent AI Engine Dropdown */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)', padding: '2px 6px' }}>
+              <Sparkles size={12} style={{ color: 'var(--accent-primary)' }} />
+              <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-secondary)' }}>AI Engine:</span>
+              <select
+                value={synthesisProvider}
+                onChange={(e) => setSynthesisProvider(e.target.value)}
+                style={{
+                  background: 'transparent',
+                  color: 'var(--text-primary)',
+                  border: 'none',
+                  outline: 'none',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  padding: '2px 4px',
+                }}
+                title="Select AI Engine for Knowledge Graph synthesis"
+              >
+                <option value="ollama">Local LLM (Ollama phi4-mini)</option>
+                <option value="gemini">Gemini (Flash-Lite)</option>
+                <option value="groq">Groq</option>
+                <option value="deepseek">DeepSeek</option>
+                <option value="nvidia">NVIDIA NIM</option>
+                <option value="openrouter">OpenRouter</option>
+              </select>
+            </div>
+
+            {/* Build AI Graph button right in the canvas toolbar */}
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={() => handleBuildWorkspaceGraph(false)}
+              disabled={buildingGraph || addedToGraphPaperIds.length === 0}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '4px 10px',
+                fontSize: 12,
+                fontWeight: 600,
+                background: 'var(--accent-primary)',
+              }}
+              title="Synthesize cross-paper connections with selected AI Engine & SQLite cache"
+            >
+              {buildingGraph ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+              <span>{buildingGraph ? 'Synthesizing...' : `Build AI Graph (${addedToGraphPaperIds.length})`}</span>
+            </button>
+
+            {/* Layout Mode Switcher */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 2, background: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)', padding: '2px 4px' }}>
+              <button
+                type="button"
+                onClick={() => setLayoutMode('organic')}
+                style={{
+                  background: layoutMode === 'organic' ? 'var(--accent-primary)' : 'transparent',
+                  color: layoutMode === 'organic' ? '#ffffff' : 'var(--text-secondary)',
+                  border: 'none',
+                  borderRadius: 3,
+                  fontSize: 11.5,
+                  padding: '3px 7px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+                title="Organic force-directed cluster layout"
+              >
+                Organic
+              </button>
+              <button
+                type="button"
+                onClick={() => setLayoutMode('hierarchical')}
+                style={{
+                  background: layoutMode === 'hierarchical' ? 'var(--accent-primary)' : 'transparent',
+                  color: layoutMode === 'hierarchical' ? '#ffffff' : 'var(--text-secondary)',
+                  border: 'none',
+                  borderRadius: 3,
+                  fontSize: 11.5,
+                  padding: '3px 7px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+                title="Hierarchical structured tree: Topic -> Papers -> Methods & Datasets"
+              >
+                Tree Hierarchy
+              </button>
+            </div>
+
+            {/* Citations Toggle */}
+            <button
+              type="button"
+              className={`btn btn-sm ${showCitations ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setShowCitations(!showCitations)}
+              style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', fontSize: 11.5 }}
+              title={showCitations ? "Hide paper citation lines to clean up view" : "Show paper citation lines"}
+            >
+              <span>Citations</span>
+              <span className="badge" style={{ fontSize: 9.5, padding: '1px 4px', background: showCitations ? 'rgba(255,255,255,0.2)' : 'var(--bg-tertiary)' }}>
+                {showCitations ? 'ON' : 'OFF'}
+              </span>
+            </button>
+
+            {/* Freeze Motion Toggle Button */}
+            <button
+              type="button"
+              className={`btn btn-sm ${isPhysicsFrozen ? 'btn-secondary' : 'btn-primary'}`}
+              onClick={handleToggleFreeze}
+              style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 9px', fontSize: 12 }}
+              title={isPhysicsFrozen ? "Physics is frozen (nodes stay static). Click to unfreeze motion." : "Physics is active. Click to freeze motion."}
+            >
+              {isPhysicsFrozen ? <Lock size={12} /> : <Unlock size={12} />}
+              <span>{isPhysicsFrozen ? 'Frozen' : 'Live Motion'}</span>
+            </button>
+
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={handleResetFit}
+              style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', fontSize: 12 }}
+              title="Reset Zoom and Fit to Screen"
+            >
+              <Maximize2 size={12} />
+              <span>Fit</span>
+            </button>
+
+            <span className="badge badge-neutral" style={{ fontSize: 11 }}>
+              {filteredData.nodes.length} Nodes • {filteredData.edges.length} Edges
             </span>
           </div>
         </div>
@@ -1729,7 +2146,69 @@ export default function KnowledgeGraphView() {
               </div>
             )}
             {filteredData.nodes.length > 0 ? (
-              <div ref={containerRef} style={{ width: '100%', height: '100%' }}></div>
+              <>
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 12,
+                    right: 12,
+                    zIndex: 10,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    background: 'rgba(15, 23, 42, 0.8)',
+                    backdropFilter: 'blur(8px)',
+                    padding: '4px 8px',
+                    borderRadius: 'var(--radius-sm)',
+                    border: '1px solid rgba(255, 255, 255, 0.15)',
+                    boxShadow: '0 2px 6px rgba(0, 0, 0, 0.25)',
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={handleToggleFreeze}
+                    style={{
+                      background: isPhysicsFrozen ? 'rgba(255, 255, 255, 0.1)' : 'var(--accent-primary)',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: 4,
+                      padding: '3px 8px',
+                      fontSize: 11.5,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      cursor: 'pointer',
+                      fontWeight: 500,
+                    }}
+                    title={isPhysicsFrozen ? "Physics is frozen. Click to unfreeze motion." : "Physics is active. Click to freeze motion."}
+                  >
+                    {isPhysicsFrozen ? <Lock size={11} /> : <Unlock size={11} />}
+                    <span>{isPhysicsFrozen ? 'Motion Frozen' : 'Live Motion'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleResetFit}
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.1)',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: 4,
+                      padding: '3px 8px',
+                      fontSize: 11.5,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      cursor: 'pointer',
+                    }}
+                    title="Fit to Screen"
+                  >
+                    <Maximize2 size={11} />
+                    <span>Fit</span>
+                  </button>
+                </div>
+                <div ref={containerRef} style={{ width: '100%', height: '100%' }}></div>
+              </>
             ) : addedToGraphPaperIds && addedToGraphPaperIds.length > 0 ? (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)', textAlign: 'center', padding: 24 }}>
                 <div
@@ -1750,7 +2229,7 @@ export default function KnowledgeGraphView() {
                   {addedToGraphPaperIds.length} Papers Added to Workspace Graph
                 </h3>
                 <p style={{ fontSize: 13, maxWidth: 500, textAlign: 'center', marginBottom: 20, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                  Click <strong>Build AI Knowledge Graph</strong> to synthesize cross-paper relationships (EXTENDS, COMPARED_TO, IMPROVES_UPON, shared architectures, research gaps) with Gemini Flash-Lite and save into SQLite for instant subsequent retrieval.
+                  Click <strong>Build AI Knowledge Graph</strong> to synthesize cross-paper relationships (EXTENDS, COMPARED_TO, IMPROVES_UPON, shared methods, benchmarks, research gaps) with <strong>Local LLM (Ollama phi4-mini)</strong> or your configured AI engine, and save into SQLite for instant subsequent retrieval.
                 </p>
                 <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
                   <button
@@ -1792,10 +2271,14 @@ export default function KnowledgeGraphView() {
 
             {filteredData.nodes.length > 0 && (
               <div className="graph-legend-strip">
-                <div><span style={{ display: 'inline-block', width: 18, height: 10, borderRadius: 10, background: theme === 'dark' ? '#e4e4e7' : '#18181b', border: '1px solid #71717a', marginRight: 6, verticalAlign: 'middle' }}></span> Topic (Center)</div>
-                <div><span style={{ display: 'inline-block', width: 14, height: 10, borderRadius: 2, background: theme === 'dark' ? '#27272a' : '#ffffff', border: '1px solid #71717a', marginRight: 6, verticalAlign: 'middle' }}></span> Research Paper (Box)</div>
-                <div><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: theme === 'dark' ? '#3f3f46' : '#e2e8f0', border: '1px solid #a1a1aa', marginRight: 6, verticalAlign: 'middle' }}></span> Method / Dataset (Circle)</div>
-                <div><span style={{ display: 'inline-block', width: 16, height: 2, background: theme === 'dark' ? '#d4d4d8' : '#475569', marginRight: 6, verticalAlign: 'middle' }}></span> Directed Relation</div>
+                <div><span style={{ display: 'inline-block', width: 16, height: 10, borderRadius: 10, background: '#4f46e5', marginRight: 6, verticalAlign: 'middle' }}></span> Topic</div>
+                <div><span style={{ display: 'inline-block', width: 14, height: 10, borderRadius: 3, background: theme === 'dark' ? '#27272a' : '#ffffff', border: '1px solid #71717a', marginRight: 6, verticalAlign: 'middle' }}></span> Paper Card</div>
+                <div><span style={{ display: 'inline-block', width: 14, height: 10, borderRadius: 8, background: '#10b981', marginRight: 6, verticalAlign: 'middle' }}></span> Method</div>
+                <div><span style={{ display: 'inline-block', width: 14, height: 10, borderRadius: 8, background: '#f59e0b', marginRight: 6, verticalAlign: 'middle' }}></span> Dataset</div>
+                <div><span style={{ display: 'inline-block', width: 12, height: 10, borderRadius: 3, background: '#f43f5e', marginRight: 6, verticalAlign: 'middle' }}></span> Gap</div>
+                <div><span style={{ display: 'inline-block', width: 16, height: 2, background: '#10b981', marginRight: 6, verticalAlign: 'middle' }}></span> Method Link</div>
+                <div><span style={{ display: 'inline-block', width: 16, height: 2, background: '#f59e0b', marginRight: 6, verticalAlign: 'middle' }}></span> Dataset Link</div>
+                <div><span style={{ display: 'inline-block', width: 16, height: 2, background: '#6366f1', marginRight: 6, verticalAlign: 'middle' }}></span> Cross-Paper</div>
               </div>
             )}
           </div>
@@ -1855,7 +2338,7 @@ export default function KnowledgeGraphView() {
               <div id="inspector-details-content" style={{ marginTop: 14 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span className={`badge ${selectedEntity.raw?.category === 'Proposed Novelty' || selectedEntity.id?.startsWith('cand-') ? 'badge-emerald' : selectedEntity.type === 'TOPIC' ? 'badge-blue' : selectedEntity.type === 'METHOD' ? 'badge-purple' : selectedEntity.type === 'DATASET' ? 'badge-amber' : selectedEntity.type === 'RELATIONSHIP' ? 'badge-emerald' : 'badge-neutral'}`}>
-                    {selectedEntity.raw?.category === 'Proposed Novelty' || selectedEntity.id?.startsWith('cand-') ? '⭐ PROPOSED NOVELTY' : selectedEntity.type}
+                    {selectedEntity.raw?.category === 'Proposed Novelty' || selectedEntity.id?.startsWith('cand-') ? 'PROPOSED NOVELTY' : selectedEntity.type}
                   </span>
                   <button
                     className="btn btn-secondary btn-sm"
@@ -2145,7 +2628,7 @@ export default function KnowledgeGraphView() {
                             </div>
 
                             <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.35, marginTop: 1, borderTop: '1px dashed var(--border-subtle)', paddingTop: 4 }}>
-                              💡 {connectionExplanation}
+                              {connectionExplanation}
                             </div>
                           </div>
                         );
@@ -2251,24 +2734,24 @@ export default function KnowledgeGraphView() {
                       const mech = (nov.mechanism || '').toLowerCase();
                       let badgeBg = 'var(--bg-secondary)';
                       let badgeColor = 'var(--accent-primary)';
-                      let badgeLabel = '💡 Proposal';
+                      let badgeLabel = 'Proposal';
 
                       if (mech.includes('recombination') || mech.includes('orthogonal')) {
                         badgeBg = theme === 'dark' ? '#064e3b' : '#ecfdf5';
                         badgeColor = theme === 'dark' ? '#34d399' : '#059669';
-                        badgeLabel = '⚡ Recombination';
+                        badgeLabel = 'Recombination';
                       } else if (mech.includes('contradict') || mech.includes('tension')) {
                         badgeBg = theme === 'dark' ? '#451a03' : '#fffbeb';
                         badgeColor = theme === 'dark' ? '#fbbf24' : '#b45309';
-                        badgeLabel = '⚖️ Tension Resolution';
+                        badgeLabel = 'Tension Resolution';
                       } else if (mech.includes('limitation') || mech.includes('inversion')) {
                         badgeBg = theme === 'dark' ? '#172554' : '#eff6ff';
                         badgeColor = theme === 'dark' ? '#60a5fa' : '#1d4ed8';
-                        badgeLabel = '🛡️ Limitation Inversion';
+                        badgeLabel = 'Limitation Inversion';
                       } else if (mech.includes('gap') || mech.includes('realization')) {
                         badgeBg = theme === 'dark' ? '#500724' : '#fdf2f8';
                         badgeColor = theme === 'dark' ? '#f472b6' : '#be185d';
-                        badgeLabel = '🎯 Gap Realization';
+                        badgeLabel = 'Gap Realization';
                       }
 
                       return (

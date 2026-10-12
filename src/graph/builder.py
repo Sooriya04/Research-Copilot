@@ -109,6 +109,18 @@ class GraphBuilder:
         )
         clean_cited_list = [str(c).strip() for c in cited_list if c]
 
+        # Check if an existing paper node is already stored under an equivalent key (DOI, arXiv ID, OpenAlex ID, or Title)
+        existing_paper_id = self.store.find_existing_paper_node(
+            doi=doi,
+            arxiv_id=arxiv_id,
+            openalex_id=openalex_id,
+            title=title,
+            raw_id=paper_id,
+        )
+        if existing_paper_id:
+            logger.info("Deduplicating PaperNode: re-using existing ID '%s' for incoming '%s'", existing_paper_id, paper_id)
+            paper_id = existing_paper_id
+
         paper_node = PaperNode(
             id=paper_id,
             title=title or "Untitled Paper",

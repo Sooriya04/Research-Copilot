@@ -77,6 +77,8 @@ class BuildWorkspaceGraphRequest(BaseModel):
     paper_ids: Optional[List[str]] = None
     papers: Optional[List[Dict[str, Any]]] = None
     force_refresh: bool = False
+    provider: Optional[str] = None
+    model: Optional[str] = None
 
 
 class BuildWorkspaceGraphResponse(BaseModel):
@@ -84,6 +86,8 @@ class BuildWorkspaceGraphResponse(BaseModel):
     workspace_id: Optional[str] = None
     cached: bool = False
     llm_called: bool = False
+    engine: Optional[str] = None
+    model: Optional[str] = None
     papers_count: int = 0
     cross_paper_relations_count: int = 0
     gaps_count: int = 0
@@ -293,6 +297,8 @@ async def build_workspace_graph_endpoint(req: BuildWorkspaceGraphRequest):
         topic=req.topic,
         papers=papers_to_use,
         force_refresh=req.force_refresh,
+        provider_name=req.provider,
+        model=req.model,
     )
     return BuildWorkspaceGraphResponse(**res)
 

@@ -21,8 +21,30 @@ from src.graph.schema import (
     slugify_id,
 )
 from src.graph.store import ResearchGraphStore
-from src.providers.base import ChatMessage
-from src.providers.gemini import GeminiFlashLiteProvider
+from src.providers.base import BaseLLMProvider, ChatMessage
+from src.providers.llm import LocalOllamaProvider
+
+
+def _extract_synthesis_json(text: str) -> Optional[Dict[str, Any]]:
+    """Helper to extract JSON dict from potentially noisy LLM response."""
+    if not text:
+        return None
+    cleaned = text.replace("```json", "").replace("```", "").strip()
+    try:
+        data = json.loads(cleaned)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+    match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+    if match:
+        try:
+            data = json.loads(match.group(0))
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            pass
+    return None
 
 
 class GraphSynthesizer:
@@ -32,9 +54,9 @@ class GraphSynthesizer:
     1. Checks SQLite persistent cache (`graph_synthesis_cache`) first. If an identical set of papers
        was already synthesized for this workspace, loads directly from SQLite with ZERO LLM calls/cost.
     2. Enriches each paper with metadata & entities (each paper's extraction is also SQLite-cached).
-    3. Builds a compact batch multi-paper prompt (~400 tokens per paper) for Gemini Flash-Lite to extract
-       inter-paper relations (EXTENDS, COMPARED_TO, IMPROVES_UPON, CONTRADICTS), shared methods/datasets,
-       and combinatorial research gaps.
+    3. Builds a compact batch multi-paper prompt (~400 tokens per paper) for local LLM (Ollama phi4-mini)
+       or configured cloud LLM to extract inter-paper relations (EXTENDS, COMPARED_TO, IMPROVES_UPON, CONTRADICTS),
+       domain-specific methods, evaluation benchmarks, and combinatorial research gaps.
     4. Automatically falls back to deterministic heuristic lineage extraction if offline or on LLM error.
     5. Persists the synthesized nodes, typed edges, and synthesis cache into SQLite.
     """
@@ -43,15 +65,48 @@ class GraphSynthesizer:
         self,
         store: Optional[ResearchGraphStore] = None,
         enricher: Optional[PaperEnricher] = None,
-        provider: Optional[GeminiFlashLiteProvider] = None,
+        provider: Optional[BaseLLMProvider] = None,
         db_path: str = "./data/research_copilot.db",
     ):
         self.store = store or ResearchGraphStore(db_path=db_path)
         self.enricher = enricher or PaperEnricher()
-        self.provider = provider or GeminiFlashLiteProvider()
+        self._provider = provider
         self.builder = GraphBuilder(store=self.store)
         self.db_path = db_path
         self._table_initialized = False
+
+    def _resolve_llm_provider(
+        self,
+        provider_name: Optional[str] = None,
+        model: Optional[str] = None,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+    ) -> Tuple[BaseLLMProvider, str, str]:
+        """Resolves the LLM provider for graph synthesis, preferring local Ollama if requested or default."""
+        p_name = (provider_name or "").lower().strip()
+        from src.core.config import settings
+        from src.providers.factory import get_llm_provider
+
+        # If user explicitly wants ollama or local LLM
+        if p_name in ("ollama", "local", "localllm"):
+            target_model = model or getattr(settings, "ollama_model", "phi4-mini") or "phi4-mini"
+            return LocalOllamaProvider(model=target_model, base_url=base_url or None), "ollama", target_model
+
+        if not p_name:
+            if self._provider:
+                return self._provider, getattr(self._provider, "provider_name", "custom"), getattr(self._provider, "model", "default")
+            pref = getattr(settings, "default_llm_provider", "ollama") or "ollama"
+            if pref == "ollama":
+                target_model = model or getattr(settings, "ollama_model", "phi4-mini") or "phi4-mini"
+                return LocalOllamaProvider(model=target_model, base_url=base_url or None), "ollama", target_model
+            p_name = pref
+
+        try:
+            prov = get_llm_provider(p_name, model=model or "", api_key=api_key or "", base_url=base_url or "")
+            return prov, p_name, model or getattr(prov, "model", "default")
+        except Exception:
+            target_model = model or getattr(settings, "ollama_model", "phi4-mini") or "phi4-mini"
+            return LocalOllamaProvider(model=target_model, base_url=base_url or None), "ollama", target_model
 
     async def _ensure_cache_table(self) -> None:
         """Create graph_synthesis_cache table if not exists."""
@@ -160,6 +215,10 @@ class GraphSynthesizer:
         topic: Optional[str],
         papers: List[Dict[str, Any]],
         force_refresh: bool = False,
+        provider_name: Optional[str] = None,
+        model: Optional[str] = None,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Synthesize knowledge graph across staged papers, utilizing SQLite cache when possible."""
         await self.store._ensure_initialized()
@@ -213,14 +272,11 @@ class GraphSynthesizer:
                     id_map = {}
                     for paper_data in valid_papers:
                         try:
-                            paper_node = await self.enricher.enrich_and_ingest(
-                                paper_data,
-                                workspace_node_id=ws_node_id,
-                                extract_entities=True,
-                            )
-                            orig_id = paper_data.get("id") or paper_node.id
-                            id_map[orig_id] = paper_node.id
-                            id_map[paper_node.id] = paper_node.id
+                            enriched = await self.enricher.enrich(paper_data)
+                            p_node_id = await self.builder.build_from_paper_intelligence(enriched)
+                            orig_id = paper_data.get("id") or p_node_id
+                            id_map[orig_id] = p_node_id
+                            id_map[p_node_id] = p_node_id
                         except Exception as ing_err:
                             logger.warning("[GraphSynthesizer] Ingest error on cache hydration: %s", ing_err)
 
@@ -278,22 +334,39 @@ class GraphSynthesizer:
                 ingested_paper_node_ids[p["id"]] = p["id"]
                 enriched_papers.append(p)
 
-        # 4. Synthesize Cross-Paper Connections (Gemini Flash-Lite with Heuristic Fallback)
+        # 4. Synthesize Cross-Paper Connections (Local Ollama phi4-mini or configured provider)
+        llm_provider, engine_name, model_name = self._resolve_llm_provider(
+            provider_name=provider_name,
+            model=model,
+            api_key=api_key,
+            base_url=base_url,
+        )
+
         synthesis_result = {
             "cross_paper_relations": [],
+            "methods": [],
+            "datasets": [],
             "shared_methods": [],
             "shared_datasets": [],
             "research_gaps": [],
             "synthesis_summary": "",
+            "engine": engine_name,
+            "model": model_name,
         }
         llm_called = False
 
         if len(enriched_papers) >= 2:
-            synthesis_result, llm_called = await self._run_llm_synthesis(enriched_papers, ingested_paper_node_ids)
+            synthesis_result, llm_called = await self._run_llm_synthesis(
+                enriched_papers,
+                ingested_paper_node_ids,
+                provider=llm_provider,
+                engine_name=engine_name,
+                model_name=model_name,
+            )
         elif len(enriched_papers) == 1:
             synthesis_result["synthesis_summary"] = f"Single focal paper '{enriched_papers[0].get('title', '')}' mapped with core methods and evaluation datasets."
 
-        # 5. Apply Discovered Relations & Gaps to Graph Store
+        # 5. Apply Discovered Relations, Methods, Datasets & Gaps to Graph Store
         await self._apply_synthesis_to_store(synthesis_result, ingested_paper_node_ids, clean_ws_id)
 
         # 6. Fetch Visual Elements
@@ -313,6 +386,8 @@ class GraphSynthesizer:
             "workspace_id": clean_ws_id,
             "cached": False,
             "llm_called": llm_called,
+            "engine": synthesis_result.get("engine", engine_name),
+            "model": synthesis_result.get("model", model_name),
             "papers_count": len(valid_papers),
             "cross_paper_relations_count": len(synthesis_result.get("cross_paper_relations", [])),
             "gaps_count": len(synthesis_result.get("research_gaps", [])),
@@ -326,8 +401,11 @@ class GraphSynthesizer:
         self,
         enriched_papers: List[Dict[str, Any]],
         id_map: Dict[str, str],
+        provider: BaseLLMProvider,
+        engine_name: str,
+        model_name: str,
     ) -> Tuple[Dict[str, Any], bool]:
-        """Invoke Gemini Flash-Lite on compact paper abstracts to synthesize cross-paper graph intelligence."""
+        """Invoke local Ollama phi4-mini or configured LLM on compact paper abstracts to synthesize cross-paper graph intelligence."""
         # Build compact representation (under ~350 tokens per paper)
         paper_summaries = []
         for idx, p in enumerate(enriched_papers, 1):
@@ -350,16 +428,23 @@ class GraphSynthesizer:
 
         system_instruction = (
             "You are an expert AI Research Engineer synthesizing scientific connections across research papers.\n"
-            "Analyze these papers and discover grounded relationships between them.\n"
+            "Analyze these papers and discover grounded relationships between them, domain-specific methods/architectures, evaluation datasets/benchmarks, and research gaps.\n"
             "STRICT RULES:\n"
             "1. ONLY output valid JSON adhering to the specified schema.\n"
             "2. 'relation' between papers MUST be one of: 'extends', 'compared_to', 'improves_upon', 'contradicts'.\n"
             "3. Ground all relations in the provided text (e.g. Paper B applies Paper A's method or outperforms Paper A).\n"
-            "4. Discover 1-3 combinatorial research gaps (e.g., applying Method from Paper A to the benchmark/domain of Paper B).\n"
+            "4. Extract distinct methods/architectures and evaluation benchmarks explicitly mentioned.\n"
+            "5. Discover 1-3 combinatorial research gaps (e.g., applying Method from Paper A to the benchmark/domain of Paper B).\n"
             "SCHEMA:\n"
             "{\n"
             '  "cross_paper_relations": [\n'
             '    {"source_id": "paper_id_1", "target_id": "paper_id_2", "relation": "extends|compared_to|improves_upon|contradicts", "explanation": "Brief rationale", "weight": 2.0}\n'
+            '  ],\n'
+            '  "methods": [\n'
+            '    {"name": "Method or Architecture Name", "paper_ids": ["paper_id_1"]}\n'
+            '  ],\n'
+            '  "datasets": [\n'
+            '    {"name": "Dataset or Benchmark Name", "paper_ids": ["paper_id_1"]}\n'
             '  ],\n'
             '  "shared_methods": ["Method name"],\n'
             '  "shared_datasets": ["Dataset name"],\n'
@@ -377,17 +462,35 @@ class GraphSynthesizer:
 
         llm_called = False
         try:
-            raw_res = await self.provider.complete(messages, temperature=0.1)
+            kwargs: Dict[str, Any] = {"temperature": 0.1}
+            if isinstance(provider, LocalOllamaProvider):
+                kwargs["json_mode"] = True
+            raw_res = await provider.complete(messages, **kwargs)
             llm_called = True
-            clean_str = raw_res.replace("```json", "").replace("```", "").strip()
-            parsed = json.loads(clean_str)
+            parsed = _extract_synthesis_json(raw_res)
             if isinstance(parsed, dict) and "cross_paper_relations" in parsed:
+                parsed["engine"] = engine_name
+                parsed["model"] = model_name
                 return parsed, True
         except Exception as e:
-            logger.info("[GraphSynthesizer] LLM synthesis fallback to heuristic lineage: %s", e)
+            logger.info("[GraphSynthesizer] Primary LLM synthesis (%s) failed: %s", engine_name, e)
+            if not isinstance(provider, LocalOllamaProvider):
+                try:
+                    logger.info("[GraphSynthesizer] Falling back to local Ollama phi4-mini for synthesis")
+                    ollama_prov = LocalOllamaProvider(model="phi4-mini")
+                    raw_res = await ollama_prov.complete(messages, temperature=0.1, json_mode=True)
+                    parsed = _extract_synthesis_json(raw_res)
+                    if isinstance(parsed, dict) and "cross_paper_relations" in parsed:
+                        parsed["engine"] = "ollama"
+                        parsed["model"] = "phi4-mini"
+                        return parsed, True
+                except Exception as ollama_err:
+                    logger.warning("[GraphSynthesizer] Local Ollama fallback also failed: %s", ollama_err)
 
         # Fallback to deterministic heuristic synthesis
         fallback_res = self._fallback_heuristic_synthesis(enriched_papers)
+        fallback_res["engine"] = "heuristic"
+        fallback_res["model"] = "deterministic"
         return fallback_res, llm_called
 
     def _fallback_heuristic_synthesis(self, papers: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -476,7 +579,16 @@ class GraphSynthesizer:
         id_map: Dict[str, str],
         workspace_id: str,
     ) -> None:
-        """Add synthesized edges, shared method/dataset links, and research gaps to the graph store."""
+        """Add synthesized edges, method/dataset links, and research gaps to the graph store."""
+        STOP_WORDS = {
+            "large language model", "large language models", "llm", "llms", "language model",
+            "artificial intelligence", "machine learning", "deep learning", "natural language processing",
+            "paper", "papers", "study", "studies", "model", "models", "approach", "approaches",
+            "method", "methods", "system", "systems", "framework", "frameworks", "technique", "techniques",
+            "evaluation", "evaluations", "analysis", "analyses", "experiment", "experiments", "task", "tasks",
+            "general", "general benchmark", "benchmark evaluation",
+        }
+
         # 1. Cross-paper relational edges
         for rel in synthesis.get("cross_paper_relations", []):
             src_raw = rel.get("source_id")
@@ -493,7 +605,8 @@ class GraphSynthesizer:
             if tgt not in self.store.graph and slugify_id(tgt) in self.store.graph:
                 tgt = slugify_id(tgt)
 
-            rel_type_str = str(rel.get("relation", "compared_to")).lower()
+            raw_rel = str(rel.get("relation", "compared_to")).lower()
+            rel_type_str = raw_rel.split("|")[0].split("/")[0].strip()
             rel_enum = Relation(rel_type_str) if rel_type_str in Relation._value2member_map_ else Relation.COMPARED_TO
 
             edge = ResearchEdge(
@@ -504,18 +617,112 @@ class GraphSynthesizer:
             )
             await self.store.add_edge(edge)
 
-        # 2. Add Research Gap Nodes
+        # 2. Methods (both structured method objects and shared_methods strings)
+        methods_entries = synthesis.get("methods", []) or []
+        for m_item in methods_entries:
+            if isinstance(m_item, dict):
+                m_name = m_item.get("name") or m_item.get("method") or ""
+                p_ids = m_item.get("paper_ids") or []
+            else:
+                m_name = str(m_item)
+                p_ids = list(id_map.values())
+            m_norm = normalize_entity(m_name)
+            if not m_norm or m_norm.lower() in STOP_WORDS or len(m_norm) < 2:
+                continue
+            m_slug = slugify_id(m_norm)
+            m_id = m_slug if m_slug in self.store.graph else (f"method-{m_slug}" if f"method-{m_slug}" in self.store.graph else m_slug)
+            existing = await self.store.get_node(m_id)
+            if not existing:
+                await self.store.add_node(MethodNode(id=m_id, name=m_norm, category="synthesized"))
+            for pid in p_ids:
+                mapped_pid = id_map.get(pid) or pid
+                if mapped_pid in self.store.graph:
+                    await self.store.add_edge(ResearchEdge(
+                        source_id=mapped_pid,
+                        target_id=m_id,
+                        relation=Relation.USES_METHOD,
+                        weight=2.0
+                    ))
+
+        for sm in (synthesis.get("shared_methods", []) or []):
+            sm_norm = normalize_entity(str(sm))
+            if not sm_norm or sm_norm.lower() in STOP_WORDS or len(sm_norm) < 2:
+                continue
+            sm_slug = slugify_id(sm_norm)
+            sm_id = sm_slug if sm_slug in self.store.graph else (f"method-{sm_slug}" if f"method-{sm_slug}" in self.store.graph else sm_slug)
+            existing = await self.store.get_node(sm_id)
+            if not existing:
+                await self.store.add_node(MethodNode(id=sm_id, name=sm_norm, category="shared"))
+            for mapped_pid in id_map.values():
+                if mapped_pid in self.store.graph:
+                    await self.store.add_edge(ResearchEdge(
+                        source_id=mapped_pid,
+                        target_id=sm_id,
+                        relation=Relation.USES_METHOD,
+                        weight=2.0
+                    ))
+
+        # 3. Datasets (both structured dataset objects and shared_datasets strings)
+        datasets_entries = synthesis.get("datasets", []) or []
+        for d_item in datasets_entries:
+            if isinstance(d_item, dict):
+                d_name = d_item.get("name") or d_item.get("dataset") or ""
+                p_ids = d_item.get("paper_ids") or []
+            else:
+                d_name = str(d_item)
+                p_ids = list(id_map.values())
+            d_norm = normalize_entity(d_name)
+            if not d_norm or d_norm.lower() in STOP_WORDS or len(d_norm) < 2:
+                continue
+            d_slug = slugify_id(d_norm)
+            d_id = d_slug if d_slug in self.store.graph else (f"dataset-{d_slug}" if f"dataset-{d_slug}" in self.store.graph else d_slug)
+            existing = await self.store.get_node(d_id)
+            if not existing:
+                await self.store.add_node(DatasetNode(id=d_id, name=d_norm, domain="synthesized"))
+            for pid in p_ids:
+                mapped_pid = id_map.get(pid) or pid
+                if mapped_pid in self.store.graph:
+                    await self.store.add_edge(ResearchEdge(
+                        source_id=mapped_pid,
+                        target_id=d_id,
+                        relation=Relation.EVALUATES_ON,
+                        weight=2.0
+                    ))
+
+        for sd in (synthesis.get("shared_datasets", []) or []):
+            sd_norm = normalize_entity(str(sd))
+            if not sd_norm or sd_norm.lower() in STOP_WORDS or len(sd_norm) < 2:
+                continue
+            sd_slug = slugify_id(sd_norm)
+            sd_id = sd_slug if sd_slug in self.store.graph else (f"dataset-{sd_slug}" if f"dataset-{sd_slug}" in self.store.graph else sd_slug)
+            existing = await self.store.get_node(sd_id)
+            if not existing:
+                await self.store.add_node(DatasetNode(id=sd_id, name=sd_norm, domain="shared"))
+            for mapped_pid in id_map.values():
+                if mapped_pid in self.store.graph:
+                    await self.store.add_edge(ResearchEdge(
+                        source_id=mapped_pid,
+                        target_id=sd_id,
+                        relation=Relation.EVALUATES_ON,
+                        weight=2.0
+                    ))
+
+        # 4. Add Research Gap Nodes & link to papers, methods, and datasets
         for idx, gap in enumerate(synthesis.get("research_gaps", []), 1):
             gap_title = gap.get("title") or f"Research Gap {idx}"
             gap_id = f"gap-{slugify_id(gap_title)[:30]}"
             method_norm = normalize_entity(gap.get("method") or "novel-technique")
             dataset_norm = normalize_entity(gap.get("dataset_or_task") or "benchmark")
+            m_slug = slugify_id(method_norm)
+            m_id = m_slug if m_slug in self.store.graph else f"method-{m_slug}"
+            d_slug = slugify_id(dataset_norm)
+            d_id = d_slug if d_slug in self.store.graph else f"dataset-{d_slug}"
 
             gap_node = ResearchGapNode(
                 id=gap_id,
                 description=gap.get("description") or gap_title,
-                method_id=f"method-{slugify_id(method_norm)}",
-                dataset_id=f"dataset-{slugify_id(dataset_norm)}",
+                method_id=m_id,
+                dataset_id=d_id,
                 confidence=0.85,
             )
             await self.store.add_node(gap_node)
@@ -534,6 +741,22 @@ class GraphSynthesizer:
                         weight=1.8,
                     )
                     await self.store.add_edge(edge)
+
+            # Link gap to method / dataset if present
+            if m_id in self.store.graph:
+                await self.store.add_edge(ResearchEdge(
+                    source_id=gap_id,
+                    target_id=m_id,
+                    relation=Relation.INVESTIGATES,
+                    weight=1.5
+                ))
+            if d_id in self.store.graph:
+                await self.store.add_edge(ResearchEdge(
+                    source_id=gap_id,
+                    target_id=d_id,
+                    relation=Relation.EVALUATES_ON,
+                    weight=1.5
+                ))
 
     async def _get_scoped_elements(self, ws_node_id: str, paper_ids: List[str]) -> Dict[str, Any]:
         """Fetch visual graph elements scoped strictly to the workspace and paper set."""

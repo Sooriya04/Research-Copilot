@@ -1956,6 +1956,49 @@ bundle compilation (`npm run build`).
   * Verified Vite frontend production build (`npm run build`) compiles cleanly in `6.85s`.
   * Verified all 111 backend tests pass 100% green: `111 passed, 4 warnings in 136.57s`.
 
+<br />
+
+## Multi-Provider AI Knowledge Graph Synthesis, SQLite Graph Cache, Radial Anti-Collision Layout, and Academic UI Polish
+
+* **SQLite Graph & Synthesis Persistence (`src/graph/store.py`, `src/graph/synthesizer.py`, `src/graph/builder.py`, `src/api/routes_graph.py`)**:
+  * Implemented SQLite database persistence for Knowledge Graph topology and cross-paper synthesis:
+    * Stored normalized nodes, edges, and semantic relationships directly in SQLite (`graph_nodes`, `graph_edges`, `graph_synthesis_cache`).
+    * Cache-first retrieval: graph fetches check SQLite cache first, returning complete synthesized topologies instantly with zero external API calls.
+  * Added multi-provider AI graph synthesis supporting:
+    * **Local LLM**: Integrated Ollama (`phi4-mini` or user-configured model) for fully local, private graph generation without internet connectivity or API token consumption.
+    * **Cloud LLM Providers**: Integrated Gemini Flash-Lite, Groq, DeepSeek, NVIDIA NIM, and OpenRouter for high-throughput batch synthesis.
+  * Resolved paper entity duplication using normalized ID hashing, canonical title matching, and deduplicated abstract entity extraction (`src/engines/abstract_entity_extractor.py`).
+
+* **Spacious Radial Orbit Seeding & Collision Prevention (`frontend/src/views/KnowledgeGraphView.jsx`)**:
+  * Implemented `computeSpaciousSeedPositions` to pre-calculate expansive coordinates before simulation starts:
+    * Central Topic node anchored at `(0, 0)`.
+    * Paper cards arranged in an expansive orbital circle at radius $R \ge 380\text{px} + N \times 65\text{px}$, ensuring $\ge 340\text{px}$ chord clearance between adjacent papers.
+    * Method, Dataset, and Gap entities arranged in an outer fan arc at radius $R + 190\text{px}$ with $+50\text{px}$ alternating radial stagger to completely eliminate node overlap.
+  * Overhauled vis-network physics from ForceAtlas2 to `barnesHut`:
+    * Configured quadratic inverse-square repulsion: `gravitationalConstant: -16000` to form an impenetrable anti-overlap boundary.
+    * Set `centralGravity: 0.03` to prevent outer nodes from collapsing into the center.
+    * Enabled strict node radius boundary enforcement (`avoidOverlap: 1.0`).
+  * Per-edge spring lengths and elasticity:
+    * Topic-to-paper edges: `length: 340px`, `springConstant: 0.035`.
+    * Cross-paper & citation edges: `length: 380px`, `springConstant: 0.008` (loose coupling preventing papers from clumping together).
+    * Paper-to-entity branches: `length: 170px`, `springConstant: 0.04`.
+
+* **Academic UI Styling & Zero-Emoji Enforcement (`frontend/src/views/KnowledgeGraphView.jsx`)**:
+  * Enforced a strict zero-emoji policy across the entire Knowledge Graph interface:
+    * Stripped emojis from all node cards, dropdown selects, layout mode buttons, toolbar actions, legend indicators, and novelty proposal cards.
+    * Engine dropdown options now use clean academic text (`Local LLM (Ollama phi4-mini)`, `Gemini (Flash-Lite)`, `Groq`, etc.).
+    * Replaced emoji indicators with clean Lucide SVG icons (`Zap`, `Sparkles`, `Lock`, `Unlock`, `NetworkIcon`).
+  * Refined card typography and dimensions:
+    * Paper titles wrapped cleanly up to 3 lines without slug hyphens (`wrapLabel(rawLabel, 20)`).
+    * Compact publication card geometry (`widthConstraint: { minimum: 150, maximum: 200 }`, `margin: { top: 8, right: 12, bottom: 8, left: 12 }`).
+    * Crisp pill badges for methods and datasets (`minimum: 70, maximum: 140`).
+  * Added floating motion freeze/unfreeze toggle and reset zoom controls.
+
+* **Verification & Build**:
+  * Verified Vite frontend production build (`npm run build`) compiles cleanly in `6.88s`.
+  * Verified all 19 graph engine and workspace backend tests pass (`19 passed in 52.48s`).
+
+
 
 
 

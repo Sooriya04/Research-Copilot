@@ -149,6 +149,80 @@ class ResearchGraphStore:
 
         return None
 
+    def find_existing_paper_node(
+        self,
+        doi: Optional[str] = None,
+        arxiv_id: Optional[str] = None,
+        openalex_id: Optional[str] = None,
+        title: Optional[str] = None,
+        raw_id: Optional[str] = None,
+    ) -> Optional[str]:
+        """Find an existing PaperNode in the graph matching by normalized DOI, arXiv ID, OpenAlex ID, or title."""
+        import re
+
+        def _norm_doi(d: Optional[str]) -> str:
+            if not d:
+                return ""
+            s = str(d).strip().lower()
+            m = re.search(r"10\.\d{4,9}/[-._;()/:a-z0-9]+", s)
+            return m.group(0).rstrip(".;,") if m else ""
+
+        def _norm_arxiv(a: Optional[str]) -> str:
+            if not a:
+                return ""
+            s = str(a).strip().lower()
+            m = re.search(r"(\d{4}\.\d{4,5})", s)
+            return m.group(1) if m else ""
+
+        def _norm_openalex(o: Optional[str]) -> str:
+            if not o:
+                return ""
+            s = str(o).strip().lower()
+            m = re.search(r"(w\d+)", s)
+            return m.group(1) if m else ""
+
+        def _norm_title(t: Optional[str]) -> str:
+            if not t:
+                return ""
+            return re.sub(r"[^a-z0-9]", "", str(t).lower())
+
+        target_doi = _norm_doi(doi) or _norm_doi(raw_id)
+        target_arxiv = _norm_arxiv(arxiv_id) or _norm_arxiv(raw_id)
+        target_openalex = _norm_openalex(openalex_id) or _norm_openalex(raw_id)
+        target_title = _norm_title(title)
+
+        for nid in self.graph.nodes:
+            ndata = self.graph.nodes.get(nid, {})
+            ntype = str(ndata.get("node_type", "")).lower()
+            if ntype != "paper":
+                continue
+
+            # 1. Match by DOI
+            node_doi = _norm_doi(ndata.get("doi")) or _norm_doi(nid)
+            if target_doi and node_doi and target_doi == node_doi:
+                return nid
+
+            # 2. Match by arXiv ID
+            node_arxiv = _norm_arxiv(ndata.get("arxiv_id")) or _norm_arxiv(nid)
+            if target_arxiv and node_arxiv and target_arxiv == node_arxiv:
+                return nid
+
+            # 3. Match by OpenAlex ID
+            node_openalex = _norm_openalex(ndata.get("openalex_id")) or _norm_openalex(nid)
+            if target_openalex and node_openalex and target_openalex == node_openalex:
+                return nid
+
+            # 4. Match by normalized Title (at least 15 chars)
+            node_title = _norm_title(ndata.get("title"))
+            if target_title and node_title and len(target_title) >= 15 and len(node_title) >= 15:
+                if target_title == node_title:
+                    return nid
+                shorter, longer = (target_title, node_title) if len(target_title) < len(node_title) else (node_title, target_title)
+                if len(shorter) >= 20 and shorter in longer:
+                    return nid
+
+        return None
+
     async def get_neighbors(self, node_id: str, relation: Optional[Union[str, Relation]] = None) -> List[GraphNode]:
         """Return neighboring target nodes, optionally filtered by edge relation."""
         await self._ensure_initialized()
