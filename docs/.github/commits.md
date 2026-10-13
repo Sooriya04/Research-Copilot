@@ -2096,3 +2096,13 @@ bundle compilation (`npm run build`).
   * Verified all 112 backend tests pass 100% green (`pytest` in 302s).
   * Verified Vite frontend production build (`npm run build`) compiles cleanly in `6.84s` with asset bundle size reduced by ~24 kB.
 
+<br />
+
+## Add GitHub Repository Review & Feedback Link to TopHeader
+
+* **GitHub Repository Header Action (`frontend/src/components/layout/TopHeader.jsx`)**:
+  * Added a dedicated GitHub repository link button (`#btn-github-repo`) in the top navigation bar right next to the Theme toggle.
+  * Directs researchers to [`https://github.com/Sooriya04/Research-Copilot`](https://github.com/Sooriya04/Research-Copilot) with `target="_blank"` and `rel="noopener noreferrer"`.
+  * Allows users to review, star, submit feedback, or file issues directly on GitHub with the official SVG icon.
+  * Verified production build compilation (`npm run build`) in `8.08s`.
+
