@@ -2,15 +2,18 @@ import React from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
+  FolderKanban,
   Search,
   BookOpen,
   Network,
-  FileText,
-  Sparkles,
-  Library,
-  Workflow,
-  Settings,
   Lightbulb,
+  Compass,
+  Workflow,
+  FileText,
+  MessageSquare,
+  Upload,
+  Settings,
+  Sparkles,
   PanelLeftClose,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
@@ -26,11 +29,7 @@ export default function Sidebar() {
     setMobileSidebarOpen,
   } = useApp();
 
-  const isPaperReaderActive = [
-    '/pdf-inspector',
-    '/library/reader',
-    '/library-reader',
-  ].some((p) => location.pathname === p || location.pathname.startsWith(p + '/'));
+  const isPaperReaderActive = location.pathname === '/pdf-inspector' || location.pathname.startsWith('/pdf-inspector/');
 
   return (
     <aside
@@ -99,7 +98,20 @@ export default function Sidebar() {
           </div>
         </NavLink>
 
-        {/* 2. Literature Search */}
+        {/* 2. Workspaces */}
+        <NavLink
+          to="/workspaces"
+          className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+          title="Research Workspaces"
+          onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
+        >
+          <div className="nav-item-left">
+            <FolderKanban size={15} />
+            <span>Workspaces</span>
+          </div>
+        </NavLink>
+
+        {/* 3. Literature Search */}
         <NavLink
           to="/search"
           className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
@@ -112,7 +124,7 @@ export default function Sidebar() {
           </div>
         </NavLink>
 
-        {/* 3. Discovered Papers */}
+        {/* 4. Discovered Papers */}
         <NavLink
           to="/search-results"
           className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
@@ -125,7 +137,7 @@ export default function Sidebar() {
           </div>
         </NavLink>
 
-        {/* 4. Knowledge Graph */}
+        {/* 5. Knowledge Graph */}
         <NavLink
           to="/knowledge-graph"
           className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
@@ -138,7 +150,7 @@ export default function Sidebar() {
           </div>
         </NavLink>
 
-        {/* 5. Novelty Studio */}
+        {/* 6. Novelty Studio */}
         <NavLink
           to="/novelty"
           className={({ isActive }) =>
@@ -153,7 +165,20 @@ export default function Sidebar() {
           </div>
         </NavLink>
 
-        {/* 6. LitGraph */}
+        {/* 7. Research Gaps */}
+        <NavLink
+          to="/research-gaps"
+          className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+          title="Research Gap Finder"
+          onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
+        >
+          <div className="nav-item-left">
+            <Compass size={15} />
+            <span>Research Gaps</span>
+          </div>
+        </NavLink>
+
+        {/* 8. LitGraph */}
         <NavLink
           to="/litgraph"
           className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
@@ -166,7 +191,7 @@ export default function Sidebar() {
           </div>
         </NavLink>
 
-        {/* 7. Paper Reader (Active Highlight) */}
+        {/* 9. Paper Reader (Active Highlight) */}
         <NavLink
           to="/pdf-inspector"
           className={`nav-item ${isPaperReaderActive ? 'active paper-reader-active' : ''}`}
@@ -182,18 +207,29 @@ export default function Sidebar() {
           )}
         </NavLink>
 
-        {/* 8. Library */}
+        {/* 10. Research Chat */}
         <NavLink
-          to="/library"
-          className={({ isActive }) =>
-            `nav-item ${isActive || (location.pathname.startsWith('/library') && !isPaperReaderActive) ? 'active' : ''}`
-          }
-          title="Research Library"
+          to="/chat"
+          className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+          title="Research Chat Assistant"
           onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
         >
           <div className="nav-item-left">
-            <Library size={15} />
-            <span>Library</span>
+            <MessageSquare size={15} />
+            <span>Research Chat</span>
+          </div>
+        </NavLink>
+
+        {/* 11. Import Papers */}
+        <NavLink
+          to="/create"
+          className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+          title="Import Papers Catalog"
+          onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
+        >
+          <div className="nav-item-left">
+            <Upload size={15} />
+            <span>Import Papers</span>
           </div>
         </NavLink>
       </nav>

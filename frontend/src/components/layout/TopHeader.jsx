@@ -6,9 +6,6 @@ import { useApp } from '../../context/AppContext';
 const VIEW_TITLES = {
   '/': 'Overview',
   '/overview': 'Overview',
-  '/library': 'Research Library',
-  '/library/reader': 'Paper Reader',
-  '/library-reader': 'Paper Reader',
   '/create': 'Import Papers',
   '/chat': 'Research Chat',
   '/workspaces': 'Research Workspaces',
@@ -40,7 +37,6 @@ export default function TopHeader() {
   } = useApp();
 
   const currentTitle = VIEW_TITLES[location.pathname] || location.pathname.replace('/', '').replace(/-/g, ' ') || 'Workspace';
-  const isLibraryRoute = location.pathname.startsWith('/library') || location.pathname.startsWith('/library-reader');
 
   const handleSidebarToggle = () => {
     if (window.innerWidth <= 768) {
@@ -107,13 +103,11 @@ export default function TopHeader() {
         </div>
       </div>
 
-      {!isLibraryRoute && (
-        <div className="command-bar-trigger" id="btn-open-cmd-bar" onClick={openCmdPalette}>
-          <Search size={14} style={{ marginRight: 6, color: 'var(--text-muted)' }} />
-          <span>Search literature, DOIs, repositories...</span>
-          <span className="kbd-badge">⌘K</span>
-        </div>
-      )}
+      <div className="command-bar-trigger" id="btn-open-cmd-bar" onClick={openCmdPalette}>
+        <Search size={14} style={{ marginRight: 6, color: 'var(--text-muted)' }} />
+        <span>Search literature, DOIs, repositories...</span>
+        <span className="kbd-badge">⌘K</span>
+      </div>
 
       <div className="header-right">
         <button className="header-btn" id="btn-theme-toggle" title="Toggle Theme" onClick={toggleTheme}>

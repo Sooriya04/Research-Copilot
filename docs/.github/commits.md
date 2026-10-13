@@ -2076,3 +2076,23 @@ bundle compilation (`npm run build`).
   * All 3 workspace graph synthesis tests pass 100% green in 9.44s.
   * Frontend production build (`npm run build`) compiles cleanly in 7.12s with zero errors.
 
+<br />
+
+## Purge Legacy Library Route, Decommission Orphaned Views, and Streamline Navigation
+
+* **Purge Legacy Library Views & Routes (`frontend/src/App.jsx`, `frontend/src/views/`)**:
+  * Deleted obsolete `LibraryView.jsx` and `LibraryReaderView.jsx` components from the frontend workspace.
+  * Completely unmapped the `/library`, `/library/reader`, and `/library-reader` routes from React Router.
+  * Simplified `isReaderRoute` to cleanly target `/pdf-inspector`.
+  * Reassigned numeric navigation keyboard shortcuts: `1: Overview`, `2: Workspaces`, `3: Literature Search`, `4: Knowledge Graph`.
+
+* **Streamline Sidebar & TopHeader Navigation (`frontend/src/components/layout/Sidebar.jsx`, `frontend/src/components/layout/TopHeader.jsx`, `frontend/src/views/OverviewView.jsx`)**:
+  * Removed the `Library` link and decommissioned reader aliases from `Sidebar.jsx`.
+  * Surfaced primary active features in the sidebar: **Workspaces** (`/workspaces`), **Research Gaps** (`/research-gaps`), **Research Chat** (`/chat`), and **Import Papers** (`/create`).
+  * Removed legacy library title mappings and conditional wrappers in `TopHeader.jsx`.
+  * Added quick action shortcuts for **Novelty Studio** and **Research Chat** to the homepage hero card in `OverviewView.jsx`.
+
+* **Verification & Production Build**:
+  * Verified all 112 backend tests pass 100% green (`pytest` in 302s).
+  * Verified Vite frontend production build (`npm run build`) compiles cleanly in `6.84s` with asset bundle size reduced by ~24 kB.
+

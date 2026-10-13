@@ -13,8 +13,6 @@ import LiteratureResultsView from './views/LiteratureResultsView';
 import KnowledgeGraphView from './views/KnowledgeGraphView';
 import LitGraphView from './views/LitGraphView';
 import PaperReaderView from './views/PaperReaderView';
-import LibraryView from './views/LibraryView';
-import LibraryReaderView from './views/LibraryReaderView';
 import ChatView from './views/ChatView';
 import CreateView from './views/CreateView';
 import BenchmarksView from './views/BenchmarksView';
@@ -29,16 +27,13 @@ export default function App() {
   const location = useLocation();
   const { mobileSidebarOpen, setMobileSidebarOpen } = useApp();
 
-  const isReaderRoute =
-    location.pathname === '/pdf-inspector' ||
-    location.pathname.startsWith('/library/reader') ||
-    location.pathname === '/library-reader';
+  const isReaderRoute = location.pathname === '/pdf-inspector';
 
   // Numeric shortcuts 1, 2, 3, 4
   useEffect(() => {
     const handleNumberShortcuts = (e) => {
       if (['1', '2', '3', '4'].includes(e.key) && !['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) {
-        const routes = ['/', '/workspaces', '/library', '/search'];
+        const routes = ['/', '/workspaces', '/search', '/knowledge-graph'];
         navigate(routes[parseInt(e.key) - 1]);
       }
     };
@@ -62,9 +57,6 @@ export default function App() {
             <Route path="/" element={<OverviewView />} />
             <Route path="/overview" element={<OverviewView />} />
             <Route path="/workspaces" element={<WorkspacesView />} />
-            <Route path="/library" element={<LibraryView />} />
-            <Route path="/library/reader" element={<LibraryReaderView />} />
-            <Route path="/library-reader" element={<LibraryReaderView />} />
             <Route path="/create" element={<CreateView />} />
             <Route path="/chat" element={<ChatView />} />
             <Route path="/search" element={<LiteratureSearchView />} />

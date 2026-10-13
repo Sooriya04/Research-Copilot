@@ -23,6 +23,7 @@ import {
   Calendar,
   PenTool,
   Terminal,
+  MessageSquare,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
@@ -208,8 +209,26 @@ export default function OverviewView() {
             onClick={() => navigate('/research-gaps')}
             style={{ display: 'flex', alignItems: 'center', gap: 6 }}
           >
-            <Lightbulb size={13} style={{ color: 'var(--accent-rose)' }} />
-            <span>5. Research Gap Finder</span>
+            <Compass size={13} style={{ color: 'var(--accent-rose)' }} />
+            <span>5. Research Gaps</span>
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => navigate('/novelty')}
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <Lightbulb size={13} style={{ color: 'var(--accent-amber)' }} />
+            <span>6. Novelty Studio</span>
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => navigate('/chat')}
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <MessageSquare size={13} style={{ color: 'var(--accent-blue)' }} />
+            <span>7. Research Chat</span>
           </button>
           <button
             type="button"
