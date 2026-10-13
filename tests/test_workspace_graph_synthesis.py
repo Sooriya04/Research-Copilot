@@ -136,3 +136,42 @@ def test_build_workspace_graph_api_endpoint():
     assert "nodes" in data
     assert "edges" in data
     assert data["stats"]["total_nodes"] >= 2
+
+
+def test_cached_only_mode_api_endpoint():
+    """Verify cached_only mode returns not_cached when missing, and cached graph when present without calling LLM."""
+    client = TestClient(app)
+
+    # 1. Non-existent workspace with cached_only=True: returns not_cached with 0 nodes immediately
+    payload_miss = {
+        "workspace_id": "ws-nonexistent-cache-test",
+        "topic": "Unknown Topic",
+        "paper_ids": ["arxiv:9999.99999", "arxiv:8888.88888"],
+        "cached_only": True,
+        "force_refresh": False,
+    }
+    res_miss = client.post("/api/v1/graph/build-workspace-graph", json=payload_miss)
+    assert res_miss.status_code == 200
+    data_miss = res_miss.json()
+    assert data_miss["status"] == "not_cached"
+    assert data_miss["cached"] is False
+    assert data_miss["llm_called"] is False
+    assert len(data_miss["nodes"]) == 0
+    assert len(data_miss["edges"]) == 0
+
+    # 2. Existing workspace with cached_only=True: returns cached graph immediately
+    payload_hit = {
+        "workspace_id": "ws-api-test",
+        "topic": "Foundation Models",
+        "paper_ids": ["arxiv:1706.03762", "arxiv:2106.09685"],
+        "cached_only": True,
+        "force_refresh": False,
+    }
+    res_hit = client.post("/api/v1/graph/build-workspace-graph", json=payload_hit)
+    assert res_hit.status_code == 200
+    data_hit = res_hit.json()
+    assert data_hit["status"] == "cached"
+    assert data_hit["cached"] is True
+    assert data_hit["llm_called"] is False
+    assert len(data_hit["nodes"]) >= 2
+

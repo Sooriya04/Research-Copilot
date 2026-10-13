@@ -142,34 +142,43 @@ class GraphSynthesizer:
         return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
 
     async def get_cached_synthesis(
-        self, workspace_id: str, paper_ids: List[str]
+        self, workspace_id: str, paper_ids: Optional[List[str]] = None
     ) -> Optional[Dict[str, Any]]:
         """Retrieve cached synthesis from SQLite if available."""
-        if not workspace_id or not paper_ids:
+        if not workspace_id:
             return None
         await self._ensure_cache_table()
-        paper_hash = self.compute_paper_hash(paper_ids)
         try:
             async with aiosqlite.connect(self.db_path) as db:
-                async with db.execute(
-                    "SELECT synthesis_json, nodes_count, edges_count FROM graph_synthesis_cache WHERE workspace_id = ? AND paper_ids_hash = ?",
-                    (workspace_id, paper_hash),
-                ) as cursor:
-                    row = await cursor.fetchone()
-                    if row:
-                        synthesis_data = json.loads(row[0])
-                        # If cached synthesis has 0 relations, 0 methods, and 0 gaps, it was a failed run - do not use
-                        if not synthesis_data.get("cross_paper_relations") and not synthesis_data.get("methods") and not synthesis_data.get("research_gaps"):
-                            logger.info("[GraphSynthesizer] Ignoring empty/corrupted SQLite synthesis cache for workspace '%s'", workspace_id)
-                            return None
-                        return {
-                            "cached": True,
-                            "llm_called": False,
-                            "paper_ids_hash": paper_hash,
-                            "nodes_count": row[1],
-                            "edges_count": row[2],
-                            **synthesis_data,
-                        }
+                if paper_ids and len(paper_ids) > 0:
+                    paper_hash = self.compute_paper_hash(paper_ids)
+                    async with db.execute(
+                        "SELECT synthesis_json, nodes_count, edges_count, paper_ids_json, paper_ids_hash FROM graph_synthesis_cache WHERE workspace_id = ? AND paper_ids_hash = ?",
+                        (workspace_id, paper_hash),
+                    ) as cursor:
+                        row = await cursor.fetchone()
+                else:
+                    async with db.execute(
+                        "SELECT synthesis_json, nodes_count, edges_count, paper_ids_json, paper_ids_hash FROM graph_synthesis_cache WHERE workspace_id = ? ORDER BY updated_at DESC LIMIT 1",
+                        (workspace_id,),
+                    ) as cursor:
+                        row = await cursor.fetchone()
+
+                if row:
+                    synthesis_data = json.loads(row[0])
+                    # If cached synthesis has 0 relations, 0 methods, and 0 gaps, it was a failed run - do not use
+                    if not synthesis_data.get("cross_paper_relations") and not synthesis_data.get("methods") and not synthesis_data.get("research_gaps"):
+                        logger.info("[GraphSynthesizer] Ignoring empty/corrupted SQLite synthesis cache for workspace '%s'", workspace_id)
+                        return None
+                    return {
+                        "cached": True,
+                        "llm_called": False,
+                        "paper_ids_hash": row[4],
+                        "paper_ids": json.loads(row[3]) if row[3] else [],
+                        "nodes_count": row[1],
+                        "edges_count": row[2],
+                        **synthesis_data,
+                    }
         except Exception as e:
             logger.debug("[GraphSynthesizer] Cache read notice: %s", e)
         return None
@@ -219,6 +228,7 @@ class GraphSynthesizer:
         topic: Optional[str],
         papers: List[Dict[str, Any]],
         force_refresh: bool = False,
+        cached_only: bool = False,
         provider_name: Optional[str] = None,
         model: Optional[str] = None,
         api_key: Optional[str] = None,
@@ -243,6 +253,13 @@ class GraphSynthesizer:
                 p["id"] = pid
                 valid_papers.append(p)
                 canonical_pids.append(pid)
+
+        # If papers list is empty, attempt to resolve from existing workspace cache before giving up
+        if not valid_papers and not force_refresh:
+            cached_res = await self.get_cached_synthesis(clean_ws_id, None)
+            if cached_res and cached_res.get("paper_ids"):
+                canonical_pids = cached_res.get("paper_ids", [])
+                valid_papers = [{"id": pid, "title": pid} for pid in canonical_pids]
 
         if not valid_papers:
             return {
@@ -293,6 +310,7 @@ class GraphSynthesizer:
                     "cached": True,
                     "llm_called": False,
                     "papers_count": len(valid_papers),
+                    "paper_ids": canonical_pids,
                     "cross_paper_relations_count": len(cached_res.get("cross_paper_relations", [])),
                     "gaps_count": len(cached_res.get("research_gaps", [])),
                     "synthesis_summary": cached_res.get("synthesis_summary", "Retrieved from SQLite cache."),
@@ -300,6 +318,24 @@ class GraphSynthesizer:
                     "research_gaps": cached_res.get("research_gaps", []),
                     **elements,
                 }
+
+        # If cached_only mode requested and not found in cache, return immediately without calling LLM
+        if cached_only:
+            return {
+                "status": "not_cached",
+                "workspace_id": clean_ws_id,
+                "cached": False,
+                "llm_called": False,
+                "papers_count": len(valid_papers),
+                "cross_paper_relations_count": 0,
+                "gaps_count": 0,
+                "synthesis_summary": "Not cached in SQLite.",
+                "cross_paper_relations": [],
+                "research_gaps": [],
+                "nodes": [],
+                "edges": [],
+                "stats": {"total_nodes": 0, "total_edges": 0, "node_type_counts": {}},
+            }
 
         # 3. Cache Miss / Force Refresh: Ingest papers into GraphStore
         logger.info(

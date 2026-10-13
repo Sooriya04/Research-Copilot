@@ -2053,3 +2053,26 @@ bundle compilation (`npm run build`).
   * Verified Vite frontend production build (`npm run build`) compiles cleanly in `7.27s`.
   * Re-synthesized workspace `ws-5719cd9a` with 28 nodes, 31 edges, 4 cross-paper relations, and 2 research gaps.
 
+<br />
+
+## Pre-Render SQLite Knowledge Graph Cache, Cached-Only Fast Path, and On-Demand First-Time Generation
+
+* **Instant SQLite Cache Pre-Rendering (`frontend/src/views/KnowledgeGraphView.jsx`)**:
+  * Configured `fetchGraphData` to immediately check SQLite cache (`POST /api/v1/graph/build-workspace-graph` with `cached_only: true`) on initial component mount and workspace switches.
+  * If the workspace and paper set already has a pre-built synthesis in SQLite, the complete graph topology (nodes, edges, cross-paper relations, and gaps) is rendered instantly without requiring user button interaction or LLM latency.
+  * If it is the first time (no cached synthesis in SQLite yet), the system displays the staged papers state and waits for the user to explicitly click "Build AI Knowledge Graph" before triggering generation.
+
+* **Cached-Only Mode Fast Path (`src/graph/synthesizer.py`, `src/api/routes_graph.py`)**:
+  * Added `cached_only: bool = False` parameter to `BuildWorkspaceGraphRequest` and `GraphSynthesizer.synthesize_workspace_graph`.
+  * In `cached_only` mode, the backend checks SQLite cache (`graph_synthesis_cache`) in ~5ms. If present, it hydrates store elements and returns `cached: true`. If missing, it immediately returns `status: "not_cached", cached: false` without triggering any external LLM calls or model inference.
+  * Supported optional `paper_ids` in `get_cached_synthesis`, allowing retrieval of the latest valid synthesis for a workspace even when paper lists are not yet loaded into client state.
+
+* **Workspace Paper Synchronization (`frontend/src/views/KnowledgeGraphView.jsx`)**:
+  * Added automatic synchronization from `activeWorkspace.papers` to `addedToGraphPaperIds` when client staged list is empty.
+  * Updated effect dependencies to track `activeWorkspace.papers.length`, ensuring seamless transitions when switching between active workspaces.
+
+* **Verification & Test Suite**:
+  * Added `test_cached_only_mode_api_endpoint` to [`tests/test_workspace_graph_synthesis.py`](file:///home/sooriya/Desktop/research-copilot/tests/test_workspace_graph_synthesis.py), verifying both cache hit and cache miss fast-paths.
+  * All 3 workspace graph synthesis tests pass 100% green in 9.44s.
+  * Frontend production build (`npm run build`) compiles cleanly in 7.12s with zero errors.
+

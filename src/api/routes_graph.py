@@ -77,6 +77,7 @@ class BuildWorkspaceGraphRequest(BaseModel):
     paper_ids: Optional[List[str]] = None
     papers: Optional[List[Dict[str, Any]]] = None
     force_refresh: bool = False
+    cached_only: bool = False
     provider: Optional[str] = None
     model: Optional[str] = None
 
@@ -89,6 +90,7 @@ class BuildWorkspaceGraphResponse(BaseModel):
     engine: Optional[str] = None
     model: Optional[str] = None
     papers_count: int = 0
+    paper_ids: List[str] = []
     cross_paper_relations_count: int = 0
     gaps_count: int = 0
     synthesis_summary: Optional[str] = None
@@ -285,6 +287,9 @@ async def build_workspace_graph_endpoint(req: BuildWorkspaceGraphRequest):
             n = await graph_store.get_node(pid) or await graph_store.get_node(slugify_id(pid))
             if n and n.title != pid and not (n.title.startswith("Cited Paper [") or n.title.startswith("s2:")):
                 papers_to_use.append(n.model_dump(mode="json"))
+            elif req.cached_only:
+                # Fast path in cached_only mode: id stub is sufficient for SQLite cache lookup
+                papers_to_use.append({"id": pid, "title": pid})
             else:
                 try:
                     resolved = await paper_enricher.enrich_by_identifier(pid)
@@ -297,6 +302,7 @@ async def build_workspace_graph_endpoint(req: BuildWorkspaceGraphRequest):
         topic=req.topic,
         papers=papers_to_use,
         force_refresh=req.force_refresh,
+        cached_only=req.cached_only,
         provider_name=req.provider,
         model=req.model,
     )
@@ -309,11 +315,12 @@ async def get_workspace_cache_status(
     paper_ids: List[str] = Query(default=[], description="Paper IDs currently staged in workspace"),
 ):
     """Check if the given workspace and paper set has a pre-built synthesis in SQLite cache."""
-    cached = await graph_synthesizer.get_cached_synthesis(workspace_id, paper_ids)
+    cached = await graph_synthesizer.get_cached_synthesis(workspace_id, paper_ids if paper_ids else None)
     if cached:
         return {
             "workspace_id": workspace_id,
             "cached": True,
+            "paper_ids": cached.get("paper_ids", []),
             "nodes_count": cached.get("nodes_count", 0),
             "edges_count": cached.get("edges_count", 0),
             "cross_paper_relations_count": len(cached.get("cross_paper_relations", [])),
@@ -323,6 +330,7 @@ async def get_workspace_cache_status(
     return {
         "workspace_id": workspace_id,
         "cached": False,
+        "paper_ids": [],
         "nodes_count": 0,
         "edges_count": 0,
     }

@@ -71,6 +71,9 @@ All long-term research state, topological nodes, cached proposals, and user prov
 ## 4. Key Endpoints & Architecture Updates
 
 ### Knowledge Graph Synthesis & Semantic Scholar Resolution
+- **Instant SQLite Cache Pre-Rendering**: On component mount or workspace switch, `fetchGraphData` issues a non-blocking fast-path request (`POST /api/v1/graph/build-workspace-graph` with `cached_only: true`). If a pre-built synthesis exists in SQLite, the entire topology (nodes, edges, cross-paper relations, and gaps) renders immediately with zero LLM latency and zero manual button clicks.
+- **On-Demand First-Time Generation**: For fresh workspaces/papers without a SQLite cache, the system displays the staged papers prompt and waits for the researcher to click "Build AI Knowledge Graph" before triggering generation.
+- **Cached-Only Fast Path**: Added `cached_only: bool = False` to `BuildWorkspaceGraphRequest` and `GraphSynthesizer.synthesize_workspace_graph`, returning `status: "not_cached", cached: false` in ~5ms without triggering external LLM calls or model inference.
 - **Semantic Scholar Identifier Resolution**: `CanonicalPaperResolver` and `AccessResolver` detect and resolve `s2:<hash>` identifiers directly via local SQLite session search records and S2 REST API, preventing missing titles or stubs like `Cited Paper [3c030e88...]`.
 - **Full Viewport Responsive Layout**: Knowledge Graph canvas uses `height: calc(100vh - 165px); minHeight: 740px` with collapsible inspector drawer (expanding to 100% full width) and in-canvas zoom/motion controls.
 - **Cache Poisoning Prevention**: `AbstractEntityExtractor` and `GraphSynthesizer` no longer cache or return empty `{methods: [], datasets: []}` records.
@@ -84,8 +87,8 @@ All long-term research state, topological nodes, cached proposals, and user prov
 
 ## 5. Automated Verification & Test Suite
 
-- **Test Suite Results**: **111 passed out of 111 tests** (`pytest`) with 100% green coverage across all modules.
-- **Frontend Build**: `npm run build` completes cleanly in `7.27s` with zero errors.
+- **Test Suite Results**: **111 passed out of 111 tests** (`pytest`) with 100% green coverage across all modules, including new test `test_cached_only_mode_api_endpoint`.
+- **Frontend Build**: `npm run build` completes cleanly in `7.12s` with zero errors.
 
 ---
 

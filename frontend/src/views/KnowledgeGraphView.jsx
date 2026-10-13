@@ -478,9 +478,131 @@ export default function KnowledgeGraphView() {
     const activeTopic = (searchQuery || activeWorkspace?.title || '').trim();
     const wsId = (activeWorkspace?.id || '').trim();
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000);
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
 
     try {
+      // 1. Check if SQLite cache already has a pre-built synthesis for this workspace/papers
+      // If it exists in SQLite, render it immediately! If it's the first time, wait for user to click Build Graph.
+      let stagedPaperIds = [...(addedToGraphPaperIds || [])];
+      if (stagedPaperIds.length === 0 && activeWorkspace?.papers && activeWorkspace.papers.length > 0) {
+        stagedPaperIds = activeWorkspace.papers.map(p => p.id || p.arxiv_id).filter(Boolean);
+      }
+
+      // Collect available metadata for staged papers
+      const fullPapers = stagedPaperIds.map(pid => {
+        const found =
+          (searchResults || []).find(p => p.id === pid || p.arxiv_id === pid) ||
+          (graphSearchResults || []).find(p => p.id === pid || p.arxiv_id === pid) ||
+          (activeWorkspace?.papers || []).find(p => p.id === pid || p.arxiv_id === pid) ||
+          (comparisonPapers || []).find(p => p.id === pid || p.arxiv_id === pid);
+        if (found) {
+          return {
+            id: found.id || pid,
+            title: found.title,
+            abstract: found.abstract || '',
+            arxiv_id: found.arxiv_id,
+            doi: found.doi,
+            year: found.year,
+            authors: (found.authors || []).map(a => typeof a === 'string' ? a : a.name || String(a)),
+            topics: found.topics || [],
+          };
+        }
+        return { id: pid, title: pid };
+      });
+
+      if (wsId || stagedPaperIds.length > 0) {
+        try {
+          const cacheCheckRes = await fetch('/api/v1/graph/build-workspace-graph', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              workspace_id: wsId || null,
+              topic: activeTopic || 'General Literature',
+              paper_ids: stagedPaperIds,
+              papers: fullPapers,
+              force_refresh: false,
+              cached_only: true,
+            }),
+            signal: controller.signal,
+          });
+
+          if (cacheCheckRes.ok) {
+            const cacheData = await cacheCheckRes.json();
+            if (cacheData.cached && cacheData.nodes && cacheData.nodes.length > 0) {
+              // Pre-built graph exists in SQLite! Render it immediately!
+              setRawNodes(cacheData.nodes);
+              setRawEdges(cacheData.edges || []);
+              setSynthesisInfo({
+                cached: true,
+                llm_called: false,
+                engine: cacheData.engine || synthesisProvider,
+                model: cacheData.model || '',
+                cross_paper_relations_count: cacheData.cross_paper_relations_count || 0,
+                gaps_count: cacheData.gaps_count || 0,
+                synthesis_summary: cacheData.synthesis_summary || '',
+                papers_count: cacheData.papers_count || 0,
+              });
+
+              if (cacheData.paper_ids && cacheData.paper_ids.length > 0 && (!addedToGraphPaperIds || addedToGraphPaperIds.length === 0)) {
+                setAddedToGraphPaperIds(cacheData.paper_ids);
+              }
+
+              // Check SQLite novelty cache status in background
+              try {
+                const novStatusUrl = `/api/v1/graph/novelty-cache-status?workspace_id=${encodeURIComponent(wsId)}${
+                  (cacheData.paper_ids || stagedPaperIds).map(id => `&paper_ids=${encodeURIComponent(id)}`).join('')
+                }`;
+                const novStatusRes = await fetch(novStatusUrl, { signal: controller.signal });
+                if (novStatusRes.ok) {
+                  const novStatus = await novStatusRes.json();
+                  if (novStatus.cached && novStatus.novelties_count > 0) {
+                    const novGenRes = await fetch('/api/v1/graph/generate-novelty', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        workspace_id: wsId,
+                        topic: activeTopic,
+                        paper_ids: cacheData.paper_ids || stagedPaperIds,
+                        force_refresh: false,
+                      }),
+                      signal: controller.signal,
+                    });
+                    if (novGenRes.ok) {
+                      const novGenData = await novGenRes.json();
+                      setNoveltyList(novGenData.novelties || []);
+                    }
+                  }
+                }
+              } catch (nErr) {
+                console.debug('Novelty cache status notice:', nErr);
+              }
+
+              // Fetch summary
+              try {
+                const sumRes = await fetch('/api/v1/graph/summary', { signal: controller.signal });
+                if (sumRes.ok) {
+                  setSummaryData(await sumRes.json());
+                }
+              } catch {}
+
+              return;
+            }
+          }
+        } catch (cErr) {
+          console.debug('SQLite cache pre-render notice:', cErr);
+        }
+      }
+
+      // If papers are staged but not yet synthesized in SQLite (first time),
+      // DO NOT auto-generate: show staged papers prompt so researcher clicks Build AI Graph
+      if (stagedPaperIds.length > 0) {
+        setRawNodes([]);
+        setRawEdges([]);
+        setSynthesisInfo(null);
+        return;
+      }
+
+      // 2. Unscoped / topic fallback when no papers are staged
       const params = new URLSearchParams();
       if (activeTopic) params.set('topic', activeTopic);
       if (wsId) params.set('workspace_id', wsId);
@@ -501,7 +623,6 @@ export default function KnowledgeGraphView() {
 
       const backendPaperNodes = loadedNodes.filter(n => (n.node_type || '').toLowerCase() === 'paper');
 
-      // Only show papers explicitly added to graph or workspace (no synthetic regex fallback)
       if (backendPaperNodes.length === 0) {
         loadedNodes = [];
         loadedEdges = [];
@@ -510,66 +631,11 @@ export default function KnowledgeGraphView() {
       setRawNodes(loadedNodes);
       setRawEdges(loadedEdges);
 
-      // Check SQLite synthesis cache status for workspace
-      if (wsId) {
-        try {
-          const cacheUrl = `/api/v1/graph/workspace-cache-status?workspace_id=${encodeURIComponent(wsId)}${
-            (addedToGraphPaperIds || []).map(id => `&paper_ids=${encodeURIComponent(id)}`).join('')
-          }`;
-          const cacheRes = await fetch(cacheUrl, { signal: controller.signal });
-          if (cacheRes.ok) {
-            const cacheStatus = await cacheRes.json();
-            if (cacheStatus.cached) {
-              setSynthesisInfo({
-                cached: true,
-                llm_called: false,
-                cross_paper_relations_count: cacheStatus.cross_paper_relations_count || 0,
-                gaps_count: cacheStatus.gaps_count || 0,
-                synthesis_summary: cacheStatus.synthesis_summary || '',
-              });
-            }
-          }
-        } catch (cErr) {
-          console.debug('Cache status notice:', cErr);
-        }
-
-        // Check SQLite novelty cache status for workspace
-        try {
-          const novStatusUrl = `/api/v1/graph/novelty-cache-status?workspace_id=${encodeURIComponent(wsId)}${
-            (addedToGraphPaperIds || []).map(id => `&paper_ids=${encodeURIComponent(id)}`).join('')
-          }`;
-          const novStatusRes = await fetch(novStatusUrl, { signal: controller.signal });
-          if (novStatusRes.ok) {
-            const novStatus = await novStatusRes.json();
-            if (novStatus.cached && novStatus.novelties_count > 0) {
-              const novGenRes = await fetch('/api/v1/graph/generate-novelty', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  workspace_id: wsId,
-                  topic: activeTopic,
-                  paper_ids: addedToGraphPaperIds,
-                  force_refresh: false,
-                }),
-                signal: controller.signal,
-              });
-              if (novGenRes.ok) {
-                const novGenData = await novGenRes.json();
-                setNoveltyList(novGenData.novelties || []);
-              }
-            }
-          }
-        } catch (nErr) {
-          console.debug('Novelty cache status notice:', nErr);
-        }
-      }
-
-      // 2. Fetch summary & coverage
+      // Check summary
       try {
         const sumRes = await fetch('/api/v1/graph/summary', { signal: controller.signal });
         if (sumRes.ok) {
-          const summary = await sumRes.json();
-          setSummaryData(summary);
+          setSummaryData(await sumRes.json());
         }
       } catch (sumErr) {
         console.warn('Failed to load summary:', sumErr);
@@ -723,11 +789,21 @@ export default function KnowledgeGraphView() {
     }
   };
 
+  // Seed addedToGraphPaperIds from activeWorkspace.papers if staged list is empty
+  useEffect(() => {
+    if ((!addedToGraphPaperIds || addedToGraphPaperIds.length === 0) && activeWorkspace?.papers && activeWorkspace.papers.length > 0) {
+      const pids = activeWorkspace.papers.map(p => p.id || p.arxiv_id).filter(Boolean);
+      if (pids.length > 0) {
+        setAddedToGraphPaperIds(pids);
+      }
+    }
+  }, [activeWorkspace?.id, activeWorkspace?.papers?.length]);
+
   useEffect(() => {
     setSelectedEntity(null);
     setNeighborhood(null);
     fetchGraphData();
-  }, [searchQuery, activeWorkspace?.id, activeWorkspace?.title, addedToGraphPaperIds?.length]);
+  }, [searchQuery, activeWorkspace?.id, activeWorkspace?.title, addedToGraphPaperIds?.length, activeWorkspace?.papers?.length]);
 
   const handleSearchPapers = async (customQuery) => {
     const term = (customQuery !== undefined ? customQuery : graphSearchInput).trim();
