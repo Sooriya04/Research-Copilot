@@ -2106,3 +2106,27 @@ bundle compilation (`npm run build`).
   * Allows users to review, star, submit feedback, or file issues directly on GitHub with the official SVG icon.
   * Verified production build compilation (`npm run build`) in `8.08s`.
 
+<br />
+
+## Redesign Novelty Studio UI and Strictly Scope Grounding Literature to Workspace Graph Papers
+
+* **Strict Grounding Literature Scoping (`src/api/routes_novelty.py`, `frontend/src/views/NoveltyStudioView.jsx`)**:
+  * Updated `GET /api/v1/novelty/workspace-papers` to accept `workspace_id: Optional[str] = None` and strictly isolate paper nodes connected to the workspace anchor node in the NetworkX DiGraph store (`ws-{workspace_id}`).
+  * Connected `addedToGraphPaperIds` from `AppContext` in `NoveltyStudioView.jsx` to filter `availablePapers` strictly to papers explicitly added to the knowledge graph in the active workspace.
+  * Resolved paper metadata dynamically against `searchResults` and `activeWorkspace.papers`, ensuring global test fixtures and unadded papers (`Paper A`, `Paper B`, `Paper Exclusive to Alpha`) are never displayed.
+  * Added clean empty-state messaging when zero papers are added to graph with direct navigation shortcuts to Literature Search (`/`) and Graph Canvas (`/knowledge-graph`).
+
+* **Novelty Studio Control Console Redesign (`frontend/src/views/NoveltyStudioView.jsx`)**:
+  * Removed the 6 massive, screen-hogging provider cards and replaced them with a sleek, compact unified control console.
+  * Added compact pill selectors for LLM engines: Google Gemini, Groq LPU, Local Ollama, OpenRouter, NVIDIA NIM, and DeepSeek, showing live status dots (`SQLite`, `.env`, `Active`, `Online`).
+  * Added a dedicated Tournament Mode toggle button (`All 6 Engines`) and clean quick configuration trigger for API keys and models.
+  * Consolidated Topic input, SQLite cache bypass toggle, and staged paper counts into a unified control strip.
+
+* **Developer Debug Clutter Removal (`frontend/src/views/NoveltyStudioView.jsx`)**:
+  * Completely eliminated the noisy debug status box (`API STATUS: 200 OK (Backend Active)` and `Endpoint: POST /api/v1/novelty/synthesize`).
+  * Replaced debug text with a subtle telemetry chip in the synthesized proposals header showing execution latency and cache hit status.
+
+* **Verification & Test Suite**:
+  * Verified all 112 pytest tests pass 100% green in 210.15s.
+  * Verified Vite frontend production build (`npm run build`) compiles cleanly in 7.41s with zero errors.
+

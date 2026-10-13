@@ -121,6 +121,15 @@ All long-term research state, topological nodes, cached proposals, and user prov
 | **Notebook Kernel Runner** | Sandboxed Jupyter kernel session, cell execution, stdout/stderr capture | **Not Implemented** | ⏳ Next Phase |
 | **Cloud Compute Dispatch** | Remote Modal / RunPod / SSH execution | **Not Implemented** | ⏳ Next Phase |
 
+---
+
+## 8. Novelty Studio UI Clean-Up & Strict Paper Scoping
+
+- **Strict Knowledge Graph Scoping**: `GET /api/v1/novelty/workspace-papers` now filters nodes based on `workspace_id`. Frontend `NoveltyStudioView.jsx` binds directly to `addedToGraphPaperIds`, ensuring only papers explicitly added to the active workspace graph are displayed or used as grounding literature. Test mocks and un-added papers (`Paper A`, `Paper B`, etc.) are completely excluded.
+- **Unified Control Console**: Replaced the 6 oversized multi-badge engine cards with a sleek, compact toolbar: compact pill selectors for Google Gemini, Groq LPU, Local Ollama, OpenRouter, NVIDIA NIM, and DeepSeek, a Tournament Mode toggle, a clean Topic input, and a collapsible Keys Drawer.
+- **Developer Debug Removal**: Completely removed `API STATUS: 200 OK` and `Endpoint: POST /api/v1/novelty/synthesize` banners, replacing them with subtle latency and cache badges on proposal cards.
+- **Verification**: All 112 pytest unit and integration tests passing (100% green). Frontend production bundle builds cleanly.
+
 
 
 

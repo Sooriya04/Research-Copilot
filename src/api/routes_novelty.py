@@ -338,7 +338,22 @@ async def get_workspace_papers(workspace_id: Optional[str] = None):
     """Get active papers loaded in the knowledge graph for novelty synthesis."""
     await _novelty_engine.store._ensure_initialized()
     paper_nodes = []
+
+    # If workspace_id is provided, isolate papers explicitly linked to this workspace
+    scoped_paper_ids = None
+    if workspace_id and workspace_id.strip():
+        ws_clean = workspace_id.strip()
+        ws_id = ws_clean if ws_clean.startswith("ws-") else f"ws-{ws_clean}"
+        scoped_paper_ids = set()
+        if ws_id in _novelty_engine.store.graph:
+            for succ in _novelty_engine.store.graph.successors(ws_id):
+                scoped_paper_ids.add(succ)
+            for pred in _novelty_engine.store.graph.predecessors(ws_id):
+                scoped_paper_ids.add(pred)
+
     for nid in _novelty_engine.store.graph.nodes:
+        if scoped_paper_ids is not None and nid not in scoped_paper_ids:
+            continue
         n = await _novelty_engine.store.get_node(nid)
         if n and getattr(n, "node_type", None) == NodeType.PAPER:
             p_dict = n.model_dump() if hasattr(n, "model_dump") else getattr(n, "__dict__", {})

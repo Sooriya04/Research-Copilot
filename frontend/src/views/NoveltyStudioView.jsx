@@ -43,13 +43,22 @@ import MathRenderer from '../components/common/MathRenderer';
 
 export default function NoveltyStudioView() {
   const navigate = useNavigate();
-  const { searchQuery, activeWorkspace, theme } = useApp();
+  const { searchQuery, activeWorkspace, theme, addedToGraphPaperIds, searchResults } = useApp();
 
   // Topic and Papers state
-  const [topic, setTopic] = useState(() => searchQuery || activeWorkspace?.title || 'Time Series Forecasting');
+  const [topic, setTopic] = useState(() => activeWorkspace?.title || searchQuery || 'Time Series Forecasting');
   const [availablePapers, setAvailablePapers] = useState([]);
   const [selectedPaperIds, setSelectedPaperIds] = useState([]);
   const [loadingPapers, setLoadingPapers] = useState(false);
+
+  // Sync topic with active workspace
+  useEffect(() => {
+    if (activeWorkspace?.title) {
+      setTopic(activeWorkspace.title);
+    } else if (searchQuery) {
+      setTopic(searchQuery);
+    }
+  }, [activeWorkspace?.id, activeWorkspace?.title]);
 
   // Providers & Models state
   const [providersStatus, setProvidersStatus] = useState(null);
@@ -191,7 +200,7 @@ export default function NoveltyStudioView() {
     fetchProvidersStatus();
     fetchWorkspacePapers();
     fetchSavedProposals();
-  }, [activeWorkspace?.id]);
+  }, [activeWorkspace?.id, addedToGraphPaperIds?.length]);
 
   const addTelemetryLog = () => {};
 
@@ -271,14 +280,60 @@ export default function NoveltyStudioView() {
   const fetchWorkspacePapers = async () => {
     setLoadingPapers(true);
     try {
-      const res = await fetch('/api/v1/novelty/workspace-papers');
+      const wsParam = activeWorkspace?.id ? `?workspace_id=${encodeURIComponent(activeWorkspace.id)}` : '';
+      const res = await fetch(`/api/v1/novelty/workspace-papers${wsParam}`);
+      let apiPapers = [];
       if (res.ok) {
         const data = await res.json();
-        const papers = data.papers || [];
-        setAvailablePapers(papers);
-        setSelectedPaperIds(papers.map((p) => p.id));
-        addTelemetryLog(`Loaded ${papers.length} active literature papers from knowledge graph.`);
+        apiPapers = data.papers || [];
       }
+
+      const graphIds = new Set(addedToGraphPaperIds || []);
+      const wsPapers = activeWorkspace?.papers || [];
+
+      let scoped = [];
+      if (graphIds.size > 0) {
+        // Strict scope: ONLY papers present in addedToGraphPaperIds
+        graphIds.forEach((gid) => {
+          const matchedApi = apiPapers.find((p) => p.id === gid);
+          if (matchedApi) {
+            scoped.push(matchedApi);
+            return;
+          }
+          const matchedWs = wsPapers.find((p) => p.id === gid || p.arxiv_id === gid);
+          if (matchedWs) {
+            scoped.push({
+              id: gid,
+              title: matchedWs.title || gid,
+              authors: matchedWs.authors || [],
+              year: matchedWs.year,
+            });
+            return;
+          }
+          const matchedSearch = (searchResults || []).find((p) => p.id === gid || p.arxiv_id === gid);
+          if (matchedSearch) {
+            scoped.push({
+              id: gid,
+              title: matchedSearch.title || gid,
+              authors: matchedSearch.authors || [],
+              year: matchedSearch.year,
+            });
+            return;
+          }
+          scoped.push({ id: gid, title: gid });
+        });
+      } else if (wsPapers.length > 0) {
+        scoped = wsPapers.map((p) => ({
+          id: p.id || p.arxiv_id,
+          title: p.title || p.id,
+          authors: p.authors || [],
+          year: p.year,
+        }));
+      }
+
+      setAvailablePapers(scoped);
+      setSelectedPaperIds(scoped.map((p) => p.id));
+      addTelemetryLog(`Loaded ${scoped.length} active literature papers scoped to workspace graph.`);
     } catch (err) {
       console.error('Failed fetching workspace papers:', err);
     } finally {
@@ -487,7 +542,7 @@ export default function NoveltyStudioView() {
     const activeTopic = (topic || searchQuery || activeWorkspace?.title || 'Literature Synthesis').trim();
     const activePids = selectedPaperIds.length > 0 ? selectedPaperIds : availablePapers.map((p) => p.id);
 
-    const provStr = selectedProviders.length === 1 ? selectedProviders[0] : (selectedProviders.length === 5 ? 'all' : selectedProviders.join(','));
+    const provStr = selectedProviders.length === 1 ? selectedProviders[0] : (selectedProviders.length === 6 ? 'all' : selectedProviders.join(','));
     addTelemetryLog(
       `Firing synthesis -> POST /api/v1/novelty/synthesize (engines=[${selectedProviders.join(', ')}], papers=${activePids.length})...`
     );
@@ -736,8 +791,8 @@ ${nov.mathematical_formulation || 'N/A'}
             <span>
               {synthesizing
                 ? 'Synthesizing...'
-                : selectedProviders.length === 5
-                ? 'Fire Tournament (All 5 Engines)'
+                : selectedProviders.length === 6
+                ? 'Fire Tournament (All 6 Engines)'
                 : selectedProviders.length === 1
                 ? `Fire Synthesis (${selectedProviders[0].toUpperCase()})`
                 : `Fire Synthesis (${selectedProviders.length} Engines: ${selectedProviders.map((p) => p.toUpperCase()).join(', ')})`}
@@ -798,508 +853,269 @@ ${nov.mathematical_formulation || 'N/A'}
         </div>
       )}
 
-      {/* 2. Multi-Engine Selector Toolbar & Checkbox Cards */}
-      <div style={{ marginBottom: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 10 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-secondary)' }}>
-              Target LLM Engines:
+      {/* 2. Unified Novelty Studio Control Console */}
+      <div
+        className="card"
+        style={{
+          padding: '16px 20px',
+          marginBottom: 16,
+          background: 'var(--bg-card)',
+          border: '1px solid var(--border-subtle)',
+          borderRadius: 'var(--radius-md, 8px)',
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.03)',
+        }}
+      >
+        {/* Row A: Target LLM Engine & Tournament Mode */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 11.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-secondary)' }}>
+              LLM Engine:
             </span>
+
+            {/* Compact Engine Selector Pills */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              {[
+                { id: 'gemini', label: 'Google Gemini', icon: Sparkles, color: '#3b82f6', status: providersStatus?.gemini?.stored_in_db ? 'SQLite' : (providersStatus?.gemini?.has_key ? '.env' : 'Active') },
+                { id: 'groq', label: 'Groq LPU', icon: Zap, color: '#f59e0b', status: providersStatus?.groq?.stored_in_db ? 'SQLite' : (providersStatus?.groq?.has_key ? '.env' : 'Key Req') },
+                { id: 'ollama', label: 'Local Ollama', icon: Cpu, color: '#10b981', status: providersStatus?.ollama?.available ? 'Online' : 'Local' },
+                { id: 'openrouter', label: 'OpenRouter', icon: Server, color: '#8b5cf6', status: providersStatus?.openrouter?.stored_in_db ? 'SQLite' : (providersStatus?.openrouter?.has_key ? '.env' : 'Key Req') },
+                { id: 'nvidia', label: 'NVIDIA NIM', icon: Layers, color: '#84cc16', status: providersStatus?.nvidia?.stored_in_db ? 'SQLite' : (providersStatus?.nvidia?.has_key ? '.env' : 'Key Req') },
+                { id: 'deepseek', label: 'DeepSeek', icon: BrainCircuit, color: '#0284c7', status: providersStatus?.deepseek?.stored_in_db ? 'SQLite' : (providersStatus?.deepseek?.has_key ? '.env' : 'Key Req') },
+              ].map((prov) => {
+                const isSelected = selectedProviders.includes(prov.id);
+                const IconComponent = prov.icon;
+                return (
+                  <button
+                    key={prov.id}
+                    type="button"
+                    onClick={() => toggleProvider(prov.id)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '4px 10px',
+                      borderRadius: 6,
+                      fontSize: 12,
+                      fontWeight: isSelected ? 600 : 500,
+                      cursor: 'pointer',
+                      border: isSelected ? `1.5px solid ${prov.color}` : '1px solid var(--border-subtle)',
+                      background: isSelected ? (isDark ? 'rgba(59, 130, 246, 0.15)' : '#eff6ff') : 'var(--bg-secondary)',
+                      color: isSelected ? 'var(--text-primary)' : 'var(--text-muted)',
+                      transition: 'all 0.15s ease',
+                    }}
+                    title={`Click to toggle ${prov.label}`}
+                  >
+                    <IconComponent size={13} style={{ color: prov.color }} />
+                    <span>{prov.label}</span>
+                    <span
+                      style={{
+                        fontSize: 9.5,
+                        padding: '1px 5px',
+                        borderRadius: 3,
+                        background: isSelected ? (isDark ? 'rgba(0,0,0,0.3)' : '#ffffff') : 'transparent',
+                        color: isSelected ? prov.color : 'var(--text-muted)',
+                        fontWeight: 600,
+                      }}
+                    >
+                      {prov.status}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Tournament & Key Controls */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              type="button"
+              onClick={selectedProviders.length === 6 ? () => setSelectedProviders(['gemini']) : selectAllProviders}
+              className="btn btn-secondary btn-sm"
+              style={{
+                fontSize: 11.5,
+                padding: '4px 10px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                background: selectedProviders.length === 6 ? (isDark ? 'rgba(245, 158, 11, 0.15)' : '#fffbeb') : 'var(--bg-secondary)',
+                border: selectedProviders.length === 6 ? '1.5px solid #f59e0b' : '1px solid var(--border-subtle)',
+                color: selectedProviders.length === 6 ? '#f59e0b' : 'var(--text-secondary)',
+                fontWeight: 600,
+              }}
+              title="Toggle multi-engine tournament across all 6 LLMs"
+            >
+              <Zap size={12} />
+              <span>{selectedProviders.length === 6 ? 'Tournament Mode Active (6)' : 'Tournament Mode (All 6)'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowConfigDrawer((prev) => !prev)}
+              className="btn btn-secondary btn-sm"
+              style={{ fontSize: 11.5, padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 5 }}
+              title="Configure API keys and models"
+            >
+              <Key size={12} />
+              <span>Keys & Models</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Row B: Topic & Bypass Cache */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10, paddingTop: 10, borderTop: '1px solid var(--border-subtle)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 280 }}>
+            <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Topic:
+            </span>
+            <input
+              type="text"
+              className="input"
+              value={topic}
+              onChange={(e) => setTopic(e.target.value)}
+              placeholder="e.g. LLM Hallucination Detection"
+              style={{ fontSize: 13, fontWeight: 600, flex: 1, padding: '5px 10px' }}
+            />
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 12 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', color: 'var(--text-secondary)', userSelect: 'none' }}>
+              <input
+                type="checkbox"
+                checked={forceRefresh}
+                onChange={(e) => setForceRefresh(e.target.checked)}
+                style={{ accentColor: '#10b981' }}
+              />
+              <span>Bypass SQLite Cache</span>
+            </label>
+
             <span
               className="badge"
               style={{
-                background: isDark ? '#064e3b' : '#ecfdf5',
-                color: '#10b981',
-                border: '1px solid #10b981',
+                background: isDark ? '#1e293b' : '#f1f5f9',
+                color: 'var(--text-secondary)',
+                border: '1px solid var(--border-subtle)',
                 fontSize: 11,
-                fontWeight: 700,
+                fontWeight: 600,
               }}
             >
-              {selectedProviders.length} of 5 Selected
+              {selectedPaperIds.length} of {availablePapers.length} Grounding Papers Staged
             </span>
           </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Quick Select:</span>
-            <button
-              type="button"
-              onClick={selectAllProviders}
-              className="btn btn-secondary btn-sm"
-              style={{ fontSize: 11, padding: '3px 9px' }}
-              title="Select all 5 LLM engines for tournament synthesis"
-            >
-              All 5 Engines
-            </button>
-            <button
-              type="button"
-              onClick={selectCloudProviders}
-              className="btn btn-secondary btn-sm"
-              style={{ fontSize: 11, padding: '3px 9px' }}
-              title="Select Gemini, Groq, OpenRouter, and NVIDIA"
-            >
-              Cloud (4)
-            </button>
-            <button
-              type="button"
-              onClick={() => setSelectedProviders(['ollama'])}
-              className="btn btn-secondary btn-sm"
-              style={{ fontSize: 11, padding: '3px 9px' }}
-              title="Select Local Ollama daemon only"
-            >
-              Local Ollama
-            </button>
-            <button
-              type="button"
-              onClick={() => setSelectedProviders(['gemini'])}
-              className="btn btn-secondary btn-sm"
-              style={{ fontSize: 11, padding: '3px 9px' }}
-              title="Reset selection to Gemini"
-            >
-              Gemini Only
-            </button>
-          </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
-          {/* 1. Google Gemini Card */}
-          {(() => {
-            const isSelected = selectedProviders.includes('gemini');
-            return (
-              <div
-                onClick={() => toggleProvider('gemini')}
-                className="card"
-                style={{
-                  padding: 14,
-                  cursor: 'pointer',
-                  border: isSelected ? '2px solid #3b82f6' : '1px solid var(--border-subtle)',
-                  background: isSelected ? (isDark ? '#1e293b' : '#eff6ff') : 'var(--bg-card)',
-                  boxShadow: isSelected ? '0 0 0 1px rgba(59, 130, 246, 0.2)' : 'none',
-                  transition: 'all 0.15s ease',
-                  position: 'relative',
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div
-                      style={{
-                        width: 18,
-                        height: 18,
-                        borderRadius: 4,
-                        border: isSelected ? 'none' : '1.5px solid var(--border-subtle)',
-                        background: isSelected ? '#3b82f6' : 'transparent',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        flexShrink: 0,
-                        transition: 'background 0.15s',
-                      }}
-                    >
-                      {isSelected && <Check size={12} style={{ color: '#ffffff', strokeWidth: 3 }} />}
-                    </div>
-                    <Sparkles size={16} style={{ color: '#3b82f6' }} />
-                    <strong style={{ fontSize: 13, color: 'var(--text-primary)' }}>Google Gemini</strong>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <span className="badge badge-blue" style={{ fontSize: 9.5 }}>Cloud Fast</span>
-                    <button
-                      type="button"
-                      onClick={(e) => selectOnlyProvider('gemini', e)}
-                      style={{
-                        fontSize: 9.5,
-                        padding: '1px 5px',
-                        borderRadius: 3,
-                        border: '1px solid var(--border-subtle)',
-                        background: 'var(--bg-subtle)',
-                        color: 'var(--text-muted)',
-                        cursor: 'pointer',
-                      }}
-                      title="Select only Google Gemini"
-                    >
-                      Only
-                    </button>
-                  </div>
-                </div>
-                <p style={{ fontSize: 11, color: 'var(--text-secondary)', margin: '0 0 8px', lineHeight: 1.35 }}>
-                  Flash-Lite structured JSON synthesis with strict schema validation.
-                </p>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 10, color: 'var(--text-muted)' }}>
-                  <span>Model: {providersStatus?.gemini?.default_model || 'gemini-3.5-flash-lite'}</span>
-                  <span style={{ color: '#10b981', fontWeight: 600 }}>
-                    {providersStatus?.gemini?.stored_in_db ? '● SQLite Active' : (providersStatus?.gemini?.has_key ? '● .env Active' : '○ Needs Key')}
-                  </span>
-                </div>
-              </div>
-            );
-          })()}
+        {/* Row C: Grounding Literature (Strictly Scoped to Workspace Graph Papers) */}
+        <div style={{ paddingTop: 10, borderTop: '1px solid var(--border-subtle)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 11.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-secondary)' }}>
+                Grounding Literature:
+              </span>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                (Only papers added to this workspace graph)
+              </span>
+            </div>
 
-          {/* 2. Groq LPU Card */}
-          {(() => {
-            const isSelected = selectedProviders.includes('groq');
-            return (
-              <div
-                onClick={() => toggleProvider('groq')}
-                className="card"
-                style={{
-                  padding: 14,
-                  cursor: 'pointer',
-                  border: isSelected ? '2px solid #f59e0b' : '1px solid var(--border-subtle)',
-                  background: isSelected ? (isDark ? '#292211' : '#fffbeb') : 'var(--bg-card)',
-                  boxShadow: isSelected ? '0 0 0 1px rgba(245, 158, 11, 0.2)' : 'none',
-                  transition: 'all 0.15s ease',
-                  position: 'relative',
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div
-                      style={{
-                        width: 18,
-                        height: 18,
-                        borderRadius: 4,
-                        border: isSelected ? 'none' : '1.5px solid var(--border-subtle)',
-                        background: isSelected ? '#f59e0b' : 'transparent',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        flexShrink: 0,
-                        transition: 'background 0.15s',
-                      }}
-                    >
-                      {isSelected && <Check size={12} style={{ color: '#ffffff', strokeWidth: 3 }} />}
-                    </div>
-                    <Zap size={16} style={{ color: '#f59e0b' }} />
-                    <strong style={{ fontSize: 13, color: 'var(--text-primary)' }}>Groq LPU</strong>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <span className="badge badge-amber" style={{ fontSize: 9.5 }}>Ultra Speed</span>
-                    <button
-                      type="button"
-                      onClick={(e) => selectOnlyProvider('groq', e)}
-                      style={{
-                        fontSize: 9.5,
-                        padding: '1px 5px',
-                        borderRadius: 3,
-                        border: '1px solid var(--border-subtle)',
-                        background: 'var(--bg-subtle)',
-                        color: 'var(--text-muted)',
-                        cursor: 'pointer',
-                      }}
-                      title="Select only Groq LPU"
-                    >
-                      Only
-                    </button>
-                  </div>
-                </div>
-                <p style={{ fontSize: 11, color: 'var(--text-secondary)', margin: '0 0 8px', lineHeight: 1.35 }}>
-                  Lightning-fast token generation on Qwen-3.8, GPT-OSS, and Llama.
-                </p>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 10, color: 'var(--text-muted)' }}>
-                  <span>Model: {providersStatus?.groq?.default_model || 'qwen/qwen3.8-27b'}</span>
-                  <span style={{ color: providersStatus?.groq?.has_key ? '#10b981' : '#f59e0b', fontWeight: 600 }}>
-                    {providersStatus?.groq?.stored_in_db ? '● SQLite Active' : (providersStatus?.groq?.has_key ? '● .env Active' : '○ Needs Key')}
-                  </span>
-                </div>
+            {availablePapers.length > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <button
+                  type="button"
+                  onClick={() => setSelectedPaperIds(availablePapers.map((p) => p.id))}
+                  style={{ fontSize: 10.5, padding: '2px 8px', borderRadius: 4, border: '1px solid var(--border-subtle)', background: 'var(--bg-subtle)', color: 'var(--text-secondary)', cursor: 'pointer' }}
+                >
+                  Select All
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedPaperIds([])}
+                  style={{ fontSize: 10.5, padding: '2px 8px', borderRadius: 4, border: '1px solid var(--border-subtle)', background: 'var(--bg-subtle)', color: 'var(--text-secondary)', cursor: 'pointer' }}
+                >
+                  Clear Selection
+                </button>
               </div>
-            );
-          })()}
+            )}
+          </div>
 
-          {/* 3. Local Ollama Card */}
-          {(() => {
-            const isSelected = selectedProviders.includes('ollama');
-            return (
-              <div
-                onClick={() => toggleProvider('ollama')}
-                className="card"
-                style={{
-                  padding: 14,
-                  cursor: 'pointer',
-                  border: isSelected ? '2px solid #10b981' : '1px solid var(--border-subtle)',
-                  background: isSelected ? (isDark ? '#064e3b22' : '#ecfdf5') : 'var(--bg-card)',
-                  boxShadow: isSelected ? '0 0 0 1px rgba(16, 185, 129, 0.2)' : 'none',
-                  transition: 'all 0.15s ease',
-                  position: 'relative',
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div
-                      style={{
-                        width: 18,
-                        height: 18,
-                        borderRadius: 4,
-                        border: isSelected ? 'none' : '1.5px solid var(--border-subtle)',
-                        background: isSelected ? '#10b981' : 'transparent',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        flexShrink: 0,
-                        transition: 'background 0.15s',
-                      }}
-                    >
-                      {isSelected && <Check size={12} style={{ color: '#ffffff', strokeWidth: 3 }} />}
-                    </div>
-                    <Server size={16} style={{ color: '#10b981' }} />
-                    <strong style={{ fontSize: 13, color: 'var(--text-primary)' }}>Local Ollama</strong>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <span className="badge badge-emerald" style={{ fontSize: 9.5 }}>Local & Private</span>
-                    <button
-                      type="button"
-                      onClick={(e) => selectOnlyProvider('ollama', e)}
-                      style={{
-                        fontSize: 9.5,
-                        padding: '1px 5px',
-                        borderRadius: 3,
-                        border: '1px solid var(--border-subtle)',
-                        background: 'var(--bg-subtle)',
-                        color: 'var(--text-muted)',
-                        cursor: 'pointer',
-                      }}
-                      title="Select only Local Ollama"
-                    >
-                      Only
-                    </button>
-                  </div>
-                </div>
-                <p style={{ fontSize: 11, color: 'var(--text-secondary)', margin: '0 0 8px', lineHeight: 1.35 }}>
-                  Zero-cloud, air-gapped local model inference on localhost:11434.
-                </p>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 10, color: 'var(--text-muted)' }}>
-                  <span>Model: {providersStatus?.ollama?.default_model || 'phi4-mini'}</span>
-                  <span style={{ color: providersStatus?.ollama?.online ? '#10b981' : 'var(--text-muted)' }}>
-                    {providersStatus?.ollama?.online ? `● Online (${providersStatus?.ollama?.latency_ms ? `${Math.round(providersStatus.ollama.latency_ms)}ms` : 'ready'})` : '○ Offline'}
-                  </span>
-                </div>
+          {availablePapers.length === 0 ? (
+            <div
+              style={{
+                padding: '12px 16px',
+                borderRadius: 6,
+                background: isDark ? 'rgba(30, 41, 59, 0.4)' : '#f8fafc',
+                border: '1px dashed var(--border-subtle)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: 10,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-muted)', fontSize: 12 }}>
+                <AlertCircle size={15} style={{ color: '#f59e0b', flexShrink: 0 }} />
+                <span>No papers added to the knowledge graph in this workspace yet. Add papers from Literature Search or Graph Canvas to ground novelty synthesis.</span>
               </div>
-            );
-          })()}
-
-          {/* 4. OpenRouter Card */}
-          {(() => {
-            const isSelected = selectedProviders.includes('openrouter');
-            return (
-              <div
-                onClick={() => toggleProvider('openrouter')}
-                className="card"
-                style={{
-                  padding: 14,
-                  cursor: 'pointer',
-                  border: isSelected ? '2px solid #8b5cf6' : '1px solid var(--border-subtle)',
-                  background: isSelected ? (isDark ? '#2e106522' : '#f5f3ff') : 'var(--bg-card)',
-                  boxShadow: isSelected ? '0 0 0 1px rgba(139, 92, 246, 0.2)' : 'none',
-                  transition: 'all 0.15s ease',
-                  position: 'relative',
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div
-                      style={{
-                        width: 18,
-                        height: 18,
-                        borderRadius: 4,
-                        border: isSelected ? 'none' : '1.5px solid var(--border-subtle)',
-                        background: isSelected ? '#8b5cf6' : 'transparent',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        flexShrink: 0,
-                        transition: 'background 0.15s',
-                      }}
-                    >
-                      {isSelected && <Check size={12} style={{ color: '#ffffff', strokeWidth: 3 }} />}
-                    </div>
-                    <Layers size={16} style={{ color: '#8b5cf6' }} />
-                    <strong style={{ fontSize: 13, color: 'var(--text-primary)' }}>OpenRouter</strong>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <span className="badge badge-purple" style={{ fontSize: 9.5 }}>Universal Frontier</span>
-                    <button
-                      type="button"
-                      onClick={(e) => selectOnlyProvider('openrouter', e)}
-                      style={{
-                        fontSize: 9.5,
-                        padding: '1px 5px',
-                        borderRadius: 3,
-                        border: '1px solid var(--border-subtle)',
-                        background: 'var(--bg-subtle)',
-                        color: 'var(--text-muted)',
-                        cursor: 'pointer',
-                      }}
-                      title="Select only OpenRouter"
-                    >
-                      Only
-                    </button>
-                  </div>
-                </div>
-                <p style={{ fontSize: 11, color: 'var(--text-secondary)', margin: '0 0 8px', lineHeight: 1.35 }}>
-                  Access Claude 3.5, DeepSeek-R1, Llama 3.3, and Gemma with unified routing.
-                </p>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 10, color: 'var(--text-muted)' }}>
-                  <span>Model: {providersStatus?.openrouter?.default_model || 'anthropic/claude-3.5-sonnet'}</span>
-                  <span style={{ color: providersStatus?.openrouter?.has_key ? '#10b981' : '#8b5cf6', fontWeight: 600 }}>
-                    {providersStatus?.openrouter?.stored_in_db ? '● SQLite Active' : (providersStatus?.openrouter?.has_key ? '● .env Active' : '○ Needs Key')}
-                  </span>
-                </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => navigate('/')}
+                  className="btn btn-secondary btn-sm"
+                  style={{ fontSize: 11, padding: '3px 9px' }}
+                >
+                  Search Literature
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigate('/knowledge-graph')}
+                  className="btn btn-secondary btn-sm"
+                  style={{ fontSize: 11, padding: '3px 9px' }}
+                >
+                  Graph Canvas
+                </button>
               </div>
-            );
-          })()}
-
-          {/* 5. NVIDIA NIM Card */}
-          {(() => {
-            const isSelected = selectedProviders.includes('nvidia');
-            return (
-              <div
-                onClick={() => toggleProvider('nvidia')}
-                className="card"
-                style={{
-                  padding: 14,
-                  cursor: 'pointer',
-                  border: isSelected ? '2px solid #76b900' : '1px solid var(--border-subtle)',
-                  background: isSelected ? (isDark ? '#1a2e05' : '#f7fee7') : 'var(--bg-card)',
-                  boxShadow: isSelected ? '0 0 0 1px rgba(118, 185, 0, 0.2)' : 'none',
-                  transition: 'all 0.15s ease',
-                  position: 'relative',
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div
-                      style={{
-                        width: 18,
-                        height: 18,
-                        borderRadius: 4,
-                        border: isSelected ? 'none' : '1.5px solid var(--border-subtle)',
-                        background: isSelected ? '#76b900' : 'transparent',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        flexShrink: 0,
-                        transition: 'background 0.15s',
-                      }}
-                    >
-                      {isSelected && <Check size={12} style={{ color: '#ffffff', strokeWidth: 3 }} />}
-                    </div>
-                    <Cpu size={16} style={{ color: '#76b900' }} />
-                    <strong style={{ fontSize: 13, color: 'var(--text-primary)' }}>NVIDIA NIM</strong>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <span
-                      className="badge"
-                      style={{
-                        fontSize: 9.5,
-                        background: isDark ? '#1a2e05' : '#f7fee7',
-                        color: '#76b900',
-                        border: '1px solid #76b900',
-                      }}
-                    >
-                      Enterprise NIM
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+              {availablePapers.map((p) => {
+                const isSelected = selectedPaperIds.includes(p.id);
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedPaperIds((prev) =>
+                        isSelected ? prev.filter((id) => id !== p.id) : [...prev, p.id]
+                      );
+                    }}
+                    style={{
+                      fontSize: 11.5,
+                      padding: '4px 10px',
+                      borderRadius: 6,
+                      background: isSelected ? (isDark ? '#1e293b' : '#eff6ff') : 'var(--bg-secondary)',
+                      border: isSelected ? '1.5px solid #3b82f6' : '1px solid var(--border-subtle)',
+                      color: isSelected ? 'var(--text-primary)' : 'var(--text-muted)',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      transition: 'all 0.15s ease',
+                      maxWidth: 320,
+                    }}
+                    title={p.title}
+                  >
+                    <span style={{ color: isSelected ? '#3b82f6' : 'var(--text-muted)', fontWeight: 'bold' }}>
+                      {isSelected ? '✓' : '+'}
                     </span>
-                    <button
-                      type="button"
-                      onClick={(e) => selectOnlyProvider('nvidia', e)}
-                      style={{
-                        fontSize: 9.5,
-                        padding: '1px 5px',
-                        borderRadius: 3,
-                        border: '1px solid var(--border-subtle)',
-                        background: 'var(--bg-subtle)',
-                        color: 'var(--text-muted)',
-                        cursor: 'pointer',
-                      }}
-                      title="Select only NVIDIA NIM"
-                    >
-                      Only
-                    </button>
-                  </div>
-                </div>
-                <p style={{ fontSize: 11, color: 'var(--text-secondary)', margin: '0 0 8px', lineHeight: 1.35 }}>
-                  Meta Llama 3.3, Nemotron, and DeepSeek running on NVIDIA DGX Cloud.
-                </p>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 10, color: 'var(--text-muted)' }}>
-                  <span>Model: {providersStatus?.nvidia?.default_model || 'meta/llama-3.3-70b-instruct'}</span>
-                  <span style={{ color: providersStatus?.nvidia?.has_key ? '#10b981' : '#76b900', fontWeight: 600 }}>
-                    {providersStatus?.nvidia?.stored_in_db ? '● SQLite Active' : (providersStatus?.nvidia?.has_key ? '● .env Active' : '○ Needs Key')}
-                  </span>
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* 6. DeepSeek Card */}
-          {(() => {
-            const isSelected = selectedProviders.includes('deepseek');
-            return (
-              <div
-                className="card"
-                onClick={() => toggleProvider('deepseek')}
-                style={{
-                  padding: '14px 16px',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease',
-                  border: isSelected ? '2px solid #0284c7' : '1px solid var(--border-subtle)',
-                  background: isSelected ? (isDark ? '#0c2340' : '#f0f9ff') : 'var(--bg-card)',
-                  borderRadius: 'var(--radius-sm)',
-                  position: 'relative',
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                    <input
-                      type="checkbox"
-                      checked={isSelected}
-                      onChange={() => {}}
-                      style={{ cursor: 'pointer', accentColor: '#0284c7' }}
-                    />
-                    <BrainCircuit size={16} style={{ color: '#0284c7' }} />
-                    <strong style={{ fontSize: 13.5 }}>DeepSeek</strong>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span
-                      className="badge"
-                      style={{
-                        fontSize: 9.5,
-                        background: isDark ? '#082f49' : '#e0f2fe',
-                        color: '#0284c7',
-                        border: '1px solid #0284c7',
-                      }}
-                    >
-                      V3 / R1 Reasoner
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {p.title}
                     </span>
-                    <button
-                      type="button"
-                      onClick={(e) => selectOnlyProvider('deepseek', e)}
-                      style={{
-                        fontSize: 9.5,
-                        padding: '1px 5px',
-                        borderRadius: 3,
-                        border: '1px solid var(--border-subtle)',
-                        background: 'var(--bg-subtle)',
-                        color: 'var(--text-muted)',
-                        cursor: 'pointer',
-                      }}
-                      title="Select only DeepSeek"
-                    >
-                      Only
-                    </button>
-                  </div>
-                </div>
-                <p style={{ fontSize: 11, color: 'var(--text-secondary)', margin: '0 0 8px', lineHeight: 1.35 }}>
-                  DeepSeek-V3 671B MoE and DeepSeek-R1 reasoning models via official API.
-                </p>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 10, color: 'var(--text-muted)' }}>
-                  <span>Model: {providersStatus?.deepseek?.default_model || 'deepseek-chat'}</span>
-                  <span style={{ color: providersStatus?.deepseek?.has_key ? '#10b981' : '#0284c7', fontWeight: 600 }}>
-                    {providersStatus?.deepseek?.stored_in_db ? '● SQLite Active' : (providersStatus?.deepseek?.has_key ? '● .env Active' : '○ Needs Key')}
-                  </span>
-                </div>
-              </div>
-            );
-          })()}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
-
-      {/* 3. Provider Settings & Connection Test Drawer */}
+      
+{/* 3. Provider Settings & Connection Test Drawer */}
       {showConfigDrawer && (
         <div
           className="card"
@@ -2000,139 +1816,27 @@ ${nov.mathematical_formulation || 'N/A'}
         </div>
       )}
 
-      {/* 4. Target Topic & Literature Selector Strip */}
-      <div
-        className="card"
-        style={{
-          padding: '14px 18px',
-          marginBottom: 16,
-          background: 'var(--bg-card)',
-          border: '1px solid var(--border-subtle)',
-        }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 280 }}>
-            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>
-              Topic:
-            </span>
-            <input
-              type="text"
-              className="input"
-              value={topic}
-              onChange={(e) => setTopic(e.target.value)}
-              placeholder="e.g. Time Series Forecasting"
-              style={{ fontSize: 13, fontWeight: 600, flex: 1, padding: '5px 10px' }}
-            />
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 12 }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', color: 'var(--text-secondary)' }}>
-              <input
-                type="checkbox"
-                checked={forceRefresh}
-                onChange={(e) => setForceRefresh(e.target.checked)}
-              />
-              <span>Bypass SQLite Cache (Force LLM Run)</span>
-            </label>
-
-            <span className="badge badge-neutral" style={{ fontSize: 11 }}>
-              {selectedPaperIds.length} / {availablePapers.length} Papers Staged
-            </span>
-          </div>
-        </div>
-
-        {/* Papers pills */}
-        {availablePapers.length > 0 && (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
-            <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Grounding Literature:</span>
-            {availablePapers.map((p) => {
-              const isSelected = selectedPaperIds.includes(p.id);
-              return (
-                <button
-                  key={p.id}
-                  onClick={() => {
-                    setSelectedPaperIds((prev) =>
-                      isSelected ? prev.filter((id) => id !== p.id) : [...prev, p.id]
-                    );
-                  }}
-                  style={{
-                    fontSize: 11,
-                    padding: '3px 8px',
-                    borderRadius: 4,
-                    background: isSelected ? (isDark ? '#1e293b' : '#e0f2fe') : 'var(--bg-secondary)',
-                    border: isSelected ? '1px solid #38bdf8' : '1px solid var(--border-subtle)',
-                    color: isSelected ? (isDark ? '#7dd3fc' : '#0369a1') : 'var(--text-muted)',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 5,
-                  }}
-                >
-                  <span>{isSelected ? '✓' : '+'}</span>
-                  <span style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {p.title}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* 5. Live Telemetry & API Verification HUD */}
-      <div
-        className="card"
-        style={{
-          padding: '12px 18px',
-          marginBottom: 20,
-          background: isDark ? '#09090b' : '#f8fafc',
-          border: '1px solid var(--border-subtle)',
-          borderRadius: 'var(--radius-sm)',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: 12,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#10b981', display: 'inline-block' }}></span>
-            <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-primary)', textTransform: 'uppercase' }}>
-              API Status:
-            </span>
-            <span style={{ fontSize: 11.5, color: '#10b981', fontWeight: 600 }}>200 OK (Backend Active)</span>
-          </div>
-
-          {lastTelemetry && (
-            <>
-              <div style={{ height: 14, width: 1, background: 'var(--border-subtle)' }} />
-              <div style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>
-                Latency: <strong style={{ color: 'var(--text-primary)' }}>{lastTelemetry.duration_ms}ms</strong>
-              </div>
-              <div style={{ height: 14, width: 1, background: 'var(--border-subtle)' }} />
-              <div style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>
-                Source: <strong style={{ color: lastTelemetry.cached ? '#10b981' : '#3b82f6' }}>{lastTelemetry.cached ? 'SQLite Cache' : 'Live LLM'}</strong>
-              </div>
-              <div style={{ height: 14, width: 1, background: 'var(--border-subtle)' }} />
-              <div style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>
-                Proposals: <strong style={{ color: 'var(--text-primary)' }}>{lastTelemetry.proposals_generated}</strong>
-              </div>
-            </>
-          )}
-        </div>
-
-        <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'monospace' }}>
-          Endpoint: POST /api/v1/novelty/synthesize
-        </div>
-      </div>
-
       {/* 6. Novelty Deck Controls & View Toggle */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
-            Synthesized Novelty Proposals ({filteredNovelties.length})
-          </h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
+              Synthesized Novelty Proposals ({filteredNovelties.length})
+            </h2>
+            {lastTelemetry && (
+              <span
+                className="badge"
+                style={{
+                  fontSize: 10.5,
+                  background: isDark ? '#1e293b' : '#f1f5f9',
+                  color: 'var(--text-secondary)',
+                  border: '1px solid var(--border-subtle)',
+                }}
+              >
+                {lastTelemetry.duration_ms}ms · {lastTelemetry.cached ? 'SQLite Cache' : 'Live LLM'}
+              </span>
+            )}
+          </div>
 
           {/* Mechanism filter */}
           <select
