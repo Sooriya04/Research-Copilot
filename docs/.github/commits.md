@@ -2026,12 +2026,30 @@ bundle compilation (`npm run build`).
   * Verified all 19 graph engine and workspace backend tests pass 100% green: `19 passed, 2 warnings in 39.03s`.
 
 
+<br />
 
+## Semantic Scholar Identifier Resolution, SQLite Search Session Hydration, Cache Poisoning Prevention, and Dynamic Heuristic Extraction
 
+* **Semantic Scholar Identifier Resolution & Session Hydration (`src/engines/canonical_resolver.py`, `src/engines/access_resolver.py`)**:
+  * Added native `semanticscholar` identifier parsing for `s2:<hash>` and 40-character hex identifiers across `AccessResolver` and `CanonicalPaperResolver`.
+  * Implemented instant local SQLite session hydration (`CanonicalPaperResolver._lookup_in_sqlite`), resolving paper titles, abstracts, authors, and arXiv IDs directly from `sessions.state_json` and `canonical_papers` without external API rate limits (HTTP 429) or network latency.
+  * Integrated Semantic Scholar REST API fallback with arXiv and DOI extraction.
 
+* **Cache Poisoning Prevention & Healing (`src/engines/abstract_entity_extractor.py`, `src/graph/synthesizer.py`, `src/api/routes_graph.py`)**:
+  * Updated `AbstractEntityExtractor` to never cache or return empty `{ "methods": [], "datasets": [] }` records, preventing failed runs from permanently corrupting paper metadata in `paper_extractions`.
+  * Updated `GraphSynthesizer.get_cached_synthesis` to ignore empty or relationless cached graphs, automatically triggering re-synthesis instead of returning blank stubs.
+  * Enhanced `build-workspace-graph` endpoint to automatically detect and re-enrich stub or hash-titled paper nodes.
+  * Purged corrupted empty rows from `graph_synthesis_cache` and `paper_extractions` in `./data/research_copilot.db`.
 
+* **Dynamic Title Syntax Parsing & Heuristic Extraction (`src/graph/normalizer.py`)**:
+  * Expanded heuristic extraction patterns for hallucination detection methods (`Belief Tree Propagation`, `SelfCheckGPT`, `Self-Reflection`, `Cross-Model Consistency`, `Faithfulness Verification`) and benchmarks (`TruthfulQA`, `HaluEval`, `FactScore`, `WikiBio`, `FaithDial`).
+  * Added dynamic title syntax extraction parsing primary methodologies from prepositions (`via <Method>`, `through <Method>`, `using <Method>`) and title prefixes (`<Method>: <Subtitle>`).
 
+* **Frontend Full-Metadata Transmission (`frontend/src/views/KnowledgeGraphView.jsx`)**:
+  * Updated `handleBuildWorkspaceGraph` to collect and transmit full paper objects (`title`, `abstract`, `arxiv_id`, `authors`) from active search results and workspaces in the POST body to `/api/v1/graph/build-workspace-graph`.
 
-
-
+* **Verification & Test Suite**:
+  * Verified all 111 backend tests pass 100% green (`pytest` in 270.54s).
+  * Verified Vite frontend production build (`npm run build`) compiles cleanly in `7.27s`.
+  * Re-synthesized workspace `ws-5719cd9a` with 28 nodes, 31 edges, 4 cross-paper relations, and 2 research gaps.
 

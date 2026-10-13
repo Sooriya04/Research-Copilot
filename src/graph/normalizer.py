@@ -119,6 +119,13 @@ HEURISTIC_METHOD_PATTERNS = [
     (re.compile(r"\b(direct preference optimization|\bdpo\b)\b", re.I), "DPO"),
     (re.compile(r"\b(knowledge distillation)\b", re.I), "Knowledge Distillation"),
     (re.compile(r"\b(model quantization|\bawq\b|\bgptq\b)\b", re.I), "Model Quantization"),
+    (re.compile(r"\b(selfcheckgpt)\b", re.I), "SelfCheckGPT"),
+    (re.compile(r"\b(belief tree propagation|\bbtprop\b)\b", re.I), "Belief Tree Propagation"),
+    (re.compile(r"\b(self-reflection|self reflection)\b", re.I), "Self-Reflection"),
+    (re.compile(r"\b(self-consistency|self consistency)\b", re.I), "Self-Consistency"),
+    (re.compile(r"\b(cross-model consistency|cross model consistency)\b", re.I), "Cross-Model Consistency"),
+    (re.compile(r"\b(faithfulness verification)\b", re.I), "Faithfulness Verification"),
+    (re.compile(r"\b(fact-checking|fact checking)\b", re.I), "Fact-Checking"),
 ]
 
 HEURISTIC_DATASET_PATTERNS = [
@@ -133,6 +140,11 @@ HEURISTIC_DATASET_PATTERNS = [
     (re.compile(r"\b(wmt 2014|\bwmt14\b)\b", re.I), "WMT 2014"),
     (re.compile(r"\b(wikitext-103|wikitext)\b", re.I), "WikiText-103"),
     (re.compile(r"\b(cifar-100?)\b", re.I), "CIFAR-10"),
+    (re.compile(r"\b(truthfulqa)\b", re.I), "TruthfulQA"),
+    (re.compile(r"\b(halueval)\b", re.I), "HaluEval"),
+    (re.compile(r"\b(factscore)\b", re.I), "FactScore"),
+    (re.compile(r"\b(wikibio)\b", re.I), "WikiBio"),
+    (re.compile(r"\b(faithdial)\b", re.I), "FaithDial"),
 ]
 
 HEURISTIC_TASK_PATTERNS = [
@@ -143,6 +155,8 @@ HEURISTIC_TASK_PATTERNS = [
     (re.compile(r"\b(mathematical reasoning|math reasoning)\b", re.I), "Mathematical Reasoning"),
     (re.compile(r"\b(code generation|program synthesis)\b", re.I), "Code Generation"),
     (re.compile(r"\b(image classification)\b", re.I), "Image Classification"),
+    (re.compile(r"\b(hallucination detection|mitigating hallucination)\b", re.I), "Hallucination Detection"),
+    (re.compile(r"\b(fact verification|factual consistency)\b", re.I), "Fact Verification"),
 ]
 
 
@@ -158,7 +172,7 @@ def normalize_entity(name: str) -> str:
 
 
 def extract_heuristic_entities(text: str) -> Dict[str, List[str]]:
-    """Deterministic zero-token heuristic entity extractor scanning text against canonical ML patterns."""
+    """Deterministic zero-token heuristic entity extractor scanning text against canonical ML patterns and title structures."""
     if not text:
         return {"methods": [], "datasets": [], "tasks": [], "metrics": []}
 
@@ -177,6 +191,26 @@ def extract_heuristic_entities(text: str) -> Dict[str, List[str]]:
     for pattern, canonical in HEURISTIC_TASK_PATTERNS:
         if pattern.search(text):
             tasks.add(canonical)
+
+    # Dynamic extraction from Title syntax (e.g. 'Method: Subtitle' or 'X via Method' or 'X through Method')
+    first_line = text.split("\n")[0] if "\n" in text else text
+    if first_line.upper().startswith("TITLE:"):
+        first_line = first_line[6:].strip()
+
+    # Pattern A: Leading distinctive brand/method before colon (e.g. 'SelfCheckGPT: Zero-Resource...')
+    m_colon = re.match(r"^([A-Za-z0-9\-\s]{3,28}):", first_line)
+    if m_colon:
+        cand = m_colon.group(1).strip()
+        if not any(w in cand.lower() for w in ["survey", "overview", "towards", "on the", "analysis"]):
+            methods.add(cand)
+
+    # Pattern B: Method indicated by prepositions 'via', 'through', 'using' (e.g. 'via Belief Tree Propagation')
+    m_prep = re.search(r"\b(?:via|through|using)\s+([A-Za-z0-9\-\s]{3,45})(?:$|[\(\,\:])", first_line, re.I)
+    if m_prep:
+        cand = m_prep.group(1).strip()
+        cand = re.sub(r"^(fine-grained|coarse-grained|probabilistic|efficient|novel|robust)\s+", "", cand, flags=re.I)
+        if len(cand) >= 3 and not any(w in cand.lower() for w in ["llm", "large language model", "neural"]):
+            methods.add(cand.title())
 
     return {
         "methods": sorted(list(methods)),

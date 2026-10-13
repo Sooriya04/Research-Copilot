@@ -37,15 +37,80 @@ class CanonicalPaperResolver:
         if lower.startswith("pmid:") or re.match(r"^\d{7,9}$", raw):
             return "pmid", re.sub(r"^pmid:\s*", "", raw, flags=re.IGNORECASE).strip()
 
+        # Semantic Scholar ID
+        if lower.startswith("s2:") or (len(raw) == 40 and bool(re.match(r"^[0-9a-f]{40}$", lower))):
+            clean_str = re.sub(r"^s2:\s*", "", raw, flags=re.IGNORECASE)
+            return "semanticscholar", clean_str
+
         return "title", raw
+
+    @staticmethod
+    def _lookup_in_sqlite(identifier: str, clean_id: str):
+        """Lookup paper from local SQLite sessions (populated during search) or canonical tables."""
+        import sqlite3, json
+        from src.core.schemas import Paper, Author
+        try:
+            con = sqlite3.connect("./data/research_copilot.db", timeout=5.0)
+            cur = con.cursor()
+            # 1. Search in sessions table (where literature search stores full top_papers metadata)
+            for r in cur.execute("SELECT state_json FROM sessions WHERE state_json LIKE ?", (f"%{clean_id}%",)).fetchall():
+                try:
+                    s = json.loads(r[0])
+                    for p in s.get("top_papers", []):
+                        pid = str(p.get("id") or "")
+                        if clean_id in pid or pid in identifier or identifier in pid:
+                            con.close()
+                            return Paper(
+                                id=pid,
+                                title=p.get("title") or "Untitled Paper",
+                                abstract=p.get("abstract") or "",
+                                year=p.get("year"),
+                                authors=[Author(name=a if isinstance(a, str) else a.get("name", "Author")) for a in (p.get("authors") or [])],
+                                arxiv_id=p.get("arxiv_id"),
+                                doi=p.get("doi"),
+                                primary_source=p.get("primary_source") or "semanticscholar",
+                                citation_count=p.get("citation_count") or 0,
+                                is_open_access=True,
+                            )
+                except Exception:
+                    pass
+            # 2. Search in canonical_papers
+            row = cur.execute(
+                "SELECT canonical_id, title, abstract, year, arxiv_id, doi, citation_count FROM canonical_papers WHERE canonical_id LIKE ? OR arxiv_id LIKE ?",
+                (f"%{clean_id}%", f"%{clean_id}%")
+            ).fetchone()
+            if row:
+                con.close()
+                return Paper(
+                    id=row[0],
+                    title=row[1] or "Untitled Paper",
+                    abstract=row[2] or "",
+                    year=row[3],
+                    arxiv_id=row[4],
+                    doi=row[5],
+                    citation_count=row[6] or 0,
+                    is_open_access=True,
+                )
+            con.close()
+        except Exception as e:
+            logger.debug("[CanonicalResolver] SQLite lookup notice: %s", e)
+        return None
 
     async def resolve(self, identifier: str) -> Optional[CanonicalPaper]:
         """Resolve identifier across providers and construct unified CanonicalPaper."""
         id_type, clean_id = self.normalize_identifier(identifier)
         logger.info("[CanonicalResolver] Resolving identifier: '%s' (type: %s, clean: %s)", identifier, id_type, clean_id)
 
-        # 1. Query underlying AccessResolver
-        res = await self.access_resolver.resolve_identifier(identifier)
+        # 0. Check SQLite first (instant lookup for search results and existing papers)
+        cached_p = self._lookup_in_sqlite(identifier, clean_id)
+        if cached_p:
+            logger.info("[CanonicalResolver] Resolved '%s' via SQLite database session cache: '%s'", identifier, cached_p.title)
+            from src.engines.access_resolver import PaperAccessResponse
+            res = PaperAccessResponse(identifier=identifier, paper=cached_p, candidates=[], best_candidate=None)
+        else:
+            # 1. Query underlying AccessResolver
+            res = await self.access_resolver.resolve_identifier(identifier)
+
         if not res.paper:
             if id_type == "title":
                 papers = await self.access_resolver.search_openalex(clean_id, limit=1)

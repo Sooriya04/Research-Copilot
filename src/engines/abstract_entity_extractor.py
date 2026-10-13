@@ -42,6 +42,15 @@ class AbstractEntityExtractor:
         self.db_path = db_path
         self._table_initialized = False
 
+    @property
+    def provider(self) -> BaseLLMProvider:
+        """Resolve active LLM provider for entity extraction."""
+        return self._get_provider()
+
+    @provider.setter
+    def provider(self, val: Optional[BaseLLMProvider]) -> None:
+        self._provider = val
+
     def _get_provider(self) -> BaseLLMProvider:
         """Resolve LLM provider, defaulting to local Ollama phi4-mini if available."""
         if self._provider:
@@ -100,9 +109,11 @@ class AbstractEntityExtractor:
                         row = await cursor.fetchone()
                         if row:
                             cached_data = json.loads(row[0])
-                            _EXTRACTION_CACHE[cache_key] = cached_data
-                            logger.info("[AbstractExtractor] SQLite cache hit for '%s' (0 LLM cost)", cache_key)
-                            return cached_data
+                            # Only treat as cache hit if it contains actual extracted entities
+                            if (cached_data.get("methods") or cached_data.get("datasets") or cached_data.get("tasks")):
+                                _EXTRACTION_CACHE[cache_key] = cached_data
+                                logger.info("[AbstractExtractor] SQLite cache hit for '%s' (0 LLM cost)", cache_key)
+                                return cached_data
             except Exception as e:
                 logger.debug("[AbstractExtractor] SQLite read check failed: %s", e)
 
@@ -113,7 +124,7 @@ class AbstractEntityExtractor:
         # If abstract is empty or very short, use deterministic heuristic extraction directly
         if not abstract or len(abstract.strip()) < 30:
             heuristic_res = extract_heuristic_entities(combined_text)
-            if cache_key:
+            if cache_key and (heuristic_res.get("methods") or heuristic_res.get("datasets") or heuristic_res.get("tasks")):
                 _EXTRACTION_CACHE[cache_key] = heuristic_res
                 try:
                     async with aiosqlite.connect(self.db_path) as db:
@@ -223,7 +234,7 @@ class AbstractEntityExtractor:
             "metrics": clean_metrics,
         }
 
-        if cache_key:
+        if cache_key and (normalized_methods or normalized_datasets or normalized_tasks):
             _EXTRACTION_CACHE[cache_key] = result
             try:
                 async with aiosqlite.connect(self.db_path) as db:

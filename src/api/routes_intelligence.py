@@ -79,16 +79,66 @@ class HypothesisResponse(BaseModel):
     hypotheses: List[HypothesisItem]
 
 @router.post("/papers/compare", response_model=CompareResponse)
-async def compare_papers(req: CompareRequest):
+async def compare_papers(req: CompareRequest, db: AsyncSession = Depends(get_db)):
     """Compare multiple scientific papers side-by-side on methodology, code, and compute."""
     if not req.identifiers:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Must provide at least one identifier.")
     
     matrix_items: List[CompareMatrixItem] = []
     for identifier in req.identifiers:
-        res = await resolver.resolve_identifier(identifier)
-        if res.paper:
-            p = res.paper
+        p: Optional[Paper] = None
+        try:
+            res = await resolver.resolve_identifier(identifier)
+            if res and res.paper:
+                p = res.paper
+        except Exception:
+            pass
+
+        if not p:
+            # Fallback to local SQLite repository if network resolution fails (e.g. arXiv 429)
+            clean_arxiv = identifier.lower().replace("arxiv:", "").strip()
+            try:
+                # 1. Check normalized canonical papers
+                canon = await PaperRepository.get_by_doi_or_arxiv(db, doi=identifier if "/" in identifier else None, arxiv_id=clean_arxiv)
+                if canon:
+                    p = Paper(
+                        id=canon.canonical_id,
+                        title=canon.title,
+                        abstract=canon.abstract,
+                        year=canon.year,
+                        citation_count=canon.citation_count,
+                        arxiv_id=canon.arxiv_id,
+                        doi=canon.doi,
+                        is_open_access=True,
+                    )
+                else:
+                    # 2. Check paper_cache table
+                    cache_stmt = select(PaperCacheModel).where(
+                        or_(
+                            PaperCacheModel.id == identifier,
+                            PaperCacheModel.arxiv_id == clean_arxiv,
+                            PaperCacheModel.id == f"arxiv:{clean_arxiv}",
+                            PaperCacheModel.doi == identifier,
+                        )
+                    )
+                    cache_res = await db.execute(cache_stmt)
+                    cached = cache_res.scalars().first()
+                    if cached:
+                        p = Paper(
+                            id=cached.id,
+                            title=cached.title,
+                            abstract=cached.abstract,
+                            year=cached.year,
+                            citation_count=cached.citation_count,
+                            score=cached.score,
+                            arxiv_id=cached.arxiv_id,
+                            doi=cached.doi,
+                            is_open_access=True,
+                        )
+            except Exception:
+                pass
+
+        if p:
             rubric = rubric_evaluator.evaluate(p)
             matrix_items.append(CompareMatrixItem(
                 id=p.id,

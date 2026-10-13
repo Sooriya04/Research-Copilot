@@ -598,6 +598,28 @@ export default function KnowledgeGraphView() {
         setBuildStatusMessage(`Synthesizing relationships with ${providerLabel}...`);
       }
 
+      // Collect full paper metadata from search results, active workspace, or comparison papers
+      const fullPapers = (addedToGraphPaperIds || []).map(pid => {
+        const found =
+          (searchResults || []).find(p => p.id === pid || p.arxiv_id === pid) ||
+          (graphSearchResults || []).find(p => p.id === pid || p.arxiv_id === pid) ||
+          (activeWorkspace?.papers || []).find(p => p.id === pid || p.arxiv_id === pid) ||
+          (comparisonPapers || []).find(p => p.id === pid || p.arxiv_id === pid);
+        if (found) {
+          return {
+            id: found.id || pid,
+            title: found.title,
+            abstract: found.abstract || '',
+            arxiv_id: found.arxiv_id,
+            doi: found.doi,
+            year: found.year,
+            authors: (found.authors || []).map(a => typeof a === 'string' ? a : a.name || String(a)),
+            topics: found.topics || [],
+          };
+        }
+        return { id: pid, title: pid };
+      });
+
       const res = await fetch('/api/v1/graph/build-workspace-graph', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -605,6 +627,7 @@ export default function KnowledgeGraphView() {
           workspace_id: wsId || null,
           topic: activeTopic,
           paper_ids: addedToGraphPaperIds,
+          papers: fullPapers,
           force_refresh: forceRefresh,
           provider: synthesisProvider,
         }),

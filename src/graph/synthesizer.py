@@ -158,6 +158,10 @@ class GraphSynthesizer:
                     row = await cursor.fetchone()
                     if row:
                         synthesis_data = json.loads(row[0])
+                        # If cached synthesis has 0 relations, 0 methods, and 0 gaps, it was a failed run - do not use
+                        if not synthesis_data.get("cross_paper_relations") and not synthesis_data.get("methods") and not synthesis_data.get("research_gaps"):
+                            logger.info("[GraphSynthesizer] Ignoring empty/corrupted SQLite synthesis cache for workspace '%s'", workspace_id)
+                            return None
                         return {
                             "cached": True,
                             "llm_called": False,

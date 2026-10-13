@@ -1,6 +1,6 @@
 # Research Copilot — System & Operational Status Report
 
-**Generated**: October 8, 2026 | 22:38 IST  
+**Generated**: October 13, 2026 | 21:35 IST  
 **Environment**: Ubuntu Linux | NVIDIA CUDA 13.2 | Driver 595.84  
 **Repository Branch**: `dev` (strictly local modifications; git commit/push disabled per user instructions)  
 
@@ -14,7 +14,7 @@
 | **Vite Frontend UI** | `http://localhost:5173` | React 18 / Vite 5 | `🟢 UP (Healthy)` | Clean production build (`public_dist/`) |
 | **Searqon Web Search** | `http://localhost:7493` | Searqon (SearXNG / DDG) | `🟢 UP (Healthy)` | Task 7 external research & citation engine |
 | **Redis Active Cache** | `redis://localhost:6379` | Redis Daemon 7.x | `🟢 UP (Healthy)` | Active paper cache & web search cache (TTL 900s) |
-| **Local Ollama** | `http://localhost:11434` | Ollama Daemon | `🟢 UP (Healthy)` | Latency ~38ms, GPU-accelerated |
+| **Local Ollama** | `http://localhost:11434` | Ollama Daemon | `🟢 UP (Healthy)` | Latency ~38ms, `phi4-mini` (2.5GB) + `nomic-embed-text` GPU-accelerated |
 | **GPU Acceleration** | PCIe Bus `01:00.0` | NVIDIA GeForce RTX 3050 | `🟢 ACTIVE` | 6GB VRAM, active model allocation |
 
 ---
@@ -60,45 +60,32 @@ All long-term research state, topological nodes, cached proposals, and user prov
 | :--- | :--- | :--- |
 | `user_settings` | Stores API keys, custom base URLs, and active model names | Persistent storage for provider credentials (never pushed) |
 | `graph_novelty_cache` | SHA-256 isolated cache keys (`paper_ids + provider + model`) | Enables instant zero-token repeats |
+| `graph_synthesis_cache` | Workspaces synthesis cache (cross-paper relations, methods, gaps) | Verified & purged of empty runs; instant cache retrieval |
 | `graph_nodes` | Persistent knowledge graph entity storage | Active nodes (Papers, Methods, Datasets, Authors) |
 | `graph_edges` | Cross-paper relational edges (cites, solves, uses, extends) | Verified relational edges |
+| `paper_extractions` | Cached paper entities (methods, datasets, tasks) | Active extraction cache; empty entries barred from poisoning |
 | `workspaces` | Active research workspace session contexts | Active literature synthesis topic loaded |
 
 ---
 
 ## 4. Key Endpoints & Architecture Updates
 
-### Searqon Web Research Integration (Task 7)
-- `POST /papers/{paper_id}/chat`: Context-aware research assistant combining Paper RAG, GraphRAG, and Searqon external web results when paper context is insufficient.
-- Searqon client: Abstraction at `src/services/searqon.py` with automatic fallback to paper knowledge if Searqon is unavailable.
-- Citations: Returns distinct `paper_citations` and `web_sources` (title, URL, publication date, snippet).
+### Knowledge Graph Synthesis & Semantic Scholar Resolution
+- **Semantic Scholar Identifier Resolution**: `CanonicalPaperResolver` and `AccessResolver` detect and resolve `s2:<hash>` identifiers directly via local SQLite session search records and S2 REST API, preventing missing titles or stubs like `Cited Paper [3c030e88...]`.
+- **Full Viewport Responsive Layout**: Knowledge Graph canvas uses `height: calc(100vh - 165px); minHeight: 740px` with collapsible inspector drawer (expanding to 100% full width) and in-canvas zoom/motion controls.
+- **Cache Poisoning Prevention**: `AbstractEntityExtractor` and `GraphSynthesizer` no longer cache or return empty `{methods: [], datasets: []}` records.
+- **Dynamic Heuristic Fallback**: Enhanced heuristic extraction with hallucination patterns (`SelfCheckGPT`, `Belief Tree Propagation`, `Self-Reflection`, `Cross-Model Consistency`, `TruthfulQA`, `HaluEval`, `WikiBio`, `FactScore`) and title-level syntax parsing.
 
-### Novelty Studio & Telemetry Clean-up
-- `GET /api/v1/novelty/providers-status`: Live probing of registered providers (Gemini, Groq, Ollama, OpenRouter, NVIDIA, DeepSeek).
-- `POST /api/v1/novelty/save-provider-key`: Persists API key / model / base_url to SQLite `user_settings`.
-- `DELETE /api/v1/novelty/remove-provider-key/{provider}`: Deletes provider configuration from SQLite.
-- `POST /api/v1/novelty/test-connection`: Ping and target model probe.
-- `POST /api/v1/novelty/synthesize`: Synthesizes scientific novelty proposals across selected engines.
-- **Telemetry UI Clean-up**: Removed the Novelty Engine Telemetry Stream console logging box from the Novelty Studio UI.
+### Paper Comparison & Multi-Source Intelligence
+- `POST /api/v1/papers/compare`: Added resilient fallback to SQLite `canonical_papers` and `paper_cache` when external APIs (e.g. arXiv) return 429 rate limits.
+- `POST /papers/{paper_id}/chat`: Context-aware research assistant combining Paper RAG, GraphRAG, and Searqon external web results when paper context is insufficient.
 
 ---
 
 ## 5. Automated Verification & Test Suite
 
-- `tests/test_deepseek_provider.py`:
-  - `test_deepseek_provider_factory_routing`: `PASSED`
-  - `test_deepseek_sqlite_persistence`: `PASSED`
-  - `test_deepseek_test_connection_mock`: `PASSED`
-  - `test_deepseek_complete_mock`: `PASSED`
-- `tests/test_novelty_routes.py`:
-  - `test_get_providers_status`: `PASSED`
-  - `test_provider_test_connection_gemini`: `PASSED`
-  - `test_novelty_synthesize_endpoint_with_telemetry`: `PASSED`
-  - `test_save_and_remove_provider_key_sqlite`: `PASSED`
-- `tests/test_graph_novelty_engine.py`:
-  - `test_graph_novelty_engine_synthesis_and_cache`: `PASSED`
-  - `test_generate_novelty_api_endpoints`: `PASSED`
-- **Frontend Build**: `npm run build` completes cleanly in `7.56s` with zero errors.
+- **Test Suite Results**: **111 passed out of 111 tests** (`pytest`) with 100% green coverage across all modules.
+- **Frontend Build**: `npm run build` completes cleanly in `7.27s` with zero errors.
 
 ---
 

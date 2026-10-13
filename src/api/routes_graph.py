@@ -281,9 +281,9 @@ async def build_workspace_graph_endpoint(req: BuildWorkspaceGraphRequest):
     # If papers list is empty but paper_ids provided, resolve or fetch
     if not papers_to_use and req.paper_ids:
         for pid in req.paper_ids:
-            # Check if paper already exists in graph_store
+            # Check if paper already exists in graph_store with a real title
             n = await graph_store.get_node(pid) or await graph_store.get_node(slugify_id(pid))
-            if n:
+            if n and n.title != pid and not (n.title.startswith("Cited Paper [") or n.title.startswith("s2:")):
                 papers_to_use.append(n.model_dump(mode="json"))
             else:
                 try:

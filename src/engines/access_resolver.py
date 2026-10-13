@@ -45,6 +45,11 @@ class AccessResolver:
             return "pmid", re.sub(r"^pmid:\s*", "", raw, flags=re.IGNORECASE).strip()
         if lower.startswith("pmc"):
             return "pmcid", raw.upper()
+
+        # Semantic Scholar ID
+        if lower.startswith("s2:") or (len(raw) == 40 and bool(re.match(r"^[0-9a-f]{40}$", lower))):
+            clean_str = re.sub(r"^s2:\s*", "", raw, flags=re.IGNORECASE)
+            return "semanticscholar", clean_str
             
         return "query", raw
 
@@ -190,6 +195,33 @@ class AccessResolver:
                 papers = await self.search_arxiv(clean_id, limit=1)
                 if papers:
                     paper = papers[0]
+            elif id_type == "semanticscholar":
+                s2_url = f"https://api.semanticscholar.org/graph/v1/paper/{clean_id}?fields=title,abstract,authors,year,externalIds,venue,citationCount,isOpenAccess,openAccessPdf"
+                try:
+                    s2_resp = await client.get(s2_url)
+                    if s2_resp.status_code == 200:
+                        s2_data = s2_resp.json()
+                        ext_ids = s2_data.get("externalIds", {})
+                        arxiv_id = ext_ids.get("ArXiv")
+                        doi_val = ext_ids.get("DOI")
+                        oa_pdf = s2_data.get("openAccessPdf", {}) or {}
+                        pdf_url = oa_pdf.get("url") or (f"https://arxiv.org/pdf/{arxiv_id}.pdf" if arxiv_id else None)
+                        paper = Paper(
+                            id=f"s2:{clean_id}",
+                            title=s2_data.get("title") or "Untitled Paper",
+                            abstract=s2_data.get("abstract") or "",
+                            authors=[Author(name=a.get("name", "Author")) for a in s2_data.get("authors", [])],
+                            year=s2_data.get("year"),
+                            doi=doi_val,
+                            arxiv_id=arxiv_id,
+                            primary_source="semanticscholar",
+                            url=f"https://www.semanticscholar.org/paper/{clean_id}",
+                            pdf_url=pdf_url,
+                            citation_count=s2_data.get("citationCount") or 0,
+                            is_open_access=bool(s2_data.get("isOpenAccess") or pdf_url),
+                        )
+                except Exception as e:
+                    logger.debug("[AccessResolver] S2 API resolution failed: %s", e)
             else:
                 papers = await self.search_openalex(clean_id, limit=1)
                 if papers:
