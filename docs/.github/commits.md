@@ -2156,4 +2156,28 @@ bundle compilation (`npm run build`).
   * Verified full test suite passes (110 passed).
   * Verified Vite frontend production build (`npm run build`) compiles cleanly in 6.91s with zero errors.
 
+<br />
+
+## Extract Dedicated Multi-Paper Comparison View and Streamline Distraction-Free Focus UI
+
+* **Dedicated Comparison Routing (`frontend/src/App.jsx`, `frontend/src/views/PaperComparisonView.jsx`, `frontend/src/components/layout/TopHeader.jsx`)**:
+  * Extracted the multi-paper comparison matrix out of `KnowledgeGraphView.jsx` into a standalone, dedicated view component `PaperComparisonView.jsx`.
+  * Routed `/compare`, `/matrix`, and `/paper-comparison` exclusively to `PaperComparisonView`, decoupling the comparison matrix from the heavy Cytoscape knowledge graph canvas.
+  * Mapped routes in `TopHeader.jsx` to render the clean title "Paper Comparison Matrix".
+  * Streamlined `KnowledgeGraphView.jsx` by removing over 750 lines of embedded matrix markup, replacing it with a clean navigation trigger to the dedicated `/compare` view.
+
+* **Focused & Distraction-Free Comparison UI (`frontend/src/views/PaperComparisonView.jsx`)**:
+  * **Staged Paper Pill Shelf**: Added an active paper tray at the top displaying paper badges, publication years, and quick remove buttons to prevent visual ambiguity.
+  * **Quick Paper Search & Adder**: Added an inline search box to add papers by arXiv ID, DOI, or title, plus one-click preset buttons (`Attention vs Mamba vs LoRA`, `Hallucination Detection Baselines`, `FlashAttention 1 vs 2`).
+  * **Dimension Tabs**: Provided focused tab switching across 5 core dimensions (`All Dimensions`, `Research Gaps`, `Methodology & Problem`, `Benchmarks & Metrics`, `Code & Repositories`, `Rigor & PaperRank`) to prevent infinite scrolling.
+  * **Focus on Gaps Mode**: Added an active toggle switch that isolates grounded research gaps and suppresses secondary metadata for deep gap analysis.
+  * **In-Matrix Live Filter**: Implemented live keyword filtering across table cells, tasks, metrics, and gaps.
+  * **Grounded Provenance & Direct Reader Links**: Each paper column header links directly to the PDF Inspector, shows DB Grounded vs AI Extracted status, and includes an on-demand audit trigger.
+  * Zero emojis maintained across all markup, labels, and notifications.
+
+* **Verification & Production Build**:
+  * Verified all 9 intelligence and comparison route tests pass in `tests/test_intelligence_routes.py`.
+  * Verified production build compilation (`npm run build`) in 7.74s with zero errors.
+
+
 
