@@ -1,8 +1,8 @@
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select, or_, text
+from sqlalchemy import select, or_, text, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.canonical_models import ExtractedClaim, VerificationStatus
 from src.core.database import get_db
@@ -11,7 +11,8 @@ from src.core.normalized_models import (
     NormalizedPaperModel, ResearchGapModel, PaperSummaryModel,
     BenchmarkModel, CodeRepositoryModel
 )
-from src.core.schemas import ChecklistRubric, Paper, ScoreBreakdown
+from src.core.logger import logger
+from src.core.schemas import Author, ChecklistRubric, Paper, ScoreBreakdown
 from src.engines.access_resolver import AccessResolver
 from src.engines.gap_extractor import ScientificGapExtractor
 from src.engines.paper_rank import PaperRankEngine
@@ -30,6 +31,11 @@ gap_extractor = ScientificGapExtractor()
 
 class CompareRequest(BaseModel):
     identifiers: List[str]
+    force_refresh: bool = False
+
+# High-performance server-side in-memory comparison matrix cache (15 min TTL)
+_COMPARE_MATRIX_CACHE: Dict[str, Tuple[float, Any]] = {}
+_COMPARE_MATRIX_TTL = 900.0  # 15 minutes
 
 class CompareResearchGap(BaseModel):
     id: str
@@ -142,29 +148,44 @@ async def compare_papers(req: CompareRequest, db: AsyncSession = Depends(get_db)
     if not req.identifiers:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Must provide at least one identifier.")
     
+    import time
+    cache_key = "|".join(sorted(req.identifiers))
+    if not req.force_refresh and cache_key in _COMPARE_MATRIX_CACHE:
+        cached_ts, cached_resp = _COMPARE_MATRIX_CACHE[cache_key]
+        if time.time() - cached_ts < _COMPARE_MATRIX_TTL:
+            return cached_resp
+
     matrix_items: List[CompareMatrixItem] = []
     
     for identifier in req.identifiers:
         p: Optional[Paper] = None
         canon = None
-        clean_arxiv = identifier.lower().replace("arxiv:", "").strip()
+        raw_id = identifier.strip()
+        # Clean double prefixes like arxiv:s2: or arXiv:s2:
+        if raw_id.lower().startswith("arxiv:s2:") or raw_id.lower().startswith("arxiv:doi:"):
+            raw_id = raw_id[6:]
+
+        clean_arxiv = None
+        if raw_id.lower().startswith("arxiv:") or re.match(r"^\d{4}\.\d{4,5}", raw_id) or re.match(r"^[a-z\-]+/\d{7}", raw_id):
+            clean_arxiv = re.sub(r"^arxiv:\s*", "", raw_id, flags=re.IGNORECASE).strip()
+
         has_db_record = False
 
         # Step 1: Check normalized canonical papers in SQLite first
         try:
             canon = await PaperRepository.get_by_doi_or_arxiv(
-                db, doi=identifier if "/" in identifier else None, arxiv_id=clean_arxiv
+                db, doi=raw_id if "/" in raw_id and not raw_id.startswith("s2:") else None, arxiv_id=clean_arxiv
             )
             if not canon:
-                canon = await PaperRepository.get_by_canonical_id(db, identifier)
-            if not canon:
+                canon = await PaperRepository.get_by_canonical_id(db, raw_id)
+            if not canon and clean_arxiv:
                 canon_stmt = select(NormalizedPaperModel).where(
                     or_(
-                        NormalizedPaperModel.canonical_id == identifier,
+                        NormalizedPaperModel.canonical_id == raw_id,
                         NormalizedPaperModel.arxiv_id == clean_arxiv,
                         NormalizedPaperModel.canonical_id == f"arxiv:{clean_arxiv}",
-                        NormalizedPaperModel.doi == identifier,
-                        NormalizedPaperModel.title.ilike(f"%{identifier[:40]}%"),
+                        NormalizedPaperModel.doi == raw_id,
+                        NormalizedPaperModel.title.ilike(f"%{raw_id[:40]}%"),
                     )
                 )
                 canon_rec = (await db.execute(canon_stmt)).scalars().first()
@@ -189,41 +210,80 @@ async def compare_papers(req: CompareRequest, db: AsyncSession = Depends(get_db)
         # Step 2: Check SQLite synthesis and cache tables if canon wasn't found
         synth_rec = None
         try:
-            synth_stmt = select(PaperSynthesisModel).where(
-                or_(
-                    PaperSynthesisModel.paper_id == identifier,
-                    PaperSynthesisModel.paper_id == clean_arxiv,
-                    PaperSynthesisModel.paper_id == f"arxiv:{clean_arxiv}",
-                    PaperSynthesisModel.title.ilike(f"%{identifier[:40]}%"),
-                )
-            )
+            synth_filters = [
+                PaperSynthesisModel.paper_id == raw_id,
+                PaperSynthesisModel.paper_id == identifier,
+                PaperSynthesisModel.title.ilike(f"%{raw_id[:40]}%"),
+            ]
+            if clean_arxiv:
+                synth_filters.append(PaperSynthesisModel.paper_id == clean_arxiv)
+                synth_filters.append(PaperSynthesisModel.paper_id == f"arxiv:{clean_arxiv}")
+
+            synth_stmt = select(PaperSynthesisModel).where(or_(*synth_filters))
             synth_rec = (await db.execute(synth_stmt)).scalars().first()
             if synth_rec:
                 has_db_record = True
                 if not p:
                     p = Paper(
                         id=synth_rec.paper_id,
-                        title=synth_rec.title or identifier,
+                        title=synth_rec.title or raw_id,
                         abstract="",
                         score=synth_rec.score,
                     )
         except Exception as e:
             logger.debug("[Compare] SQLite synthesis lookup note: %s", e)
 
-        # Step 3: Check external resolver if still not found
-        if not p:
+        # Step 2b: Check graph_nodes in SQLite (stores workspace, S2, and discovered papers with full metadata)
+        if not p or not p.title or p.title == raw_id:
             try:
-                res = await resolver.resolve_identifier(identifier)
+                import json as _json
+                gn_stmt = text("""
+                    SELECT id, data_json FROM graph_nodes 
+                    WHERE node_type = 'paper' AND (
+                        id = :id1 OR id = :id2 OR id = :id3 OR id = :id4
+                    ) LIMIT 1
+                """)
+                gn_row = (await db.execute(gn_stmt, {
+                    "id1": raw_id,
+                    "id2": identifier,
+                    "id3": f"s2:{raw_id.replace('s2:', '')}",
+                    "id4": raw_id.replace('s2:', ''),
+                })).first()
+                if gn_row and gn_row[1]:
+                    gn_data = _json.loads(gn_row[1]) if isinstance(gn_row[1], str) else gn_row[1]
+                    if gn_data and gn_data.get("title"):
+                        p = Paper(
+                            id=gn_row[0],
+                            title=gn_data.get("title"),
+                            abstract=gn_data.get("abstract") or "",
+                            year=gn_data.get("year"),
+                            doi=gn_data.get("doi"),
+                            arxiv_id=gn_data.get("arxiv_id"),
+                            citation_count=gn_data.get("citation_count") or 0,
+                            authors=[Author(name=a) if isinstance(a, str) else Author(**a) for a in gn_data.get("authors", [])],
+                            primary_source="Semantic Scholar" if "s2:" in str(gn_row[0]) else (gn_data.get("primary_source") or "Open Access"),
+                        )
+                        has_db_record = True
+            except Exception as e:
+                logger.debug("[Compare] graph_nodes lookup note: %s", e)
+
+        # Step 3: Check external resolver if still not found
+        if not p or not p.title or p.title == raw_id:
+            try:
+                res = await resolver.resolve_identifier(raw_id)
                 if res and res.paper:
                     p = res.paper
             except Exception:
                 pass
 
         if not p:
+            fallback_title = raw_id
+            if clean_arxiv and (re.match(r"^\d{4}\.\d{4,5}", clean_arxiv) or re.match(r"^[a-z\-]+/\d{7}", clean_arxiv)):
+                fallback_title = f"arXiv:{clean_arxiv}"
             # Fallback paper entity
             p = Paper(
-                id=identifier,
-                title=clean_arxiv and f"arXiv:{clean_arxiv}" or identifier,
+                id=raw_id,
+                title=fallback_title,
                 abstract="",
             )
 
@@ -461,7 +521,7 @@ async def compare_papers(req: CompareRequest, db: AsyncSession = Depends(get_db)
             if b.get("dataset"):
                 all_datasets.add(b["dataset"])
 
-    return CompareResponse(
+    result_resp = CompareResponse(
         papers_count=len(matrix_items),
         matrix=matrix_items,
         cross_paper_gaps=cross_paper_gaps,
@@ -469,6 +529,8 @@ async def compare_papers(req: CompareRequest, db: AsyncSession = Depends(get_db)
         shared_datasets=sorted(list(all_datasets))[:10],
         synthesis_summary=f"Compared {len(matrix_items)} scientific papers with {sum(m.gaps_count for m in matrix_items)} ground-truthed research gaps and {len(cross_paper_gaps)} cross-paper synthesis intersections.",
     )
+    _COMPARE_MATRIX_CACHE[cache_key] = (time.time(), result_resp)
+    return result_resp
 
 @router.post("/papers/extract-gaps", response_model=ExtractGapsResponse)
 async def extract_paper_gaps(req: ExtractGapsRequest, db: AsyncSession = Depends(get_db)):
@@ -539,6 +601,10 @@ async def extract_paper_gaps(req: ExtractGapsRequest, db: AsyncSession = Depends
             ))
         await db.commit()
         saved = True
+        # Invalidate cached comparisons involving this paper
+        for k in list(_COMPARE_MATRIX_CACHE.keys()):
+            if identifier in k or clean_arxiv in k:
+                _COMPARE_MATRIX_CACHE.pop(k, None)
     except Exception as e:
         logger.debug("[ExtractGaps] SQLite commit note: %s", e)
 

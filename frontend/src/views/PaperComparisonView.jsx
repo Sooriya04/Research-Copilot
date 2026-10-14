@@ -25,6 +25,17 @@ import {
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
+// Helper to format clean display titles avoiding raw hash strings
+export function formatPaperDisplayTitle(paper) {
+  if (!paper) return 'Untitled Paper';
+  const t = (paper.title || paper.id || '').trim();
+  if (t.toLowerCase().startsWith('arxiv:s2:') || t.toLowerCase().startsWith('s2:')) {
+    const rawHash = t.replace(/^arxiv:s2:/i, '').replace(/^s2:/i, '');
+    return `Semantic Scholar: ${rawHash.slice(0, 14)}...`;
+  }
+  return t;
+}
+
 export default function PaperComparisonView() {
   const {
     comparisonPapers,
@@ -62,14 +73,45 @@ export default function PaperComparisonView() {
     return [];
   }, [comparisonPapers, searchResults]);
 
-  // Fetch matrix from backend (SQLite check first, then fallback extractor with SQLite persistence)
+  // Generate stable cache key for comparison
+  const getMatrixCacheKey = (papers) => {
+    if (!papers || papers.length === 0) return '';
+    const ids = papers.map((p) => p.canonical_id || p.id || p.title).sort();
+    return `rc_compare_matrix_${ids.join('_')}`;
+  };
+
+  // Fetch matrix from backend with instant 0ms sessionStorage cache on refresh
   const fetchComparisonMatrix = async (papersToCompare = activePapers, force = false) => {
     if (!papersToCompare || papersToCompare.length === 0) {
       setMatrixData(null);
       return;
     }
-    setMatrixLoading(true);
+
+    const cacheKey = getMatrixCacheKey(papersToCompare);
+    let hasLoadedFromCache = false;
+
+    // Instant zero-delay display from sessionStorage on browser refresh
+    if (!force && cacheKey) {
+      try {
+        const cachedStr = sessionStorage.getItem(cacheKey);
+        if (cachedStr) {
+          const cachedData = JSON.parse(cachedStr);
+          if (cachedData && cachedData.matrix && cachedData.matrix.length > 0) {
+            setMatrixData(cachedData);
+            hasLoadedFromCache = true;
+          }
+        }
+      } catch (err) {
+        // ignore cache read failure
+      }
+    }
+
+    // Only show full loading spinner if there is no cached matrix to display immediately
+    if (!hasLoadedFromCache) {
+      setMatrixLoading(true);
+    }
     setMatrixError(null);
+
     try {
       const identifiers = papersToCompare.map(
         (p) => p.canonical_id || p.id || p.arxiv_id || p.doi || p.title
@@ -77,11 +119,18 @@ export default function PaperComparisonView() {
       const res = await fetch('/api/v1/papers/compare', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ identifiers }),
+        body: JSON.stringify({ identifiers, force_refresh: force }),
       });
       if (res.ok) {
         const data = await res.json();
         setMatrixData(data);
+        if (cacheKey) {
+          try {
+            sessionStorage.setItem(cacheKey, JSON.stringify(data));
+          } catch (e) {
+            // ignore storage limit
+          }
+        }
       } else {
         const errText = await res.text();
         setMatrixError(`Comparison failed: ${errText}`);
@@ -535,7 +584,7 @@ export default function PaperComparisonView() {
                   }}
                   title={paper.title}
                 >
-                  {paper.title || paper.id}
+                  {formatPaperDisplayTitle(paper)}
                 </span>
                 {paper.year && (
                   <span style={{ fontSize: 10, color: 'var(--text-muted)', paddingLeft: 2 }}>
@@ -910,7 +959,7 @@ export default function PaperComparisonView() {
                           }}
                           title="Open in PDF Reader"
                         >
-                          {paper.title}
+                          {formatPaperDisplayTitle(paper)}
                         </a>
 
                         {/* Authors */}

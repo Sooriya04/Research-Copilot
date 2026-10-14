@@ -37,6 +37,11 @@ class AccessResolver:
         # arXiv
         if lower.startswith("arxiv:") or "arxiv.org/" in lower or re.match(r"^\d{4}\.\d{4,5}(v\d+)?$", raw) or re.match(r"^[a-z\-]+(\.[A-Z]{2})?/\d{7}$", raw):
             clean_str = re.sub(r"^arxiv:\s*", "", raw, flags=re.IGNORECASE)
+            if clean_str.lower().startswith("s2:") or (len(clean_str) == 40 and bool(re.match(r"^[0-9a-f]{40}$", clean_str.lower()))):
+                return "semanticscholar", re.sub(r"^s2:\s*", "", clean_str, flags=re.IGNORECASE)
+            if clean_str.startswith("10.") or "doi.org/10." in clean_str.lower():
+                match = re.search(r"10\.\d{4,9}/[-._;()/:A-Za-z0-9]+", clean_str)
+                return "doi", match.group(0) if match else clean_str
             match = re.search(r"(\d{4}\.\d{4,5}|[a-z\-]+/\d{7})", clean_str)
             return "arxiv", match.group(0) if match else clean_str
             
