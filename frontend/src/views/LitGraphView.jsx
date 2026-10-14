@@ -251,7 +251,7 @@ function DetailsPanel({ node, onMakeSeed, onClose }) {
               border: '1px solid #f59e0b55', borderRadius: 4,
               fontSize: 10.5, fontWeight: 700, padding: '2px 7px', letterSpacing: '0.04em',
             }}>
-              ★ SEED PAPER
+               SEED PAPER
             </span>
           )}
           <h3 style={{ fontSize: 14, fontWeight: 700, margin: 0, color: 'var(--text-primary)', lineHeight: 1.45 }}>

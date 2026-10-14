@@ -390,7 +390,7 @@ export default function PaperDetailModal() {
                 {checklist.recommendations && checklist.recommendations.length > 0 && (
                   <div style={{ marginTop: 8, padding: '7px 9px', background: 'rgba(217,119,6,0.06)', border: '1px solid rgba(217,119,6,0.2)', borderRadius: 6, fontSize: 10.5 }}>
                     <div style={{ fontWeight: 600, color: '#d97706', marginBottom: 3 }}>
-                      ⚠ Methodology Recommendations:
+                       Methodology Recommendations:
                     </div>
                     <ul style={{ margin: 0, paddingLeft: 14 }}>
                       {checklist.recommendations.map((rec, i) => (
@@ -449,7 +449,7 @@ export default function PaperDetailModal() {
                       >
                         <Code size={11} />
                         <span>{repo.url.replace('https://github.com/', '')}</span>
-                        {repo.stars > 0 && <span style={{ color: 'var(--text-muted)' }}>★ {repo.stars}</span>}
+                        {repo.stars > 0 && <span style={{ color: 'var(--text-muted)' }}> {repo.stars}</span>}
                         <ExternalLink size={10} />
                       </a>
                     ))}

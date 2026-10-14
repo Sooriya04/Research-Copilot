@@ -2,13 +2,18 @@ import re
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select, or_
+from sqlalchemy import select, or_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.canonical_models import ExtractedClaim, VerificationStatus
 from src.core.database import get_db
 from src.core.models import PaperCacheModel, PaperSynthesisModel, PaperDocumentModel, PaperChunkModel
+from src.core.normalized_models import (
+    NormalizedPaperModel, ResearchGapModel, PaperSummaryModel,
+    BenchmarkModel, CodeRepositoryModel
+)
 from src.core.schemas import ChecklistRubric, Paper, ScoreBreakdown
 from src.engines.access_resolver import AccessResolver
+from src.engines.gap_extractor import ScientificGapExtractor
 from src.engines.paper_rank import PaperRankEngine
 from src.engines.rubric_evaluator import RubricEvaluator
 from src.providers.base import ChatMessage
@@ -21,27 +26,80 @@ resolver = AccessResolver()
 rubric_evaluator = RubricEvaluator()
 rank_engine = PaperRankEngine()
 claim_verifier_instance = ClaimVerifier()
+gap_extractor = ScientificGapExtractor()
 
 class CompareRequest(BaseModel):
     identifiers: List[str]
 
+class CompareResearchGap(BaseModel):
+    id: str
+    category: str
+    title: str
+    description: str
+    evidence_text: Optional[str] = None
+    proposed_direction: Optional[str] = None
+    source_origin: str = "database_verified"  # "database_verified" | "graph_engine" | "extracted_fallback" | "ai_inferred"
+
 class CompareMatrixItem(BaseModel):
     id: str
     title: str
-    year: Optional[int]
-    citations: int
-    score: Optional[float]
-    has_ablation: bool
-    has_baselines: bool
-    has_code_repo: bool
-    code_url: Optional[str]
-    has_compute_budget: bool
-    compute_details: Optional[str]
-    has_limitations: bool
+    year: Optional[int] = None
+    citations: int = 0
+    score: Optional[float] = None
+    has_ablation: bool = False
+    has_baselines: bool = False
+    has_code_repo: bool = False
+    code_url: Optional[str] = None
+    has_compute_budget: bool = False
+    compute_details: Optional[str] = None
+    has_limitations: bool = False
+    authors: List[str] = Field(default_factory=list)
+    abstract: Optional[str] = None
+    primary_source: Optional[str] = None
+    doi: Optional[str] = None
+    arxiv_id: Optional[str] = None
+    venue: Optional[str] = None
+    research_gaps: List[CompareResearchGap] = Field(default_factory=list)
+    gaps_count: int = 0
+    gaps_source: str = "none"  # "database_verified" | "graph_engine" | "extracted_fallback" | "ai_inferred"
+    limitations: List[str] = Field(default_factory=list)
+    open_questions: List[str] = Field(default_factory=list)
+    methodology: Optional[str] = None
+    contributions: List[str] = Field(default_factory=list)
+    benchmarks: List[Dict[str, Any]] = Field(default_factory=list)
+    code_repositories: List[Dict[str, Any]] = Field(default_factory=list)
+    rubric_score: Optional[float] = None
+    verdict: Optional[str] = None
+    has_db_record: bool = False
+
+class CrossPaperGap(BaseModel):
+    title: str
+    description: str
+    method: Optional[str] = None
+    dataset_or_task: Optional[str] = None
+    paper_ids: List[str] = Field(default_factory=list)
+    gap_type: str = "combinatorial_unexplored"
 
 class CompareResponse(BaseModel):
     papers_count: int
     matrix: List[CompareMatrixItem]
+    cross_paper_gaps: List[CrossPaperGap] = Field(default_factory=list)
+    shared_methods: List[str] = Field(default_factory=list)
+    shared_datasets: List[str] = Field(default_factory=list)
+    synthesis_summary: Optional[str] = None
+
+class ExtractGapsRequest(BaseModel):
+    identifier: str
+    title: Optional[str] = None
+    abstract: Optional[str] = None
+    force_refresh: bool = False
+
+class ExtractGapsResponse(BaseModel):
+    paper_id: str
+    title: str
+    gaps: List[CompareResearchGap]
+    source: str
+    saved_to_db: bool
 
 class CritiqueRequest(BaseModel):
     identifier: str
@@ -80,82 +138,417 @@ class HypothesisResponse(BaseModel):
 
 @router.post("/papers/compare", response_model=CompareResponse)
 async def compare_papers(req: CompareRequest, db: AsyncSession = Depends(get_db)):
-    """Compare multiple scientific papers side-by-side on methodology, code, and compute."""
+    """Compare multiple scientific papers side-by-side on methodology, code, compute, and verified research gaps."""
     if not req.identifiers:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Must provide at least one identifier.")
     
     matrix_items: List[CompareMatrixItem] = []
+    
     for identifier in req.identifiers:
         p: Optional[Paper] = None
-        try:
-            res = await resolver.resolve_identifier(identifier)
-            if res and res.paper:
-                p = res.paper
-        except Exception:
-            pass
+        canon = None
+        clean_arxiv = identifier.lower().replace("arxiv:", "").strip()
+        has_db_record = False
 
-        if not p:
-            # Fallback to local SQLite repository if network resolution fails (e.g. arXiv 429)
-            clean_arxiv = identifier.lower().replace("arxiv:", "").strip()
-            try:
-                # 1. Check normalized canonical papers
-                canon = await PaperRepository.get_by_doi_or_arxiv(db, doi=identifier if "/" in identifier else None, arxiv_id=clean_arxiv)
-                if canon:
+        # Step 1: Check normalized canonical papers in SQLite first
+        try:
+            canon = await PaperRepository.get_by_doi_or_arxiv(
+                db, doi=identifier if "/" in identifier else None, arxiv_id=clean_arxiv
+            )
+            if not canon:
+                canon = await PaperRepository.get_by_canonical_id(db, identifier)
+            if not canon:
+                canon_stmt = select(NormalizedPaperModel).where(
+                    or_(
+                        NormalizedPaperModel.canonical_id == identifier,
+                        NormalizedPaperModel.arxiv_id == clean_arxiv,
+                        NormalizedPaperModel.canonical_id == f"arxiv:{clean_arxiv}",
+                        NormalizedPaperModel.doi == identifier,
+                        NormalizedPaperModel.title.ilike(f"%{identifier[:40]}%"),
+                    )
+                )
+                canon_rec = (await db.execute(canon_stmt)).scalars().first()
+                if canon_rec:
+                    canon = PaperRepository._to_canonical_entity(canon_rec)
+
+            if canon:
+                has_db_record = True
+                p = Paper(
+                    id=canon.canonical_id,
+                    title=canon.title,
+                    abstract=canon.abstract,
+                    year=canon.year,
+                    citation_count=canon.citation_count,
+                    arxiv_id=canon.arxiv_id,
+                    doi=canon.doi,
+                    is_open_access=canon.is_open_access,
+                )
+        except Exception as e:
+            logger.debug("[Compare] SQLite canonical lookup note: %s", e)
+
+        # Step 2: Check SQLite synthesis and cache tables if canon wasn't found
+        synth_rec = None
+        try:
+            synth_stmt = select(PaperSynthesisModel).where(
+                or_(
+                    PaperSynthesisModel.paper_id == identifier,
+                    PaperSynthesisModel.paper_id == clean_arxiv,
+                    PaperSynthesisModel.paper_id == f"arxiv:{clean_arxiv}",
+                    PaperSynthesisModel.title.ilike(f"%{identifier[:40]}%"),
+                )
+            )
+            synth_rec = (await db.execute(synth_stmt)).scalars().first()
+            if synth_rec:
+                has_db_record = True
+                if not p:
                     p = Paper(
-                        id=canon.canonical_id,
-                        title=canon.title,
-                        abstract=canon.abstract,
-                        year=canon.year,
-                        citation_count=canon.citation_count,
-                        arxiv_id=canon.arxiv_id,
-                        doi=canon.doi,
-                        is_open_access=True,
+                        id=synth_rec.paper_id,
+                        title=synth_rec.title or identifier,
+                        abstract="",
+                        score=synth_rec.score,
                     )
-                else:
-                    # 2. Check paper_cache table
-                    cache_stmt = select(PaperCacheModel).where(
-                        or_(
-                            PaperCacheModel.id == identifier,
-                            PaperCacheModel.arxiv_id == clean_arxiv,
-                            PaperCacheModel.id == f"arxiv:{clean_arxiv}",
-                            PaperCacheModel.doi == identifier,
-                        )
-                    )
-                    cache_res = await db.execute(cache_stmt)
-                    cached = cache_res.scalars().first()
-                    if cached:
-                        p = Paper(
-                            id=cached.id,
-                            title=cached.title,
-                            abstract=cached.abstract,
-                            year=cached.year,
-                            citation_count=cached.citation_count,
-                            score=cached.score,
-                            arxiv_id=cached.arxiv_id,
-                            doi=cached.doi,
-                            is_open_access=True,
-                        )
+        except Exception as e:
+            logger.debug("[Compare] SQLite synthesis lookup note: %s", e)
+
+        # Step 3: Check external resolver if still not found
+        if not p:
+            try:
+                res = await resolver.resolve_identifier(identifier)
+                if res and res.paper:
+                    p = res.paper
             except Exception:
                 pass
 
-        if p:
-            rubric = rubric_evaluator.evaluate(p)
-            matrix_items.append(CompareMatrixItem(
-                id=p.id,
+        if not p:
+            # Fallback paper entity
+            p = Paper(
+                id=identifier,
+                title=clean_arxiv and f"arXiv:{clean_arxiv}" or identifier,
+                abstract="",
+            )
+
+        # Rubric & PaperRank
+        rubric = rubric_evaluator.evaluate(p)
+        if not p.score:
+            try:
+                scored = rank_engine.score_paper_list([p], query=p.title)
+                if scored:
+                    p = scored[0]
+            except Exception:
+                pass
+
+        # Step 4: Collect research gaps, limitations, and benchmarks from DB
+        found_gaps: List[CompareResearchGap] = []
+        limitations_list: List[str] = []
+        open_questions_list: List[str] = []
+        contributions_list: List[str] = []
+        benchmarks_list: List[Dict[str, Any]] = []
+        repos_list: List[Dict[str, Any]] = []
+        methodology_text: Optional[str] = None
+        authors_list: List[str] = []
+        primary_source = "Open Access"
+
+        if canon:
+            authors_list = [a.name for a in canon.authors]
+            if canon.sources:
+                primary_source = canon.sources[0].source_name.upper()
+            if canon.research_gaps:
+                for idx, g in enumerate(canon.research_gaps):
+                    found_gaps.append(CompareResearchGap(
+                        id=f"gap-db-{idx}-{abs(hash(g.description)) % 100000}",
+                        category=g.category,
+                        title=f"{g.category.replace('_', ' ').title()}: {g.description[:45]}...",
+                        description=g.description,
+                        evidence_text=g.evidence_text,
+                        proposed_direction=g.proposed_direction,
+                        source_origin="database_verified",
+                    ))
+            if canon.summary:
+                limitations_list.extend(canon.summary.limitations or [])
+                open_questions_list.extend(canon.summary.open_questions or [])
+                contributions_list.extend(canon.summary.contributions or [])
+                methodology_text = canon.summary.methodology
+            if canon.benchmarks:
+                for b in canon.benchmarks:
+                    benchmarks_list.append({
+                        "task": b.task,
+                        "dataset": b.dataset,
+                        "metric": b.metric,
+                        "value": b.value,
+                        "model": b.model,
+                    })
+            if canon.code_repositories:
+                for r in canon.code_repositories:
+                    repos_list.append({
+                        "url": r.url,
+                        "stars": r.stars,
+                        "framework": r.framework,
+                        "is_official": r.is_official,
+                    })
+
+        if synth_rec:
+            for c in (synth_rec.concerns_json or []):
+                if c not in limitations_list:
+                    limitations_list.append(c)
+            for q in (synth_rec.follow_up_questions_json or []):
+                if q not in open_questions_list:
+                    open_questions_list.append(q)
+
+        # Check knowledge graph tables (graph_edges & graph_nodes)
+        try:
+            edge_stmt = text(
+                "SELECT gn.id, gn.node_type, gn.data_json "
+                "FROM graph_edges ge "
+                "JOIN graph_nodes gn ON ge.target_id = gn.id "
+                "WHERE ge.source_id IN (:id1, :id2, :id3) AND (ge.relation = 'has_gap' OR gn.node_type = 'gap')"
+            )
+            edge_rows = (await db.execute(edge_stmt, {
+                "id1": identifier,
+                "id2": clean_arxiv,
+                "id3": f"arxiv:{clean_arxiv}",
+            })).fetchall()
+            for row in edge_rows:
+                try:
+                    import json as _json
+                    g_data = _json.loads(row[2])
+                    g_desc = g_data.get("description") or g_data.get("label") or row[0]
+                    if not any(g.description == g_desc for g in found_gaps):
+                        found_gaps.append(CompareResearchGap(
+                            id=row[0],
+                            category=g_data.get("category") or "combinatorial_gap",
+                            title=g_data.get("title") or f"Knowledge Graph Gap: {row[0]}",
+                            description=g_desc,
+                            evidence_text=g_data.get("evidence") or g_data.get("method"),
+                            proposed_direction=g_data.get("proposed_direction") or f"Investigate under {g_data.get('dataset_or_task', 'benchmarks')}.",
+                            source_origin="graph_engine",
+                        ))
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.debug("[Compare] Graph edges query note: %s", e)
+
+        # Check graph synthesis cache in SQLite
+        try:
+            cache_stmt = text("SELECT synthesis_json FROM graph_synthesis_cache")
+            cache_rows = (await db.execute(cache_stmt)).fetchall()
+            for (s_json,) in cache_rows:
+                try:
+                    import json as _json
+                    s_data = _json.loads(s_json)
+                    for g in s_data.get("research_gaps", []):
+                        p_ids = g.get("paper_ids") or []
+                        if any(pid in [identifier, clean_arxiv, f"arxiv:{clean_arxiv}"] for pid in p_ids):
+                            g_desc = g.get("description") or g.get("title", "")
+                            if not any(x.description == g_desc for x in found_gaps):
+                                found_gaps.append(CompareResearchGap(
+                                    id=f"gap-synth-{abs(hash(g_desc)) % 100000}",
+                                    category="graph_synthesis",
+                                    title=g.get("title", "Synthesized Research Gap"),
+                                    description=g_desc,
+                                    evidence_text=g.get("method"),
+                                    proposed_direction=f"Evaluate under {g.get('dataset_or_task', 'novel benchmarks')}.",
+                                    source_origin="graph_engine",
+                                ))
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.debug("[Compare] Graph synthesis cache query note: %s", e)
+
+        # Step 5: If NO gaps were found in DB ("if there are not, if not use something else do it u know")
+        # Run grounded NLP heuristic & AI gap extraction and persist to SQLite!
+        if not found_gaps:
+            extracted = await gap_extractor.extract_gaps(
                 title=p.title,
-                year=p.year,
-                citations=p.citation_count,
-                score=p.score,
-                has_ablation=rubric.has_ablation,
-                has_baselines=rubric.has_baselines,
-                has_code_repo=rubric.has_code_repo,
-                code_url=rubric.code_url,
-                has_compute_budget=rubric.has_compute_budget,
-                compute_details=rubric.compute_details,
-                has_limitations=rubric.has_limitations,
-            ))
+                abstract=p.abstract or "",
+                limitations=limitations_list,
+                concerns=(synth_rec.concerns_json if synth_rec else None),
+            )
+            for item in extracted:
+                found_gaps.append(CompareResearchGap(
+                    id=item["id"],
+                    category=item["category"],
+                    title=item["title"],
+                    description=item["description"],
+                    evidence_text=item.get("evidence_text"),
+                    proposed_direction=item.get("proposed_direction"),
+                    source_origin=item.get("source_origin", "extracted_fallback"),
+                ))
+
+            # Automatically persist extracted research gaps into SQLite database
+            try:
+                target_pid = (canon.canonical_id if canon else (clean_arxiv and f"arxiv:{clean_arxiv}") or identifier).strip()
+                for g in found_gaps:
+                    db.add(ResearchGapModel(
+                        paper_id=target_pid,
+                        category=g.category,
+                        description=g.description,
+                        evidence_text=g.evidence_text,
+                        proposed_direction=g.proposed_direction,
+                    ))
+                await db.commit()
+                has_db_record = True
+            except Exception as e:
+                logger.debug("[Compare] Could not persist extracted gaps to SQLite: %s", e)
+
+        # Determine overall gap source badge
+        gaps_source = "extracted_fallback"
+        if any(g.source_origin == "database_verified" for g in found_gaps):
+            gaps_source = "database_verified"
+        elif any(g.source_origin == "graph_engine" for g in found_gaps):
+            gaps_source = "graph_engine"
+        elif any(g.source_origin == "ai_inferred" for g in found_gaps):
+            gaps_source = "ai_inferred"
+
+        if not authors_list and hasattr(p, "authors") and p.authors:
+            authors_list = [a.name if hasattr(a, "name") else str(a) for a in p.authors]
+
+        matrix_items.append(CompareMatrixItem(
+            id=p.id,
+            title=p.title,
+            year=p.year,
+            citations=p.citation_count,
+            score=p.score,
+            has_ablation=rubric.has_ablation,
+            has_baselines=rubric.has_baselines,
+            has_code_repo=rubric.has_code_repo or bool(repos_list),
+            code_url=rubric.code_url or (repos_list[0]["url"] if repos_list else None),
+            has_compute_budget=rubric.has_compute_budget,
+            compute_details=rubric.compute_details,
+            has_limitations=bool(limitations_list) or rubric.has_limitations,
+            authors=authors_list,
+            abstract=p.abstract,
+            primary_source=primary_source,
+            doi=p.doi,
+            arxiv_id=p.arxiv_id,
+            research_gaps=found_gaps,
+            gaps_count=len(found_gaps),
+            gaps_source=gaps_source,
+            limitations=limitations_list,
+            open_questions=open_questions_list,
+            methodology=methodology_text,
+            contributions=contributions_list,
+            benchmarks=benchmarks_list,
+            code_repositories=repos_list,
+            rubric_score=synth_rec.rubric_score if synth_rec else rubric.rubric_score,
+            verdict=synth_rec.verdict if synth_rec else (
+                "High-rigor methodology with empirical validation." if rubric.rubric_score >= 70
+                else "Promising empirical method with identified research boundaries."
+            ),
+            has_db_record=has_db_record,
+        ))
+
+    # Cross-Paper combinatorial synthesis
+    raw_cross_gaps = ScientificGapExtractor.synthesize_cross_paper_gaps([item.model_dump() for item in matrix_items])
+    cross_paper_gaps = [
+        CrossPaperGap(
+            title=cg["title"],
+            description=cg["description"],
+            method=cg.get("method"),
+            dataset_or_task=cg.get("dataset_or_task"),
+            paper_ids=cg.get("paper_ids", []),
+            gap_type=cg.get("gap_type", "combinatorial_unexplored"),
+        )
+        for cg in raw_cross_gaps
+    ]
+
+    # Collect shared methods and datasets across benchmarks
+    all_methods = set()
+    all_datasets = set()
+    for item in matrix_items:
+        for b in item.benchmarks:
+            if b.get("task"):
+                all_methods.add(b["task"])
+            if b.get("dataset"):
+                all_datasets.add(b["dataset"])
+
+    return CompareResponse(
+        papers_count=len(matrix_items),
+        matrix=matrix_items,
+        cross_paper_gaps=cross_paper_gaps,
+        shared_methods=sorted(list(all_methods))[:10],
+        shared_datasets=sorted(list(all_datasets))[:10],
+        synthesis_summary=f"Compared {len(matrix_items)} scientific papers with {sum(m.gaps_count for m in matrix_items)} ground-truthed research gaps and {len(cross_paper_gaps)} cross-paper synthesis intersections.",
+    )
+
+@router.post("/papers/extract-gaps", response_model=ExtractGapsResponse)
+async def extract_paper_gaps(req: ExtractGapsRequest, db: AsyncSession = Depends(get_db)):
+    """Extract or force-refresh research gaps for a specific paper and persist them to SQLite."""
+    identifier = req.identifier.strip()
+    clean_arxiv = identifier.lower().replace("arxiv:", "").strip()
     
-    return CompareResponse(papers_count=len(matrix_items), matrix=matrix_items)
+    # Check DB if not force refresh
+    if not req.force_refresh:
+        canon = await PaperRepository.get_by_doi_or_arxiv(db, doi=identifier if "/" in identifier else None, arxiv_id=clean_arxiv)
+        if not canon:
+            canon = await PaperRepository.get_by_canonical_id(db, identifier)
+        if canon and canon.research_gaps:
+            gaps = [
+                CompareResearchGap(
+                    id=f"gap-db-{idx}",
+                    category=g.category,
+                    title=f"{g.category.replace('_', ' ').title()}: {g.description[:40]}...",
+                    description=g.description,
+                    evidence_text=g.evidence_text,
+                    proposed_direction=g.proposed_direction,
+                    source_origin="database_verified",
+                )
+                for idx, g in enumerate(canon.research_gaps)
+            ]
+            return ExtractGapsResponse(
+                paper_id=canon.canonical_id,
+                title=canon.title,
+                gaps=gaps,
+                source="database_verified",
+                saved_to_db=True,
+            )
+
+    title = req.title or identifier
+    abstract = req.abstract or ""
+    if not abstract:
+        try:
+            res = await resolver.resolve_identifier(identifier)
+            if res and res.paper:
+                title = res.paper.title
+                abstract = res.paper.abstract
+        except Exception:
+            pass
+
+    extracted = await gap_extractor.extract_gaps(title=title, abstract=abstract, use_llm=True)
+    gaps_result = [
+        CompareResearchGap(
+            id=item["id"],
+            category=item["category"],
+            title=item["title"],
+            description=item["description"],
+            evidence_text=item.get("evidence_text"),
+            proposed_direction=item.get("proposed_direction"),
+            source_origin=item.get("source_origin", "extracted_fallback"),
+        )
+        for item in extracted
+    ]
+
+    saved = False
+    try:
+        for g in gaps_result:
+            db.add(ResearchGapModel(
+                paper_id=identifier,
+                category=g.category,
+                description=g.description,
+                evidence_text=g.evidence_text,
+                proposed_direction=g.proposed_direction,
+            ))
+        await db.commit()
+        saved = True
+    except Exception as e:
+        logger.debug("[ExtractGaps] SQLite commit note: %s", e)
+
+    return ExtractGapsResponse(
+        paper_id=identifier,
+        title=title,
+        gaps=gaps_result,
+        source="ai_inferred" if any(g.source_origin == "ai_inferred" for g in gaps_result) else "extracted_fallback",
+        saved_to_db=saved,
+    )
 
 @router.post("/papers/critique", response_model=CritiqueResponse)
 async def critique_paper(req: CritiqueRequest, db: AsyncSession = Depends(get_db)):

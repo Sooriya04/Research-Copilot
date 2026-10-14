@@ -248,6 +248,16 @@ class PaperRepository:
                 model_used=s_rec.model_used
             )
 
+        research_gaps = [
+            ResearchGapEntity(
+                category=g.category,
+                description=g.description,
+                evidence_text=g.evidence_text,
+                proposed_direction=g.proposed_direction,
+            )
+            for g in (record.research_gaps or [])
+        ]
+
         return CanonicalPaper(
             canonical_id=record.canonical_id,
             title=record.title,
@@ -266,7 +276,8 @@ class PaperRepository:
             sections=sections,
             benchmarks=benchmarks,
             code_repositories=code_repositories,
-            summary=summary
+            summary=summary,
+            research_gaps=research_gaps,
         )
 
     @staticmethod

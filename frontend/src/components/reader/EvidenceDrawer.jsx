@@ -274,12 +274,12 @@ export function EvidenceInspectionPanel({ citation, onClose, onOpenPaper, onBack
           {citation.mechanically_verified ? (
             <span className="evidence-confidence-tag direct" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
               <ShieldCheck size={12} />
-              <span>✓ Mechanically Verified Quote · Page {citation.page || 1}</span>
+              <span> Mechanically Verified Quote · Page {citation.page || 1}</span>
             </span>
           ) : citation.confidence === 'direct' ? (
             <span className="evidence-confidence-tag direct">
               <CheckCircle2 size={11} />
-              <span>✓ Direct evidence · p.{citation.page || 1}</span>
+              <span> Direct evidence · p.{citation.page || 1}</span>
             </span>
           ) : citation.confidence === 'inferred' ? (
             <span className="evidence-confidence-tag inferred">
@@ -289,7 +289,7 @@ export function EvidenceInspectionPanel({ citation, onClose, onOpenPaper, onBack
           ) : (
             <span className="evidence-confidence-tag unsupported">
               <AlertTriangle size={11} />
-              <span>⚠ Not explicitly stated in the paper</span>
+              <span> Not explicitly stated in the paper</span>
             </span>
           )}
 
@@ -515,11 +515,11 @@ export function EvidenceDrawer({ sources, activeCitation, onClose, onOpenPaper, 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                   {src.mechanically_verified ? (
                     <span className="evidence-confidence-pill direct" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
-                      ✓ Verified
+                       Verified
                     </span>
                   ) : src.confidence === 'direct' ? (
                     <span className="evidence-confidence-pill direct">
-                      ✓ Direct
+                       Direct
                     </span>
                   ) : src.confidence === 'inferred' ? (
                     <span className="evidence-confidence-pill inferred">
@@ -527,7 +527,7 @@ export function EvidenceDrawer({ sources, activeCitation, onClose, onOpenPaper, 
                     </span>
                   ) : (
                     <span className="evidence-confidence-pill unsupported">
-                      ⚠ Unstated
+                       Unstated
                     </span>
                   )}
 
@@ -542,7 +542,7 @@ export function EvidenceDrawer({ sources, activeCitation, onClose, onOpenPaper, 
                         color: currentReview === 'approved' ? '#10b981' : '#ef4444',
                       }}
                     >
-                      {currentReview === 'approved' ? '✓ SIGNED' : '✕ REJECTED'}
+                      {currentReview === 'approved' ? ' SIGNED' : ' REJECTED'}
                     </span>
                   )}
                 </div>
@@ -622,13 +622,13 @@ export function EvidenceHighlightBanner({ highlight, onBackToAnswer, onDismiss }
     <div className="evidence-reader-highlight-banner">
       <div className="highlight-banner-left">
         <div className="highlight-banner-header">
-          <span className="highlight-pin-icon">📍</span>
+          <span className="highlight-pin-icon"></span>
           <span className="highlight-banner-title">
             Evidence Highlight: Page {highlight.page || 1} {highlight.section ? `· ${highlight.section}` : ''}
           </span>
           {highlight.confidence === 'direct' && (
             <span className="highlight-confidence-tag direct">
-              ✓ Direct evidence
+               Direct evidence
             </span>
           )}
           {highlight.confidence === 'inferred' && (

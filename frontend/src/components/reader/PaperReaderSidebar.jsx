@@ -53,13 +53,13 @@ function enrichPaperGrounding(content, paper, query = '') {
       missing: true,
       missingMessage: 'Not found in the paper.',
       confidence: 'missing',
-      confidenceLabel: '⚠ Not found in the paper',
+      confidenceLabel: 'Not found in the paper',
     };
   }
 
   let sources = [];
   let confidence = 'direct';
-  let confidenceLabel = '✓ Direct evidence · p.3';
+  let confidenceLabel = 'Direct evidence · p.3';
 
   if (combined.includes('method') || combined.includes('architecture') || combined.includes('approach') || combined.includes('framework')) {
     sources = [
@@ -71,7 +71,7 @@ function enrichPaperGrounding(content, paper, query = '') {
         section: 'Section 3.1 · Architectural Formulation',
         quote: 'We propose a parameter-efficient formulation that freezes pre-trained foundation model weights and injects trainable low-rank decomposition matrices.',
         confidence: 'direct',
-        confidenceLabel: '✓ Direct evidence · p.3',
+        confidenceLabel: 'Direct evidence · p.3',
       },
       {
         id: 'ev-2',
@@ -81,7 +81,7 @@ function enrichPaperGrounding(content, paper, query = '') {
         section: 'Section 3.2 · Parameter Update Formulation',
         quote: 'h = W_0 x + \\Delta W x = W_0 x + \\frac{\\alpha}{r} B A x, where B \\in \\mathbb{R}^{d \\times r} and A \\in \\mathbb{R}^{r \\times k}.',
         confidence: 'direct',
-        confidenceLabel: '✓ Direct evidence · p.4',
+        confidenceLabel: 'Direct evidence · p.4',
       },
       {
         id: 'ev-3',
@@ -95,7 +95,7 @@ function enrichPaperGrounding(content, paper, query = '') {
       },
     ];
     confidence = 'direct';
-    confidenceLabel = '✓ Direct evidence · p.3';
+    confidenceLabel = 'Direct evidence · p.3';
   } else if (combined.includes('experiment') || combined.includes('benchmark') || combined.includes('result') || combined.includes('evaluation') || combined.includes('metric') || combined.includes('table')) {
     sources = [
       {
@@ -106,7 +106,7 @@ function enrichPaperGrounding(content, paper, query = '') {
         section: 'Section 4.2 · Benchmark Comparisons',
         quote: 'Table 1: Performance comparison across standard GLUE and SQuAD benchmarks. The proposed method achieves competitive accuracy with 10,000x fewer trainable parameters.',
         confidence: 'direct',
-        confidenceLabel: '✓ Direct evidence · p.6',
+        confidenceLabel: 'Direct evidence · p.6',
       },
       {
         id: 'ev-5',
@@ -116,7 +116,7 @@ function enrichPaperGrounding(content, paper, query = '') {
         section: 'Section 4.4 · Ablation Study on Rank r',
         quote: 'Empirical results demonstrate that rank r=4 or r=8 suffices for preserving baseline performance, whereas scaling r does not significantly improve validation accuracy.',
         confidence: 'direct',
-        confidenceLabel: '✓ Direct evidence · p.7',
+        confidenceLabel: 'Direct evidence · p.7',
       },
       {
         id: 'ev-6',
@@ -130,7 +130,7 @@ function enrichPaperGrounding(content, paper, query = '') {
       },
     ];
     confidence = 'direct';
-    confidenceLabel = '✓ Direct evidence · p.6';
+    confidenceLabel = 'Direct evidence · p.6';
   } else if (combined.includes('limitation') || combined.includes('weakness') || combined.includes('future') || combined.includes('discussion')) {
     sources = [
       {
@@ -141,7 +141,7 @@ function enrichPaperGrounding(content, paper, query = '') {
         section: 'Section 6.1 · Limitations & Discussion',
         quote: 'A primary limitation is latency overhead during batched inference when multiple disparate adapters are loaded concurrently without ahead-of-time weight merging.',
         confidence: 'direct',
-        confidenceLabel: '✓ Direct evidence · p.8',
+        confidenceLabel: 'Direct evidence · p.8',
       },
       {
         id: 'ev-8',
@@ -155,7 +155,7 @@ function enrichPaperGrounding(content, paper, query = '') {
       },
     ];
     confidence = 'direct';
-    confidenceLabel = '✓ Direct evidence · p.8';
+    confidenceLabel = 'Direct evidence · p.8';
   } else if (combined.includes('contribution') || combined.includes('key') || combined.includes('novelty')) {
     sources = [
       {
@@ -166,7 +166,7 @@ function enrichPaperGrounding(content, paper, query = '') {
         section: 'Section 1.2 · Contributions',
         quote: 'Our core contributions: (1) low-rank matrix decomposition for frozen foundation models, (2) zero inference latency upon weight merging, and (3) validation across 12 downstream NLP benchmarks.',
         confidence: 'direct',
-        confidenceLabel: '✓ Direct evidence · p.2',
+        confidenceLabel: 'Direct evidence · p.2',
       },
       {
         id: 'ev-10',
@@ -176,11 +176,11 @@ function enrichPaperGrounding(content, paper, query = '') {
         section: 'Section 1.3 · High-Level Overview',
         quote: 'Figure 1: Comparison between conventional fine-tuning overhead versus low-rank parameter adaptation matrices.',
         confidence: 'direct',
-        confidenceLabel: '✓ Direct evidence · p.2',
+        confidenceLabel: 'Direct evidence · p.2',
       },
     ];
     confidence = 'direct';
-    confidenceLabel = '✓ Direct evidence · p.2';
+    confidenceLabel = 'Direct evidence · p.2';
   } else {
     sources = [
       {
@@ -193,7 +193,7 @@ function enrichPaperGrounding(content, paper, query = '') {
           ? (paper.abstract.slice(0, 200) + (paper.abstract.length > 200 ? '...' : ''))
           : 'This paper studies foundational parameter efficiency, empirical benchmarks, and reproducible AI architectures.',
         confidence: 'direct',
-        confidenceLabel: '✓ Direct evidence · p.1',
+        confidenceLabel: 'Direct evidence · p.1',
       },
       {
         id: 'ev-12',
@@ -207,7 +207,7 @@ function enrichPaperGrounding(content, paper, query = '') {
       },
     ];
     confidence = 'direct';
-    confidenceLabel = '✓ Direct evidence · p.1';
+    confidenceLabel = 'Direct evidence · p.1';
   }
 
   return {
@@ -1367,7 +1367,7 @@ function BenchmarksTab({ paper }) {
                           whiteSpace: 'nowrap',
                         }}
                       >
-                        🏆 {b.rank}
+                        {b.rank}
                       </span>
                     )}
                   </div>

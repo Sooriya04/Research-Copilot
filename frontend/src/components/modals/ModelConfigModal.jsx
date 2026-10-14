@@ -822,7 +822,7 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
                       marginBottom: 5,
                     }}
                   >
-                    🏷 Display Name
+                     Display Name
                   </label>
                   <input
                     type="text"
@@ -852,7 +852,7 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
                     <label style={{ fontSize: 12, fontWeight: 600, color: t.textSecondary }}>
-                      🔑 API Key
+                       API Key
                     </label>
                     {currentSaved?.api_key_masked && !apiKeyInput && (
                       <span style={{ fontSize: 11, color: t.textMuted }}>
@@ -986,7 +986,7 @@ export default function ModelConfigModal({ isOpen, onClose, onConfigUpdated, ini
                       marginBottom: 5,
                     }}
                   >
-                    🔗 Base URL (optional, e.g. {currentDef.defaultBaseUrl || 'https://api.openai.com/v1'})
+                     Base URL (optional, e.g. {currentDef.defaultBaseUrl || 'https://api.openai.com/v1'})
                   </label>
                   <input
                     type="text"

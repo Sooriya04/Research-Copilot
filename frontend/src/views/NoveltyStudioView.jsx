@@ -236,7 +236,7 @@ export default function NoveltyStudioView() {
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        setToastMsg(`✅ ${provider.toUpperCase()} credentials permanently saved to SQLite database!`);
+        setToastMsg(` ${provider.toUpperCase()} credentials permanently saved to SQLite database!`);
         addTelemetryLog(`SQLite DB updated for ${provider}: Masked ${data.api_key_masked || 'OK'}`);
         if (provider === 'groq') localStorage.setItem('rc_groq_key', apiKey || '');
         if (provider === 'gemini') localStorage.setItem('rc_gemini_key', apiKey || '');
@@ -263,7 +263,7 @@ export default function NoveltyStudioView() {
         method: 'DELETE',
       });
       if (res.ok) {
-        setToastMsg(`🗑️ ${provider.toUpperCase()} credentials removed from SQLite database.`);
+        setToastMsg(` ${provider.toUpperCase()} credentials removed from SQLite database.`);
         addTelemetryLog(`Removed ${provider} credentials from SQLite DB.`);
         if (provider === 'groq') { setGroqKeyOverride(''); localStorage.removeItem('rc_groq_key'); }
         if (provider === 'gemini') { setGeminiKeyOverride(''); localStorage.removeItem('rc_gemini_key'); }
@@ -420,7 +420,7 @@ export default function NoveltyStudioView() {
       if (res.ok) {
         const created = await res.json();
         setNoveltyResults((prev) => [created, ...(prev || [])]);
-        setToastMsg(`✨ Successfully added your novelty: "${created.title}"`);
+        setToastMsg(` Successfully added your novelty: "${created.title}"`);
         addTelemetryLog(`User authored novelty created: "${created.title}" (id=${created.id})`);
         setShowCustomModal(false);
         setCustomForm({
@@ -1102,7 +1102,7 @@ ${nov.mathematical_formulation || 'N/A'}
                     title={p.title}
                   >
                     <span style={{ color: isSelected ? '#3b82f6' : 'var(--text-muted)', fontWeight: 'bold' }}>
-                      {isSelected ? '✓' : '+'}
+                      {isSelected ? '' : '+'}
                     </span>
                     <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {p.title}
@@ -1846,10 +1846,10 @@ ${nov.mathematical_formulation || 'N/A'}
             style={{ fontSize: 11.5, padding: '4px 8px' }}
           >
             <option value="all">All Mechanisms</option>
-            <option value="recombination">⚡ Recombination</option>
-            <option value="contradiction_resolution">⚖️ Tension Resolution</option>
-            <option value="limitation_inversion">🛡️ Limitation Inversion</option>
-            <option value="gap_realization">🎯 Gap Realization</option>
+            <option value="recombination"> Recombination</option>
+            <option value="contradiction_resolution">Tension Resolution</option>
+            <option value="limitation_inversion">Limitation Inversion</option>
+            <option value="gap_realization"> Gap Realization</option>
           </select>
 
           {/* Provider filter */}
@@ -1860,7 +1860,7 @@ ${nov.mathematical_formulation || 'N/A'}
             style={{ fontSize: 11.5, padding: '4px 8px' }}
           >
             <option value="all">All Engines</option>
-            <option value="custom">✨ User Authored</option>
+            <option value="custom"> User Authored</option>
             <option value="gemini">Google Gemini</option>
             <option value="groq">Groq LPU</option>
             <option value="ollama">Local Ollama</option>
@@ -2225,12 +2225,12 @@ ${nov.mathematical_formulation || 'N/A'}
                     onChange={(e) => setCustomForm({ ...customForm, mechanism: e.target.value })}
                     style={{ width: '100%', fontSize: 12, padding: '7px 10px' }}
                   >
-                    <option value="recombination">⚡ Orthogonal Recombination</option>
-                    <option value="contradiction_resolution">⚖️ Tension Resolution</option>
-                    <option value="limitation_inversion">🛡️ Limitation Inversion</option>
-                    <option value="gap_realization">🎯 Gap Realization</option>
-                    <option value="empirical_extension">🔬 Empirical Extension</option>
-                    <option value="custom">✨ Novel Paradigm</option>
+                    <option value="recombination"> Orthogonal Recombination</option>
+                    <option value="contradiction_resolution">Tension Resolution</option>
+                    <option value="limitation_inversion">Limitation Inversion</option>
+                    <option value="gap_realization"> Gap Realization</option>
+                    <option value="empirical_extension"> Empirical Extension</option>
+                    <option value="custom"> Novel Paradigm</option>
                   </select>
                 </div>
 
@@ -2431,24 +2431,24 @@ function NoveltyCardItem({ novelty, isDark, isAdded, isAdding, copied, onAddToGr
   const mech = (novelty.mechanism || '').toLowerCase();
   let badgeBg = 'var(--bg-secondary)';
   let badgeColor = 'var(--accent-primary)';
-  let badgeLabel = '💡 Proposal';
+  let badgeLabel = ' Proposal';
 
   if (mech.includes('recombination') || mech.includes('orthogonal')) {
     badgeBg = isDark ? '#064e3b' : '#ecfdf5';
     badgeColor = isDark ? '#34d399' : '#059669';
-    badgeLabel = '⚡ Recombination';
+    badgeLabel = ' Recombination';
   } else if (mech.includes('contradict') || mech.includes('tension')) {
     badgeBg = isDark ? '#451a03' : '#fffbeb';
     badgeColor = isDark ? '#fbbf24' : '#b45309';
-    badgeLabel = '⚖️ Tension Resolution';
+    badgeLabel = 'Tension Resolution';
   } else if (mech.includes('limitation') || mech.includes('inversion')) {
     badgeBg = isDark ? '#172554' : '#eff6ff';
     badgeColor = isDark ? '#60a5fa' : '#1d4ed8';
-    badgeLabel = '🛡️ Limitation Inversion';
+    badgeLabel = 'Limitation Inversion';
   } else if (mech.includes('gap') || mech.includes('realization')) {
     badgeBg = isDark ? '#500724' : '#fdf2f8';
     badgeColor = isDark ? '#f472b6' : '#be185d';
-    badgeLabel = '🎯 Gap Realization';
+    badgeLabel = ' Gap Realization';
   }
 
   const eng = (novelty.engine || 'gemini').toLowerCase();
@@ -2473,7 +2473,7 @@ function NoveltyCardItem({ novelty, isDark, isAdded, isAdding, copied, onAddToGr
     engineBadge = 'Heuristic';
     engineColor = '#64748b';
   } else if (eng === 'custom' || novelty.is_custom) {
-    engineBadge = '✨ User Authored';
+    engineBadge = ' User Authored';
     engineColor = '#a855f7';
   }
 

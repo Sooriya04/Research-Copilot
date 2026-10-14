@@ -62,6 +62,9 @@ export default function App() {
             <Route path="/search" element={<LiteratureSearchView />} />
             <Route path="/search-results" element={<LiteratureResultsView />} />
             <Route path="/knowledge-graph" element={<KnowledgeGraphView />} />
+            <Route path="/compare" element={<KnowledgeGraphView />} />
+            <Route path="/matrix" element={<KnowledgeGraphView />} />
+            <Route path="/paper-comparison" element={<KnowledgeGraphView />} />
             <Route path="/novelty" element={<NoveltyStudioView />} />
             <Route path="/novelty-studio" element={<NoveltyStudioView />} />
             <Route path="/litgraph" element={<LitGraphView />} />

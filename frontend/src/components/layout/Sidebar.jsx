@@ -6,6 +6,7 @@ import {
   Search,
   BookOpen,
   Network,
+  Columns3,
   Lightbulb,
   Compass,
   Workflow,
@@ -140,13 +141,26 @@ export default function Sidebar() {
         {/* 5. Knowledge Graph */}
         <NavLink
           to="/knowledge-graph"
-          className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+          className={({ isActive }) => `nav-item ${isActive && location.pathname === '/knowledge-graph' ? 'active' : ''}`}
           title="Knowledge Graph"
           onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
         >
           <div className="nav-item-left">
             <Network size={15} />
             <span>Knowledge Graph</span>
+          </div>
+        </NavLink>
+
+        {/* 5b. Side-by-Side Multi-Paper Comparison Matrix */}
+        <NavLink
+          to="/compare"
+          className={({ isActive }) => `nav-item ${isActive || location.pathname === '/compare' || location.pathname === '/matrix' ? 'active' : ''}`}
+          title="Side-by-Side Multi-Paper Comparison Matrix"
+          onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
+        >
+          <div className="nav-item-left">
+            <Columns3 size={15} />
+            <span>Comparison Matrix</span>
           </div>
         </NavLink>
 

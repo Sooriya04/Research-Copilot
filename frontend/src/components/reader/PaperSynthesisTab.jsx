@@ -423,7 +423,7 @@ export default function PaperSynthesisTab({ paper }) {
             }}
           >
             <div style={{ fontWeight: 600, color: '#d97706', marginBottom: 4 }}>
-              ⚠ Identified Rigor Gaps ({checklist.rubric_gaps || checklist.recommendations.length}):
+               Identified Rigor Gaps ({checklist.rubric_gaps || checklist.recommendations.length}):
             </div>
             <ul style={{ margin: 0, paddingLeft: 14 }}>
               {checklist.recommendations.map((rec, i) => (
@@ -608,10 +608,10 @@ export default function PaperSynthesisTab({ paper }) {
                     <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>
                       Reviewer Sign-off:
                       {currentStatus === 'approved' && (
-                        <span style={{ color: '#10b981', fontWeight: 600, marginLeft: 4 }}>✓ Approved</span>
+                        <span style={{ color: '#10b981', fontWeight: 600, marginLeft: 4 }}> Approved</span>
                       )}
                       {currentStatus === 'rejected' && (
-                        <span style={{ color: '#ef4444', fontWeight: 600, marginLeft: 4 }}>✕ Rejected</span>
+                        <span style={{ color: '#ef4444', fontWeight: 600, marginLeft: 4 }}> Rejected</span>
                       )}
                       {!currentStatus && (
                         <span style={{ fontStyle: 'italic', marginLeft: 4 }}>Pending</span>

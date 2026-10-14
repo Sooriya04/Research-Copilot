@@ -106,7 +106,7 @@ export default function TopHeader() {
       <div className="command-bar-trigger" id="btn-open-cmd-bar" onClick={openCmdPalette}>
         <Search size={14} style={{ marginRight: 6, color: 'var(--text-muted)' }} />
         <span>Search literature, DOIs, repositories...</span>
-        <span className="kbd-badge">⌘K</span>
+        <span className="kbd-badge">Cmd+K</span>
       </div>
 
       <div className="header-right">

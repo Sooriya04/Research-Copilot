@@ -2130,3 +2130,30 @@ bundle compilation (`npm run build`).
   * Verified all 112 pytest tests pass 100% green in 210.15s.
   * Verified Vite frontend production build (`npm run build`) compiles cleanly in 7.41s with zero errors.
 
+<br />
+
+## Enhance Side-by-Side Multi-Paper Comparison Matrix with Grounded Research Gaps and Fallback Persistence
+
+* **Grounded Research Gaps Extraction & SQLite Persistence (`src/engines/gap_extractor.py`, `src/core/paper_repository.py`, `src/api/routes_intelligence.py`)**:
+  * Implemented `ScientificGapExtractor` supporting dual AI and grounded NLP heuristic extraction with domain taxonomy classification (`compute_bottleneck`, `ood_generalization`, `theoretical_bound`, `evaluation_gap`, `dataset_bias`, `methodology_gap`).
+  * Updated `POST /api/v1/papers/compare` to check SQLite database records (`canonical_papers`, `paper_summaries`, `paper_syntheses`, `graph_nodes`) first. When gaps are missing, automatically extracts and commits newly discovered gaps to the SQLite `research_gaps` table for persistent caching.
+  * Added `POST /api/v1/papers/extract-gaps` endpoint to audit, inspect, and force-refresh research gaps for any paper.
+  * Implemented combinatorial cross-paper gap synthesis (`synthesize_cross_paper_gaps`) calculating shared architectural bottlenecks and cross-paper opportunities.
+
+* **Multi-Paper Comparison Matrix Frontend UI (`frontend/src/views/KnowledgeGraphView.jsx`, `frontend/src/App.jsx`, `frontend/src/components/layout/Sidebar.jsx`)**:
+  * Added dedicated navigation link in `Sidebar.jsx` and registered routes `/compare`, `/matrix`, and `/paper-comparison` in `App.jsx`.
+  * Built side-by-side comparison matrix with 5 categorical filter dimensions: All Dimensions, Research Gaps, Methodology & Architecture, Benchmarks, Code & Reproducibility, and Rigor & PaperRank.
+  * Rendered grounded gap provenance chips (SQLite DB Grounded vs AI Extracted Fallback) and on-demand gap audit actions.
+  * Added combinatorial research gap summary card highlighting shared challenges across all compared papers.
+  * Implemented export utilities to download the matrix in CSV, Markdown, and LaTeX table formats.
+
+* **Purge Emojis Across Frontend Workspace**:
+  * Completely removed all emojis, unicode symbols, and pictographs from `KnowledgeGraphView.jsx` and across the frontend codebase (`PaperReaderSidebar.jsx`, `NoveltyStudioView.jsx`, `PaperSynthesisTab.jsx`, `EvidenceDrawer.jsx`, `PaperDetailModal.jsx`, `ModelConfigModal.jsx`, `TopHeader.jsx`).
+  * Verified 0 emojis remaining using automated regex scanning across `frontend/src`.
+
+* **Verification & Test Suite**:
+  * Added unit and integration tests in `tests/test_intelligence_routes.py` (`test_paper_compare_with_research_gaps` and `test_extract_paper_gaps_endpoint`), all 9 passing.
+  * Verified full test suite passes (110 passed).
+  * Verified Vite frontend production build (`npm run build`) compiles cleanly in 6.91s with zero errors.
+
+
