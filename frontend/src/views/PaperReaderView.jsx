@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Sparkles,
@@ -19,10 +19,18 @@ import {
   Maximize2,
   Copy,
   Check,
+  Code2,
+  AlertCircle,
+  RefreshCw,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import PaperReaderSidebar from '../components/reader/PaperReaderSidebar';
 import { EvidenceHighlightBanner } from '../components/reader/EvidenceDrawer';
+import {
+  convertPdfToHtmlPages,
+  downloadStandaloneHtmlFile,
+  createFallbackPdfBuffer,
+} from '../utils/pdfWasmConverter';
 
 function extractArxivId(idStr) {
   if (!idStr) return null;
@@ -42,6 +50,7 @@ function buildProxyPdfUrl(directUrl) {
   if (!directUrl) return null;
   const t = String(directUrl).trim();
   if (t.startsWith('blob:') || t.startsWith('data:')) return t;
+  if (t.startsWith('/api/v1/')) return t;
   if (t.startsWith('http://') || t.startsWith('https://')) {
     return `/api/v1/pdf/proxy?url=${encodeURIComponent(t)}`;
   }
@@ -50,12 +59,17 @@ function buildProxyPdfUrl(directUrl) {
 
 function resolvePaperPdf(paper) {
   if (!paper) return null;
-  if (paper.pdf_url && (paper.pdf_url.startsWith('http') || paper.pdf_url.startsWith('blob'))) {
-    if (paper.pdf_url.includes('arxiv.org/')) {
-      const aid = extractArxivId(paper.pdf_url);
+  if (paper.pdf_url) {
+    const u = String(paper.pdf_url).trim();
+    if (u.startsWith('blob:') || u.startsWith('data:')) return u;
+    if (u.startsWith('/api/v1/')) return u;
+    if (u.includes('arxiv.org/')) {
+      const aid = extractArxivId(u);
       if (aid) return buildProxyPdfUrl(`https://arxiv.org/pdf/${aid}.pdf`);
     }
-    return buildProxyPdfUrl(paper.pdf_url);
+    if (u.startsWith('http://') || u.startsWith('https://')) {
+      return buildProxyPdfUrl(u);
+    }
   }
   if (paper.arxiv_id) {
     const aid = extractArxivId(paper.arxiv_id);
@@ -67,7 +81,26 @@ function resolvePaperPdf(paper) {
   if (fromCanonical) return buildProxyPdfUrl(`https://arxiv.org/pdf/${fromCanonical}.pdf`);
   const fromUrl = extractArxivId(paper.url);
   if (fromUrl) return buildProxyPdfUrl(`https://arxiv.org/pdf/${fromUrl}.pdf`);
+  if (paper.doi) {
+    return `/api/v1/pdf/preprint?identifier=${encodeURIComponent(paper.doi)}`;
+  }
+  if (paper.id && !paper.id.startsWith('raw:')) {
+    return `/api/v1/pdf/preprint?identifier=${encodeURIComponent(paper.id)}`;
+  }
   return null;
+}
+
+function isEvidenceItem(item, pageNum, activeHighlight) {
+  if (!activeHighlight) return false;
+  if (activeHighlight.page && Number(activeHighlight.page) !== pageNum) return false;
+  const quote = (activeHighlight.quote || activeHighlight.text || '').trim().toLowerCase();
+  if (!quote) return false;
+  const s = (item.str || '').trim().toLowerCase();
+  if (s.length < 3) return false;
+  if (quote.includes(s)) return true;
+  const words = s.split(/\s+/).filter((w) => w.length >= 5);
+  if (words.length > 0 && words.some((w) => quote.includes(w))) return true;
+  return false;
 }
 
 const SAMPLE_PAPERS = [
@@ -114,20 +147,70 @@ export default function PaperReaderView() {
 
   // Document Toolbar Controls
   const [currentPage, setCurrentPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(12);
+  const [totalPages, setTotalPages] = useState(1);
   const [zoom, setZoom] = useState(100);
   const [fitWidth, setFitWidth] = useState(false);
+  const [viewMode, setViewMode] = useState('continuous'); // 'continuous' | 'single'
   const [inDocSearch, setInDocSearch] = useState('');
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [copiedBibtex, setCopiedBibtex] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
-  const [activeHighlight, setActiveHighlight] = useState(null); // { page, section, quote, confidence, type }
+  const [exportingHtml, setExportingHtml] = useState(false);
+  const [activeHighlight, setActiveHighlight] = useState(null);
+
+  // Progressive WebAssembly conversion states
+  const [convertedPages, setConvertedPages] = useState([]);
+  const [isConverting, setIsConverting] = useState(false);
+  const [conversionProgress, setConversionProgress] = useState({ percent: 0, status: '' });
+  const [conversionError, setConversionError] = useState(null);
+
+  // In-Doc Search matching
+  const [searchMatchCount, setSearchMatchCount] = useState(0);
+  const [searchCurrentMatchIdx, setSearchCurrentMatchIdx] = useState(0);
+
+  const canvasRef = useRef(null);
+  const [containerWidth, setContainerWidth] = useState(860);
+
+  // Measure container for crisp Fit Width calculation
+  useEffect(() => {
+    if (!canvasRef.current) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.contentRect.width > 0) {
+          setContainerWidth(entry.contentRect.width);
+        }
+      }
+    });
+    ro.observe(canvasRef.current);
+    return () => ro.disconnect();
+  }, []);
 
   const handleHighlightEvidence = (evidence) => {
     if (!evidence) return;
     setActiveHighlight(evidence);
-    if (evidence.page) {
-      setCurrentPage(Number(evidence.page) || 1);
+    const targetPage = Number(evidence.page) || 1;
+    setCurrentPage(targetPage);
+    if (viewMode === 'continuous') {
+      setTimeout(() => {
+        const el = document.getElementById(`wasm-pdf-page-${targetPage}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 50);
+    }
+  };
+
+  const handleExportHtml = () => {
+    if (convertedPages.length === 0 || exportingHtml) return;
+    setExportingHtml(true);
+    try {
+      downloadStandaloneHtmlFile(convertedPages, downloadFilename.replace(/\.pdf$/i, '.html'));
+    } catch (err) {
+      console.error('HTML export failed:', err);
+      alert('HTML export failed: ' + err.message);
+    } finally {
+      setExportingHtml(false);
+      setMoreMenuOpen(false);
     }
   };
 
@@ -150,19 +233,30 @@ export default function PaperReaderView() {
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data?.paper?.pdf_url) {
-          const proxied = buildProxyPdfUrl(data.paper.pdf_url);
-          if (proxied) setCurrentDoc((prev) => (prev ? { ...prev, pdfUrl: proxied } : null));
-          return;
+          const proxied = resolvePaperPdf(data.paper);
+          if (proxied) {
+            setCurrentDoc((prev) => (prev ? { ...prev, ...data.paper, pdfUrl: proxied } : data.paper));
+            return;
+          }
         }
         if (data?.candidates?.length > 0) {
           const best = data.candidates.find((c) => c.format === 'pdf') || data.candidates[0];
           if (best?.url) {
-            const proxied = buildProxyPdfUrl(best.url);
-            if (proxied) setCurrentDoc((prev) => (prev ? { ...prev, pdfUrl: proxied } : null));
+            const proxied = resolvePaperPdf({ ...data.paper, pdf_url: best.url });
+            if (proxied) {
+              setCurrentDoc((prev) => (prev ? { ...prev, pdfUrl: proxied } : null));
+              return;
+            }
           }
         }
+        // Fallback publication preprint buffer endpoint
+        const fallbackUrl = `/api/v1/pdf/preprint?identifier=${encodeURIComponent(lookupQuery)}`;
+        setCurrentDoc((prev) => (prev ? { ...prev, pdfUrl: fallbackUrl } : null));
       })
-      .catch(() => {})
+      .catch(() => {
+        const fallbackUrl = `/api/v1/pdf/preprint?identifier=${encodeURIComponent(lookupQuery)}`;
+        setCurrentDoc((prev) => (prev ? { ...prev, pdfUrl: fallbackUrl } : null));
+      })
       .finally(() => {
         setResolvingPdf(false);
       });
@@ -230,6 +324,177 @@ export default function PaperReaderView() {
       }).catch(() => {});
     }
   }, [activeReaderPaper]);
+
+  // ─── Progressive WebAssembly Conversion Engine ───────────────────────────
+  useEffect(() => {
+    if (!currentDoc) {
+      setConvertedPages([]);
+      setIsConverting(false);
+      return;
+    }
+
+    let isMounted = true;
+    const abortController = new AbortController();
+
+    const runWasmConversion = async () => {
+      setIsConverting(true);
+      setConversionError(null);
+      setConversionProgress({ percent: 5, status: 'Initializing WebAssembly runtime...' });
+      setConvertedPages([]);
+
+      // 1. Resolve source
+      let source = currentDoc.pdfUrl || resolvePaperPdf(currentDoc);
+      if (!source) {
+        if (currentDoc.doi) {
+          source = `/api/v1/pdf/preprint?identifier=${encodeURIComponent(currentDoc.doi)}`;
+        } else if (currentDoc.id && !currentDoc.id.startsWith('raw:')) {
+          source = `/api/v1/pdf/preprint?identifier=${encodeURIComponent(currentDoc.id)}`;
+        } else {
+          source = currentDoc;
+        }
+      }
+
+      try {
+        await convertPdfToHtmlPages(
+          source,
+          {
+            scale: 1.8,
+            maxPages: 40,
+            signal: abortController.signal,
+            paperFallback: currentDoc,
+            onPageRendered: (pageData, pageNum, totalDocPages) => {
+              if (!isMounted) return;
+              setConvertedPages((prev) => {
+                if (prev.some((p) => p.pageNumber === pageData.pageNumber)) return prev;
+                const next = [...prev, pageData].sort((a, b) => a.pageNumber - b.pageNumber);
+                return next;
+              });
+              setTotalPages(totalDocPages);
+            },
+          },
+          (percent, statusMsg) => {
+            if (!isMounted) return;
+            setConversionProgress({ percent, status: statusMsg });
+          }
+        );
+      } catch (err) {
+        if (abortController.signal.aborted) return;
+        console.warn('WASM conversion with primary source encountered issue, falling back to preprint buffer:', err);
+        try {
+          const fallbackBytes = createFallbackPdfBuffer(currentDoc);
+          await convertPdfToHtmlPages(
+            fallbackBytes,
+            {
+              scale: 1.8,
+              maxPages: 40,
+              onPageRendered: (pageData, pageNum, totalDocPages) => {
+                if (!isMounted) return;
+                setConvertedPages((prev) => {
+                  if (prev.some((p) => p.pageNumber === pageData.pageNumber)) return prev;
+                  return [...prev, pageData].sort((a, b) => a.pageNumber - b.pageNumber);
+                });
+                setTotalPages(totalDocPages);
+              },
+            },
+            (percent, statusMsg) => {
+              if (!isMounted) return;
+              setConversionProgress({ percent, status: statusMsg });
+            }
+          );
+        } catch (fallbackErr) {
+          if (!isMounted) return;
+          setConversionError(`Document conversion failed: ${fallbackErr.message}`);
+        }
+      } finally {
+        if (isMounted) {
+          setIsConverting(false);
+        }
+      }
+    };
+
+    runWasmConversion();
+
+    return () => {
+      isMounted = false;
+      abortController.abort();
+    };
+  }, [currentDoc?.pdfUrl, currentDoc?.id, currentDoc?.doi, currentDoc?.arxiv_id, currentDoc?.title]);
+
+  // Track active page during continuous scroll
+  useEffect(() => {
+    if (viewMode !== 'continuous' || convertedPages.length === 0) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        let bestEntry = null;
+        let maxRatio = 0;
+        for (const entry of entries) {
+          if (entry.isIntersecting && entry.intersectionRatio > maxRatio) {
+            maxRatio = entry.intersectionRatio;
+            bestEntry = entry;
+          }
+        }
+        if (bestEntry) {
+          const pageNum = Number(bestEntry.target.getAttribute('data-page-number'));
+          if (pageNum && !isNaN(pageNum)) {
+            setCurrentPage(pageNum);
+          }
+        }
+      },
+      {
+        root: null,
+        rootMargin: '-10% 0px -40% 0px',
+        threshold: [0.1, 0.3, 0.5, 0.7],
+      }
+    );
+
+    const pageEls = document.querySelectorAll('.wasm-pdf-page');
+    pageEls.forEach((el) => observer.observe(el));
+
+    return () => observer.disconnect();
+  }, [viewMode, convertedPages.length]);
+
+  const handleJumpToPage = (newPage) => {
+    const target = Math.max(1, Math.min(totalPages, newPage));
+    setCurrentPage(target);
+    if (viewMode === 'continuous') {
+      const el = document.getElementById(`wasm-pdf-page-${target}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }
+  };
+
+  // Real-time search highlighting counter
+  const searchLower = inDocSearch.trim().toLowerCase();
+
+  useEffect(() => {
+    if (!searchLower) {
+      setSearchMatchCount(0);
+      return;
+    }
+    let count = 0;
+    for (const page of convertedPages) {
+      for (const item of page.textItems || []) {
+        if (item.str && item.str.toLowerCase().includes(searchLower)) {
+          count++;
+        }
+      }
+    }
+    setSearchMatchCount(count);
+  }, [searchLower, convertedPages]);
+
+  const handleSearchKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const matchElements = document.querySelectorAll('.wasm-pdf-text-span.pdf-highlight-search');
+      if (matchElements.length > 0) {
+        const nextIdx = (searchCurrentMatchIdx + 1) % matchElements.length;
+        setSearchCurrentMatchIdx(nextIdx);
+        matchElements[nextIdx].scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+  };
 
   const handleExtract = async (overrideQuery) => {
     const query = (overrideQuery || inputVal).trim();
@@ -350,6 +615,18 @@ export default function PaperReaderView() {
     ? `${currentDoc.title.slice(0, 36).replace(/[^a-zA-Z0-9]/g, '_')}.pdf`
     : 'research_paper.pdf';
 
+  // Scale calculation
+  const firstPage = convertedPages[0];
+  const basePageWidth = firstPage?.width || 612;
+  const displayScale = fitWidth
+    ? Math.min(2.2, Math.max(0.6, (containerWidth - 48) / basePageWidth))
+    : zoom / 100;
+
+  const pagesToDisplay =
+    viewMode === 'continuous'
+      ? convertedPages
+      : convertedPages.filter((p) => p.pageNumber === currentPage);
+
   // ─── No paper: show clean reading desk empty state ─────────────────────────
   if (!currentDoc) {
     return (
@@ -407,7 +684,7 @@ export default function PaperReaderView() {
                   Research Paper Reader
                 </h2>
                 <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>
-                  Read any research paper with AI assistance — enter an arXiv ID, DOI, URL, or upload a PDF.
+                  Render any publication directly as HTML pages using WebAssembly — enter an arXiv ID, DOI, URL, or upload a PDF.
                 </p>
               </div>
 
@@ -418,7 +695,7 @@ export default function PaperReaderView() {
                   value={inputVal}
                   onChange={(e) => setInputVal(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleExtract()}
-                  placeholder="arXiv ID (e.g. 2503.04615, 1706.03762), DOI, or title..."
+                  placeholder="arXiv ID (e.g. 2503.04615, 1706.03762), DOI (e.g. 10.1561/1500000061)..."
                   style={{
                     flex: 1,
                     padding: '8px 12px',
@@ -539,7 +816,7 @@ export default function PaperReaderView() {
     );
   }
 
-  // ─── Paper Loaded: Full Clean Research IDE Reader ─────────────────────────
+  // ─── Paper Loaded: Full WebAssembly PDF-to-HTML Reader ─────────────────────
   return (
     <div className="reader-workspace-root">
       <div className="reader-center-panel">
@@ -666,11 +943,29 @@ export default function PaperReaderView() {
                     </a>
                   )}
 
+                  {convertedPages.length > 0 && (
+                    <button
+                      type="button"
+                      className="reader-dropdown-item"
+                      onClick={handleExportHtml}
+                      disabled={exportingHtml}
+                      title="Download complete standalone HTML file powered by WebAssembly"
+                    >
+                      {exportingHtml ? (
+                        <Loader2 size={13} className="animate-spin" style={{ color: 'var(--accent-violet, #6366f1)' }} />
+                      ) : (
+                        <Code2 size={13} style={{ color: 'var(--accent-violet, #6366f1)' }} />
+                      )}
+                      <span>{exportingHtml ? 'Preparing HTML...' : 'Export Standalone HTML'}</span>
+                    </button>
+                  )}
+
                   <button
                     type="button"
                     className="reader-dropdown-item"
                     onClick={() => {
                       setCurrentDoc(null);
+                      setConvertedPages([]);
                       setMoreMenuOpen(false);
                     }}
                   >
@@ -685,12 +980,12 @@ export default function PaperReaderView() {
 
         {/* ── 2. Compact Document Toolbar ── */}
         <div className="reader-doc-toolbar">
-          {/* Left: Page Navigation */}
+          {/* Left: Page Navigation & Reading Mode */}
           <div className="toolbar-group">
             <button
               type="button"
               className="toolbar-btn"
-              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              onClick={() => handleJumpToPage(currentPage - 1)}
               disabled={currentPage <= 1}
               title="Previous page"
             >
@@ -698,13 +993,13 @@ export default function PaperReaderView() {
             </button>
 
             <span className="toolbar-page-indicator">
-              Page {currentPage} / {totalPages}
+              Page {currentPage} / {totalPages || 1}
             </span>
 
             <button
               type="button"
               className="toolbar-btn"
-              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              onClick={() => handleJumpToPage(currentPage + 1)}
               disabled={currentPage >= totalPages}
               title="Next page"
             >
@@ -713,24 +1008,54 @@ export default function PaperReaderView() {
 
             <div className="toolbar-divider" />
 
+            {/* Reading Mode Switcher (Continuous vs Single Page) */}
+            <div className="reader-mode-toggle" title="Switch reading mode">
+              <button
+                type="button"
+                className={`reader-mode-toggle-btn ${viewMode === 'continuous' ? 'active' : ''}`}
+                onClick={() => setViewMode('continuous')}
+                title="Continuous Scroll Mode"
+              >
+                <FileText size={12} />
+                <span>Scroll</span>
+              </button>
+              <button
+                type="button"
+                className={`reader-mode-toggle-btn ${viewMode === 'single' ? 'active' : ''}`}
+                onClick={() => setViewMode('single')}
+                title="Page-by-page Mode"
+              >
+                <BookOpen size={12} />
+                <span>Page</span>
+              </button>
+            </div>
+
+            <div className="toolbar-divider" />
+
             {/* Zoom Controls */}
             <button
               type="button"
               className="toolbar-btn"
-              onClick={() => setZoom((z) => Math.max(50, z - 10))}
+              onClick={() => {
+                setZoom((z) => Math.max(50, z - 10));
+                setFitWidth(false);
+              }}
               title="Zoom out"
             >
               <ZoomOut size={13} />
             </button>
 
             <span className="toolbar-zoom-label">
-              {zoom}%
+              {fitWidth ? 'Auto' : `${zoom}%`}
             </span>
 
             <button
               type="button"
               className="toolbar-btn"
-              onClick={() => setZoom((z) => Math.min(200, z + 10))}
+              onClick={() => {
+                setZoom((z) => Math.min(200, z + 10));
+                setFitWidth(false);
+              }}
               title="Zoom in"
             >
               <ZoomIn size={13} />
@@ -741,24 +1066,33 @@ export default function PaperReaderView() {
               type="button"
               className={`toolbar-btn ${fitWidth ? 'active' : ''}`}
               onClick={() => setFitWidth((w) => !w)}
-              title="Fit to width"
+              title="Fit to container width"
             >
               <Maximize2 size={13} />
               <span>Fit Width</span>
             </button>
           </div>
 
-          {/* Right: In-Paper Search, Highlight, Annotation, AI Copilot Toggle */}
+          {/* Right: In-Paper Search & AI Copilot Toggle */}
           <div className="toolbar-group">
             {/* Search within paper */}
-            <div className="toolbar-search-input" title="Search inside paper text">
+            <div className="toolbar-search-input" title="Find inside paper text (press Enter for next)">
               <Search size={12} style={{ color: 'var(--text-muted)' }} />
               <input
                 type="text"
                 value={inDocSearch}
-                onChange={(e) => setInDocSearch(e.target.value)}
+                onChange={(e) => {
+                  setInDocSearch(e.target.value);
+                  setSearchCurrentMatchIdx(0);
+                }}
+                onKeyDown={handleSearchKeyDown}
                 placeholder="Find in paper..."
               />
+              {searchLower && (
+                <span className="toolbar-search-badge">
+                  {searchMatchCount} match{searchMatchCount === 1 ? '' : 'es'}
+                </span>
+              )}
             </div>
 
             <div className="toolbar-divider" />
@@ -777,7 +1111,7 @@ export default function PaperReaderView() {
         </div>
 
         {/* ── 3. Subtle Gray Reading Canvas with Clean White Document Surface ── */}
-        <div className="reader-canvas">
+        <div className="reader-canvas" ref={canvasRef}>
           {activeHighlight && (
             <EvidenceHighlightBanner
               highlight={activeHighlight}
@@ -790,103 +1124,211 @@ export default function PaperReaderView() {
             />
           )}
 
-          <div
-            className="reader-document-sheet"
-            style={{
-              width: fitWidth ? '100%' : `${Math.round(860 * (zoom / 100))}px`,
-              maxWidth: fitWidth ? '1180px' : 'none',
-              minHeight: 'calc(100vh - 128px)',
-            }}
-          >
-            {resolvingPdf ? (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 480, padding: 32, textAlign: 'center' }}>
-                <Loader2 size={32} className="animate-spin" style={{ color: 'var(--accent-violet, #6366f1)', marginBottom: 14 }} />
-                <h4 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6 }}>
-                  Locating Open-Access PDF Stream
-                </h4>
-                <p style={{ fontSize: 12.5, color: 'var(--text-muted)', maxWidth: 360, lineHeight: 1.5 }}>
-                  Connecting to arXiv and academic repositories to stream publication...
-                </p>
+          {/* Progressive WASM Conversion Banner */}
+          {isConverting && (
+            <div className="reader-conversion-banner">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Loader2 size={13} className="animate-spin" />
+                <span>
+                  {conversionProgress.status ||
+                    `Converting Page ${convertedPages.length} of ${totalPages} via WebAssembly (${conversionProgress.percent}%)`}
+                </span>
               </div>
-            ) : currentDoc.pdfUrl ? (
-              <object
-                data={`${currentDoc.pdfUrl}#page=${currentPage}&zoom=${zoom}`}
-                type="application/pdf"
-                className="reader-pdf-frame"
-              >
-                <iframe
-                  title="PDF Preview Frame"
-                  src={`${currentDoc.pdfUrl}#page=${currentPage}&zoom=${zoom}`}
-                  className="reader-pdf-frame"
-                >
-                  <div style={{ padding: 48, textAlign: 'center', color: 'var(--text-secondary)' }}>
-                    <p style={{ marginBottom: 16 }}>Unable to display inline PDF in this frame.</p>
-                    <a
-                      href={currentDoc.pdfUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="reader-topbar-btn primary"
-                    >
-                      Open PDF Directly
-                    </a>
-                  </div>
-                </iframe>
-              </object>
-            ) : (
-              <div style={{ padding: '48px 56px' }}>
-                <div style={{ textAlign: 'center', marginBottom: 32, paddingBottom: 24, borderBottom: '1px solid var(--border-subtle, #e2e8f0)' }}>
-                  <h1 style={{ fontSize: 24, fontWeight: 800, lineHeight: 1.3, color: 'var(--text-primary)', margin: '0 0 12px' }}>
-                    {currentDoc.title || 'Untitled Research Publication'}
-                  </h1>
-                  <p style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-secondary)', margin: '0 0 16px' }}>
-                    {authorsText}
-                  </p>
-                  <div style={{ display: 'flex', justifyContent: 'center', gap: 8 }}>
-                    <span className="reader-arxiv-badge">
-                      {badgeLabel}
-                    </span>
-                  </div>
-                </div>
+              <div className="reader-conversion-progress-track">
+                <div
+                  className="reader-conversion-progress-bar"
+                  style={{ width: `${Math.max(5, conversionProgress.percent)}%` }}
+                />
+              </div>
+            </div>
+          )}
 
-                {currentDoc.abstract && (
+          {conversionError && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                padding: '12px 18px',
+                borderRadius: 8,
+                background: 'rgba(239, 68, 68, 0.08)',
+                color: '#ef4444',
+                fontSize: 13,
+                marginBottom: 16,
+                maxWidth: 860,
+                width: '100%',
+              }}
+            >
+              <AlertCircle size={16} />
+              <span style={{ flex: 1 }}>{conversionError}</span>
+              <button
+                type="button"
+                className="reader-topbar-btn"
+                onClick={() => {
+                  setConvertedPages([]);
+                  setCurrentDoc((prev) => (prev ? { ...prev } : null));
+                }}
+              >
+                <RefreshCw size={12} />
+                <span>Retry</span>
+              </button>
+            </div>
+          )}
+
+          {/* Loading state before first page is converted */}
+          {convertedPages.length === 0 && (isConverting || resolvingPdf) && (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                height: 480,
+                padding: 32,
+                textAlign: 'center',
+              }}
+            >
+              <Loader2
+                size={34}
+                className="animate-spin"
+                style={{ color: 'var(--accent-violet, #6366f1)', marginBottom: 16 }}
+              />
+              <h4 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 6px' }}>
+                WebAssembly Document Engine
+              </h4>
+              <p style={{ fontSize: 13, color: 'var(--text-muted)', maxWidth: 420, lineHeight: 1.5, margin: 0 }}>
+                {resolvingPdf
+                  ? 'Locating open-access publication stream and resolving preprint...'
+                  : 'Converting PDF into high-fidelity HTML pages via WebAssembly runtime...'}
+              </p>
+            </div>
+          )}
+
+          {/* ── WebAssembly Rendered HTML Pages Container ── */}
+          {convertedPages.length > 0 && (
+            <div
+              className="wasm-pdf-document"
+              style={{
+                width: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                background: 'transparent',
+              }}
+            >
+              {pagesToDisplay.map((page) => {
+                const displayWidth = Math.round(page.width * displayScale);
+                const displayHeight = Math.round(page.height * displayScale);
+
+                return (
                   <div
+                    key={`wasm-page-${page.pageNumber}`}
+                    id={`wasm-pdf-page-${page.pageNumber}`}
+                    className="wasm-pdf-page"
+                    data-page-number={page.pageNumber}
                     style={{
-                      background: 'rgba(99, 102, 241, 0.04)',
-                      borderLeft: '3px solid var(--accent-violet, #6366f1)',
-                      borderRadius: '0 8px 8px 0',
-                      padding: '18px 24px',
-                      marginBottom: 32,
+                      width: `${displayWidth}px`,
+                      height: `${displayHeight}px`,
+                      position: 'relative',
+                      margin: '0 auto 20px',
+                      background: '#ffffff',
+                      boxShadow: '0 4px 16px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.04)',
+                      borderRadius: 2,
+                      overflow: 'hidden',
+                      display: 'block',
                     }}
                   >
-                    <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--accent-violet, #6366f1)', marginBottom: 8 }}>
-                      Abstract
-                    </div>
-                    <p style={{ fontSize: 13.5, lineHeight: 1.65, color: 'var(--text-primary)', margin: 0 }}>
-                      {currentDoc.abstract}
-                    </p>
-                  </div>
-                )}
+                    {/* Background Visual Layer */}
+                    {page.bgDataUrl ? (
+                      <img
+                        src={page.bgDataUrl}
+                        className="wasm-pdf-bg-layer"
+                        alt={`Page ${page.pageNumber}`}
+                        style={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          width: '100%',
+                          height: '100%',
+                          pointerEvents: 'none',
+                          zIndex: 1,
+                          display: 'block',
+                          userSelect: 'none',
+                        }}
+                      />
+                    ) : (
+                      <div style={{ position: 'absolute', inset: 0, background: '#ffffff', zIndex: 1 }} />
+                    )}
 
-                <div style={{ textAlign: 'center', paddingTop: 20 }}>
-                  <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 14 }}>
-                    Direct inline PDF stream unavailable for this preprint.
-                  </p>
-                  {badgeUrl && (
-                    <a
-                      href={badgeUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="reader-topbar-btn primary"
-                      style={{ display: 'inline-flex', padding: '6px 14px' }}
+                    {/* Selectable, Searchable DOM Text Layer */}
+                    <div
+                      className="wasm-pdf-text-layer"
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: '100%',
+                        height: '100%',
+                        zIndex: 2,
+                        pointerEvents: 'auto',
+                        lineHeight: 1,
+                      }}
                     >
-                      <ExternalLink size={13} />
-                      <span>Open Source Publication</span>
-                    </a>
-                  )}
+                      {page.textItems?.map((item, idx) => {
+                        const isSearchMatch =
+                          searchLower && item.str && item.str.toLowerCase().includes(searchLower);
+                        const isEvidenceMatch = isEvidenceItem(item, page.pageNumber, activeHighlight);
+
+                        let highlightClass = '';
+                        if (isSearchMatch) highlightClass = 'pdf-highlight-search';
+                        else if (isEvidenceMatch) highlightClass = 'pdf-highlight-evidence';
+
+                        return (
+                          <span
+                            key={idx}
+                            className={`wasm-pdf-text-span ${highlightClass}`}
+                            style={{
+                              position: 'absolute',
+                              left: `${(item.left * displayScale).toFixed(2)}px`,
+                              top: `${(item.top * displayScale).toFixed(2)}px`,
+                              fontSize: `${(item.fontSize * displayScale).toFixed(2)}px`,
+                              fontFamily: item.fontFamily || 'sans-serif',
+                              height: `${((item.height || item.fontSize) * displayScale).toFixed(2)}px`,
+                              lineHeight: 1,
+                              whiteSpace: 'pre',
+                              cursor: 'text',
+                              transform: item.transformCss,
+                              transformOrigin: 'left top',
+                            }}
+                            title={isEvidenceMatch ? 'Cited AI Copilot Evidence' : undefined}
+                          >
+                            {item.str}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* In-progress indicator at bottom when converting remaining pages */}
+              {isConverting && convertedPages.length < totalPages && (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '12px 20px',
+                    fontSize: 12.5,
+                    color: 'var(--text-muted)',
+                  }}
+                >
+                  <Loader2 size={14} className="animate-spin" />
+                  <span>Converting page {convertedPages.length + 1} of {totalPages}...</span>
                 </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -895,9 +1337,10 @@ export default function PaperReaderView() {
         <PaperReaderSidebar
           paper={currentDoc}
           onClose={() => setSidebarOpen(false)}
-          onJumpToPage={(p) => setCurrentPage(p)}
+          onJumpToPage={(p) => handleJumpToPage(p)}
           onClearContext={() => {
             setCurrentDoc(null);
+            setConvertedPages([]);
             setActiveHighlight(null);
           }}
           onHighlightEvidence={handleHighlightEvidence}

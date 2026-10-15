@@ -1,7 +1,10 @@
 import json
 import time
 from typing import Any, Dict, List, Optional
-import redis.asyncio as aioredis
+try:
+    import redis.asyncio as aioredis
+except ImportError:
+    aioredis = None
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.config import settings
@@ -31,7 +34,7 @@ class ActivePaperCache:
 
     async def get_client(self) -> Optional[Any]:
         """Obtain or lazily establish Redis async connection."""
-        if not self.enabled:
+        if not self.enabled or aioredis is None:
             return None
         if self._custom_client is not None:
             return self._custom_client

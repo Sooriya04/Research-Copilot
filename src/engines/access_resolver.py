@@ -232,14 +232,66 @@ class AccessResolver:
                 if papers:
                     paper = papers[0]
 
+            # CrossRef fallback if DOI provided and paper is missing or lacks abstract
+            if id_type == "doi" and (not paper or not paper.abstract):
+                try:
+                    cr_resp = await client.get(
+                        f"https://api.crossref.org/works/{clean_id}",
+                        headers={"User-Agent": "ResearchCopilot/2.0 (mailto:scholar@researchcopilot.org)"}
+                    )
+                    if cr_resp.status_code == 200:
+                        cr_msg = cr_resp.json().get("message", {})
+                        if not paper:
+                            authors_list = []
+                            for a in cr_msg.get("author", []):
+                                g = a.get("given", "").strip()
+                                f = a.get("family", "").strip()
+                                authors_list.append(Author(name=f"{g} {f}".strip() or "Author"))
+                            pub_parts = (cr_msg.get("published-print") or cr_msg.get("published-online") or {}).get("date-parts", [[]])[0]
+                            year_val = pub_parts[0] if pub_parts else None
+                            container = cr_msg.get("container-title", [""])[0] if cr_msg.get("container-title") else None
+                            paper = Paper(
+                                id=f"doi:{clean_id}",
+                                title=(cr_msg.get("title") or ["Untitled Paper"])[0],
+                                authors=authors_list,
+                                year=year_val,
+                                doi=clean_id,
+                                primary_source="crossref",
+                                url=f"https://doi.org/{clean_id}",
+                                journal=container,
+                            )
+                        if not paper.abstract and cr_msg.get("abstract"):
+                            raw_abs = cr_msg.get("abstract")
+                            clean_abs = re.sub(r"<[^>]+>", "", raw_abs).strip()
+                            paper.abstract = clean_abs
+                except Exception as e:
+                    logger.debug("[AccessResolver] CrossRef lookup failed: %s", e)
+
         if paper:
             # Multi-source fallback candidate resolution if PDF or arXiv ID is missing
             if not paper.pdf_url and not paper.arxiv_id:
                 async with httpx.AsyncClient(timeout=self.timeout, headers=self.headers) as client:
-                    # 1. Resolve DOI via Semantic Scholar to check for open access PDF or linked arXiv ID
+                    # 1. Check Unpaywall for open-access PDF
                     if paper.doi:
                         try:
-                            s2_url = f"https://api.semanticscholar.org/graph/v1/paper/{paper.doi}?fields=externalIds,openAccessPdf"
+                            upw_resp = await client.get(
+                                f"https://api.unpaywall.org/v2/{paper.doi}?email={settings.openalex_email or 'scholar@researchcopilot.org'}"
+                            )
+                            if upw_resp.status_code == 200:
+                                upw_data = upw_resp.json()
+                                if upw_data.get("is_oa"):
+                                    best_oa = upw_data.get("best_oa_location") or {}
+                                    pdf_cand = best_oa.get("url_for_pdf") or best_oa.get("url")
+                                    if pdf_cand:
+                                        paper.pdf_url = pdf_cand
+                                        paper.is_open_access = True
+                        except Exception as e:
+                            logger.debug("[AccessResolver] Unpaywall lookup failed: %s", e)
+
+                    # 2. Resolve DOI via Semantic Scholar to check for open access PDF or linked arXiv ID
+                    if not paper.pdf_url and paper.doi:
+                        try:
+                            s2_url = f"https://api.semanticscholar.org/graph/v1/paper/{paper.doi}?fields=title,abstract,externalIds,openAccessPdf,tldr"
                             s2_resp = await client.get(s2_url)
                             if s2_resp.status_code == 200:
                                 s2_data = s2_resp.json()
@@ -249,10 +301,12 @@ class AccessResolver:
                                     paper.pdf_url = f"https://arxiv.org/pdf/{paper.arxiv_id}.pdf"
                                 elif s2_data.get("openAccessPdf", {}).get("url"):
                                     paper.pdf_url = s2_data["openAccessPdf"]["url"]
+                                if not paper.abstract:
+                                    paper.abstract = s2_data.get("abstract") or s2_data.get("tldr", {}).get("text") or ""
                         except Exception as e:
                             logger.debug("[AccessResolver] S2 DOI fallback failed: %s", e)
 
-                    # 2. If still missing, try title search on arXiv
+                    # 3. If still missing, try title search on arXiv
                     if not paper.pdf_url and not paper.arxiv_id and paper.title:
                         try:
                             clean_title = re.sub(r"[^a-zA-Z0-9\s]", " ", paper.title.split(":")[0]).strip()
@@ -299,6 +353,20 @@ class AccessResolver:
                     format="pdf",
                     is_legal_oa=True,
                     priority=2
+                ))
+
+            # If no open-access PDF stream exists, generate publication preprint buffer from metadata
+            if not paper.pdf_url:
+                clean_ref = paper.doi or paper.arxiv_id or paper.id or identifier
+                encoded_id = urllib.parse.quote(str(clean_ref))
+                preprint_url = f"/api/v1/pdf/preprint?identifier={encoded_id}"
+                paper.pdf_url = preprint_url
+                candidates.append(PaperAccessCandidate(
+                    source="preprint_buffer",
+                    url=preprint_url,
+                    format="pdf",
+                    is_legal_oa=True,
+                    priority=1
                 ))
 
         return PaperAccessResponse(

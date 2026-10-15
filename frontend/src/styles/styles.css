@@ -2726,6 +2726,178 @@ body.dark-theme .reader-document-sheet {
   display: block;
 }
 
+/* WebAssembly High-Fidelity PDF-to-HTML Document Container */
+.wasm-pdf-document {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: #ffffff;
+  padding: 0;
+  margin: 0;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.wasm-pdf-page {
+  position: relative;
+  background: #ffffff;
+  margin: 0 auto;
+  overflow: hidden;
+  display: block;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.wasm-pdf-page:last-child {
+  border-bottom: none;
+}
+
+.wasm-pdf-bg-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+  display: block;
+}
+
+.wasm-pdf-text-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 2;
+  pointer-events: auto;
+  line-height: 1;
+}
+
+.wasm-pdf-text-span {
+  position: absolute;
+  white-space: pre;
+  color: transparent;
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.wasm-pdf-text-span::selection {
+  background: rgba(99, 102, 241, 0.45);
+  color: transparent;
+}
+
+/* In-Doc Search Match Highlight */
+.wasm-pdf-text-span.pdf-highlight-search {
+  background: rgba(250, 204, 21, 0.5) !important;
+  color: #1e293b !important;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1.5px rgba(234, 179, 8, 0.85);
+  z-index: 10;
+}
+
+/* AI Copilot Evidence Citation Highlight */
+.wasm-pdf-text-span.pdf-highlight-evidence {
+  background: rgba(99, 102, 241, 0.35) !important;
+  color: #1e1b4b !important;
+  border-bottom: 2px solid #6366f1;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.5);
+  z-index: 12;
+}
+
+/* View Mode Switcher in Toolbar */
+.reader-mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  background: var(--bg-subtle, #f1f5f9);
+  padding: 2px;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  gap: 2px;
+}
+
+.reader-mode-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted, #64748b);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.reader-mode-toggle-btn:hover {
+  color: var(--text-primary, #0f172a);
+}
+
+.reader-mode-toggle-btn.active {
+  background: var(--bg-card, #ffffff);
+  color: var(--accent-violet, #6366f1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+/* Real-Time WASM Reader Search Badge */
+.toolbar-search-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: rgba(234, 179, 8, 0.18);
+  color: #b45309;
+  border: 1px solid rgba(234, 179, 8, 0.35);
+  white-space: nowrap;
+  user-select: none;
+}
+
+[data-theme='dark'] .toolbar-search-badge {
+  background: rgba(234, 179, 8, 0.25);
+  color: #fde047;
+  border-color: rgba(234, 179, 8, 0.5);
+}
+
+/* Progressive WASM Conversion Banner */
+.reader-conversion-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  max-width: 860px;
+  margin: 0 auto 14px;
+  padding: 8px 16px;
+  background: rgba(99, 102, 241, 0.06);
+  border: 1px solid rgba(99, 102, 241, 0.18);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--accent-violet, #6366f1);
+  box-sizing: border-box;
+}
+
+.reader-conversion-progress-track {
+  width: 140px;
+  height: 5px;
+  background: rgba(99, 102, 241, 0.18);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-left: 12px;
+}
+
+.reader-conversion-progress-bar {
+  height: 100%;
+  background: var(--accent-violet, #6366f1);
+  border-radius: 3px;
+  transition: width 0.25s ease-out;
+}
+
 /* More Actions Dropdown Menu */
 .reader-dropdown-menu {
   position: absolute;

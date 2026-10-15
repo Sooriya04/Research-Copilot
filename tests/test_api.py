@@ -108,4 +108,34 @@ async def test_graph_benchmarks_sqlite_caching():
         assert len(data["repositories"]) == 1
 
 
+@pytest.mark.asyncio
+async def test_pdf_preprint_buffer_endpoint():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/api/v1/pdf/preprint", params={
+            "title": "An Introduction to Neural Information Retrieval",
+            "authors": "Bhaskar Mitra, Nick Craswell",
+            "doi": "10.1561/1500000061",
+            "year": 2018,
+            "venue": "Foundations and Trends in Information Retrieval"
+        })
+        assert resp.status_code == 200
+        assert resp.headers.get("content-type") == "application/pdf"
+        assert resp.content.startswith(b"%PDF-")
+        assert len(resp.content) > 1000
+
+
+@pytest.mark.asyncio
+async def test_resolve_paper_guarantees_pdf_url():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/api/v1/paper/10.1561/1500000061")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["paper"] is not None
+        assert data["paper"]["title"] is not None
+        assert data["paper"]["pdf_url"] is not None
+        assert "/api/v1/pdf/preprint" in data["paper"]["pdf_url"]
+        assert len(data["candidates"]) >= 1
+
+
+
 

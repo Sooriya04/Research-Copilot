@@ -117,6 +117,8 @@ class Paper(BaseModel):
     pdf_url: Optional[str] = None
     is_open_access: bool = False
     citation_count: int = 0
+    venue: Optional[str] = None
+    journal: Optional[str] = None
     referenced_works: List[str] = Field(default_factory=list)
     topics: List[str] = Field(default_factory=list)
     score: Optional[float] = None
