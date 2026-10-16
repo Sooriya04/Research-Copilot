@@ -2281,6 +2281,35 @@ bundle compilation (`npm run build`).
   * Verified Vite frontend production build (`npm run build`) compiles cleanly in 8.47s with zero errors.
   * Verified zero emojis across all code, markdown, and responses.
 
+<br />
+
+## Active Redis Caching Layer: Authentication Resolution, Isolated DB Namespace, and Real-Time Caching for Evidence Packages and Cross-Paper Comparisons
+
+* **Redis Authentication & Namespace Isolation (`src/core/config.py`, `.env`, SQLite `system_settings`)**:
+  * Configured authenticated Redis connection via REDIS_URL environment variable targeting isolated database 1 to prevent key collisions with external workloads.
+  * Synchronized configuration across Pydantic `Settings`, root `.env`, and SQLite `system_settings` database table (`redis_url`, `redis_enabled=true`).
+
+* **Active Paper & Evidence Caching Extension (`src/rag/active_cache.py`)**:
+  * Extended `ActivePaperCache` with methods `get_evidence`, `set_evidence`, `invalidate_evidence`, `get_json`, `set_json`, and `delete_key`.
+  * Updated `invalidate_paper` to purge evidence keys (`paper:{paper_id}:evidence`) alongside metadata, chunks, context, and active session pointers.
+
+* **Evidence Studio API Redis Caching (`src/api/routes_evidence.py`)**:
+  * Wired `ingest_paper_evidence` to inspect Redis first on read requests, enabling sub-millisecond retrieval of cached evidence packages without hitting SQLite.
+  * Writes newly extracted and verified evidence packages to Redis with active paper TTL.
+  * Evicts cached evidence from Redis in `review_evidence_claim` upon researcher review status updates to prevent serving stale claims.
+
+* **Research Intelligence Multi-Paper Comparison Caching (`src/api/routes_intelligence.py`)**:
+  * Wired `compare_papers` to compute deterministic SHA-256 key hashes from sorted identifiers and check Redis under `compare_matrix:{hash}` (900s TTL).
+  * Provides two-tier caching (in-memory process dictionary + persistent Redis DB 1) ensuring fast comparison queries even across worker restarts.
+
+* **Verification & Test Suite**:
+  * Added unit tests for evidence package and arbitrary JSON caching in `tests/test_redis_active_cache.py`.
+  * All 20 tests across `tests/test_redis_active_cache.py`, `tests/test_evidence_foundations.py`, and `tests/test_intelligence_routes.py` passed with 100% green.
+  * Verified live key creation directly in Redis DB 1 (`paper:*:evidence`, `compare_matrix:*`, and graph nodes).
+  * Vite frontend production build (`npm run build`) compiled cleanly in 7.33s with zero errors.
+  * Maintained strict zero-emoji compliance across all code, comments, documentation, and commit entries.
+
+
 
 
 

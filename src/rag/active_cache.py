@@ -71,6 +71,9 @@ class ActivePaperCache:
     def _context_key(self, paper_id: str) -> str:
         return f"paper:{paper_id}:context"
 
+    def _evidence_key(self, paper_id: str) -> str:
+        return f"paper:{paper_id}:evidence"
+
     def _active_key(self) -> str:
         return "active_paper:current"
 
@@ -134,6 +137,84 @@ class ActivePaperCache:
         except Exception as e:
             logger.warning("[ActivePaperCache] Error getting context for '%s': %s", paper_id, e)
         return None
+
+    async def get_evidence(self, paper_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve grounded evidence package from Redis cache."""
+        client = await self.get_client()
+        if not client:
+            return None
+        try:
+            raw = await client.get(self._evidence_key(paper_id))
+            if raw:
+                return json.loads(raw)
+        except Exception as e:
+            logger.warning("[ActivePaperCache] Error getting evidence for '%s': %s", paper_id, e)
+        return None
+
+    async def set_evidence(
+        self, paper_id: str, evidence_data: Dict[str, Any], ttl: Optional[int] = None
+    ) -> bool:
+        """Store grounded evidence package into Redis cache."""
+        client = await self.get_client()
+        if not client:
+            return False
+        try:
+            ex_ttl = ttl or self.ttl
+            await client.set(self._evidence_key(paper_id), json.dumps(evidence_data), ex=ex_ttl)
+            return True
+        except Exception as e:
+            logger.warning("[ActivePaperCache] Error caching evidence for '%s': %s", paper_id, e)
+            return False
+
+    async def invalidate_evidence(self, paper_id: str) -> bool:
+        """Evict evidence package from Redis cache."""
+        client = await self.get_client()
+        if not client:
+            return False
+        try:
+            await client.delete(self._evidence_key(paper_id))
+            return True
+        except Exception as e:
+            logger.warning("[ActivePaperCache] Error invalidating evidence for '%s': %s", paper_id, e)
+            return False
+
+    async def get_json(self, key: str) -> Optional[Any]:
+        """Retrieve arbitrary JSON value from Redis."""
+        client = await self.get_client()
+        if not client:
+            return None
+        try:
+            raw = await client.get(key)
+            if raw:
+                return json.loads(raw)
+        except Exception as e:
+            logger.debug("[ActivePaperCache] Error reading key '%s': %s", key, e)
+        return None
+
+    async def set_json(self, key: str, data: Any, ttl: Optional[int] = None) -> bool:
+        """Set arbitrary JSON value into Redis with TTL."""
+        client = await self.get_client()
+        if not client:
+            return False
+        try:
+            ex_ttl = ttl or self.ttl
+            await client.set(key, json.dumps(data), ex=ex_ttl)
+            return True
+        except Exception as e:
+            logger.debug("[ActivePaperCache] Error writing key '%s': %s", key, e)
+            return False
+
+    async def delete_key(self, key: str) -> bool:
+        """Delete key from Redis."""
+        client = await self.get_client()
+        if not client:
+            return False
+        try:
+            await client.delete(key)
+            return True
+        except Exception as e:
+            logger.debug("[ActivePaperCache] Error deleting key '%s': %s", key, e)
+            return False
 
     async def get_active_paper_id(self) -> Optional[str]:
         """Get ID of the currently active paper session."""
@@ -264,6 +345,7 @@ class ActivePaperCache:
                 self._meta_key(paper_id),
                 self._chunks_key(paper_id),
                 self._context_key(paper_id),
+                self._evidence_key(paper_id),
             ]
             await client.delete(*keys)
 

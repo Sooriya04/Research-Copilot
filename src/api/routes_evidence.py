@@ -35,6 +35,8 @@ from src.engines.pdf_coordinate_engine import PDFCoordinateEngine
 from src.engines.excerpt_verifier import DeterministicExcerptVerifier
 from src.engines.multi_pass_extractor import MultiPassEvidenceExtractor
 from src.engines.pdf_extractor import PDFExtractor
+from src.rag.active_cache import ActivePaperCache
+import json
 
 router = APIRouter(prefix="/api/v1/evidence", tags=["Evidence Studio & Grounded Audit"])
 
@@ -42,6 +44,8 @@ coord_engine = PDFCoordinateEngine()
 excerpt_verifier = DeterministicExcerptVerifier()
 multi_pass_extractor = MultiPassEvidenceExtractor()
 pdf_extractor_service = PDFExtractor()
+active_cache = ActivePaperCache()
+
 
 
 class EvidenceIngestRequest(BaseModel):
@@ -86,8 +90,15 @@ async def ingest_paper_evidence(req: EvidenceIngestRequest, db: AsyncSession = D
     if not paper_id:
         raise HTTPException(status_code=400, detail="paper_id is required.")
 
-    # Check cache if not force_refresh
+    # Check Redis cache first if not force_refresh
     if not req.force_refresh:
+        cached_evidence = await active_cache.get_evidence(paper_id)
+        if cached_evidence:
+            try:
+                return PaperEvidencePackage(**cached_evidence)
+            except Exception as e:
+                logger.debug("[Evidence] Redis cached package parse failed for %s: %s", paper_id, e)
+
         existing_stmt = select(PaperEvidenceModel).where(PaperEvidenceModel.paper_id == paper_id)
         res = await db.execute(existing_stmt)
         cached_model = res.scalars().first()
@@ -133,7 +144,7 @@ async def ingest_paper_evidence(req: EvidenceIngestRequest, db: AsyncSession = D
                 for f in fig_rows
             ]
 
-            return PaperEvidencePackage(
+            pkg = PaperEvidencePackage(
                 paper_id=cached_model.paper_id,
                 title=cached_model.title,
                 thesis=cached_model.thesis,
@@ -149,6 +160,8 @@ async def ingest_paper_evidence(req: EvidenceIngestRequest, db: AsyncSession = D
                 timeline=[TimelineStage(**t) for t in (cached_model.timeline_json or [])],
                 audit=audit_obj
             )
+            await active_cache.set_evidence(paper_id, pkg.model_dump())
+            return pkg
 
     # Resolve PDF source URL
     pdf_url = req.pdf_url
@@ -272,6 +285,7 @@ async def ingest_paper_evidence(req: EvidenceIngestRequest, db: AsyncSession = D
         db.add(audit_row)
 
     await db.commit()
+    await active_cache.set_evidence(paper_id, pkg.model_dump())
     return pkg
 
 
@@ -399,5 +413,6 @@ async def review_evidence_claim(paper_id: str, sub: ClaimReviewSubmission, db: A
     if updated:
         record.claims_json = list(claims)
         await db.commit()
+        await active_cache.invalidate_evidence(clean_id)
 
     return {"status": "success", "claim_id": sub.claim_id, "review_status": sub.reviewer_status}

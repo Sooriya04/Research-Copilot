@@ -33,6 +33,7 @@ from src.providers.base import ChatMessage
 from src.providers.factory import get_llm_provider
 from src.core.paper_repository import PaperRepository
 from src.engines.claim_verifier import ClaimVerifier
+from src.rag.active_cache import ActivePaperCache
 
 router = APIRouter(prefix="/api/v1", tags=["Research Intelligence & Comparison"])
 coord_engine = PDFCoordinateEngine()
@@ -45,6 +46,7 @@ rubric_evaluator = RubricEvaluator()
 rank_engine = PaperRankEngine()
 claim_verifier_instance = ClaimVerifier()
 gap_extractor = ScientificGapExtractor()
+active_cache = ActivePaperCache()
 
 class CompareRequest(BaseModel):
     identifiers: List[str]
@@ -165,12 +167,27 @@ async def compare_papers(req: CompareRequest, db: AsyncSession = Depends(get_db)
     if not req.identifiers:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Must provide at least one identifier.")
     
+    import hashlib
     import time
-    cache_key = "|".join(sorted(req.identifiers))
-    if not req.force_refresh and cache_key in _COMPARE_MATRIX_CACHE:
-        cached_ts, cached_resp = _COMPARE_MATRIX_CACHE[cache_key]
-        if time.time() - cached_ts < _COMPARE_MATRIX_TTL:
-            return cached_resp
+    sorted_ids = sorted(req.identifiers)
+    raw_key = "|".join(sorted_ids)
+    key_hash = hashlib.sha256(raw_key.encode("utf-8")).hexdigest()[:24]
+    redis_key = f"compare_matrix:{key_hash}"
+
+    if not req.force_refresh:
+        if raw_key in _COMPARE_MATRIX_CACHE:
+            cached_ts, cached_resp = _COMPARE_MATRIX_CACHE[raw_key]
+            if time.time() - cached_ts < _COMPARE_MATRIX_TTL:
+                return cached_resp
+
+        cached_redis = await active_cache.get_json(redis_key)
+        if cached_redis:
+            try:
+                resp_obj = CompareResponse(**cached_redis)
+                _COMPARE_MATRIX_CACHE[raw_key] = (time.time(), resp_obj)
+                return resp_obj
+            except Exception as e:
+                logger.debug("[Compare] Failed parsing Redis comparison cache: %s", e)
 
     matrix_items: List[CompareMatrixItem] = []
     
@@ -546,7 +563,8 @@ async def compare_papers(req: CompareRequest, db: AsyncSession = Depends(get_db)
         shared_datasets=sorted(list(all_datasets))[:10],
         synthesis_summary=f"Compared {len(matrix_items)} scientific papers with {sum(m.gaps_count for m in matrix_items)} ground-truthed research gaps and {len(cross_paper_gaps)} cross-paper synthesis intersections.",
     )
-    _COMPARE_MATRIX_CACHE[cache_key] = (time.time(), result_resp)
+    _COMPARE_MATRIX_CACHE[raw_key] = (time.time(), result_resp)
+    await active_cache.set_json(redis_key, result_resp.model_dump(), ttl=int(_COMPARE_MATRIX_TTL))
     return result_resp
 
 @router.post("/papers/extract-gaps", response_model=ExtractGapsResponse)

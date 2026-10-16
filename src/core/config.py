@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379"
     redis_active_paper_ttl: int = 3600
     redis_enabled: bool = True
+
     
     # Searqon External Web Research Configuration
     searqon_base_url: str = "http://localhost:7493"

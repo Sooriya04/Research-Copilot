@@ -211,3 +211,53 @@ async def test_active_paper_api_endpoints():
         del_resp = await client.delete(f"/api/v1/papers/{paper_id}/cache")
         assert del_resp.status_code == 200
         assert del_resp.json()["status"] == "invalidated"
+
+
+@pytest.mark.asyncio
+async def test_active_paper_cache_evidence_and_json():
+    """Verify evidence package and comparison matrix caching and invalidation in Redis."""
+    fake_client = fake_aioredis.FakeRedis(decode_responses=True)
+    cache = ActivePaperCache(redis_client=fake_client, ttl_seconds=600, enabled=True)
+    paper_id = "test-evidence-redis-1"
+
+    # 1. Evidence package caching
+    evidence_payload = {
+        "paper_id": paper_id,
+        "title": "Attention Is All You Need",
+        "claims": [{"id": "c-1", "claim_text": "Transformer architecture outperforms RNNs."}],
+        "metrics": [{"id": "m-1", "name": "BLEU", "value": 28.4}],
+    }
+    assert await cache.get_evidence(paper_id) is None
+    set_ok = await cache.set_evidence(paper_id, evidence_payload)
+    assert set_ok is True
+
+    cached_ev = await cache.get_evidence(paper_id)
+    assert cached_ev is not None
+    assert cached_ev["title"] == "Attention Is All You Need"
+    assert cached_ev["claims"][0]["id"] == "c-1"
+
+    # 2. Evidence invalidation
+    assert await cache.invalidate_evidence(paper_id) is True
+    assert await cache.get_evidence(paper_id) is None
+
+    # 3. Arbitrary JSON / comparison matrix caching
+    matrix_key = "compare_matrix:abcdef123456"
+    matrix_data = {
+        "papers_count": 2,
+        "synthesis_summary": "Compared 2 papers.",
+        "matrix": [{"id": "p1", "title": "Paper 1"}],
+    }
+    assert await cache.get_json(matrix_key) is None
+    await cache.set_json(matrix_key, matrix_data, ttl=300)
+    cached_matrix = await cache.get_json(matrix_key)
+    assert cached_matrix is not None
+    assert cached_matrix["papers_count"] == 2
+
+    await cache.delete_key(matrix_key)
+    assert await cache.get_json(matrix_key) is None
+
+    # 4. Verify invalidate_paper also purges evidence
+    await cache.set_evidence(paper_id, evidence_payload)
+    assert await cache.get_evidence(paper_id) is not None
+    await cache.invalidate_paper(paper_id)
+    assert await cache.get_evidence(paper_id) is None
