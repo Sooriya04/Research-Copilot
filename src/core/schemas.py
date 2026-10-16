@@ -1,7 +1,10 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
+
+def utcnow():
+    return datetime.now(timezone.utc)
 
 # --- Enums & Literals ---
 
@@ -155,7 +158,7 @@ class ResearchArtifact(BaseModel):
     primary: bool = False
     format: str = "markdown"
     content: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utcnow)
 
 class ResearchEntity(BaseModel):
     id: str
@@ -179,7 +182,7 @@ class ExecutionStepLog(BaseModel):
     step_id: str
     node_name: str
     iteration: int
-    started_at: datetime = Field(default_factory=datetime.utcnow)
+    started_at: datetime = Field(default_factory=utcnow)
     completed_at: Optional[datetime] = None
     duration_ms: float = 0.0
     status: NodeStatus = NodeStatus.RUNNING

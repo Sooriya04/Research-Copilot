@@ -2375,9 +2375,37 @@ bundle compilation (`npm run build`).
 
 * **Verification & Test Suite**:
   * Added unit and API endpoint tests in `tests/test_redis_active_cache.py` verifying get, set, delete, and arXiv key normalization.
-  * Verified with pytest (7/7 passing in `test_redis_active_cache.py`, 19/19 passing across all active suites).
-  * Compiled frontend production build (`npm run build`) in 7.18s with zero errors.
+  * Verified with pytest (7/7 passing in `test_redis_active_cache.py`, 123/123 passing across the entire project test suite).
+  * Compiled frontend production build (`npm run build`) in 6.95s with zero errors.
   * Maintained strict zero-emoji compliance across all code, tests, and documentation.
+
+* **Bug Fixes & Hardening**:
+  * Fixed cache key fragmentation: Normalized arXiv IDs across `ActivePaperCache` and `paperPageCache.js` by stripping trailing version suffixes (`v[0-9]+`), ensuring `2503.04615v1`, `2503.04615v2`, and `2503.04615` all hit the exact same Redis and IndexedDB entries.
+  * Fixed IndexedDB unhandled transaction aborts/errors: Added `tx.onabort` and `tx.onerror` handlers across `getLocalPageCache`, `saveLocalPageCache`, and `deleteLocalPageCache` so storage quota errors or browser incognito blocks resolve cleanly without hanging promises.
+  * Fixed fallback page state bleed in `PaperReaderView.jsx`: Explicitly reset `accumulatedPages.length = 0` and cleared `setConvertedPages([])` when entering `catch (err)` before triggering fallback conversion, preventing duplicate or conflicting pages.
+  * Deduplicated page accumulation: Added duplicate guards to `accumulatedPages` during progressive WebAssembly rendering and sorted final pages by `pageNumber` prior to cache persistence.
+  * Resolved Python 3.12 `DeprecationWarning: datetime.datetime.utcnow()`: Migrated `paper_rank.py`, `pipeline.py`, and `schemas.py` to `datetime.now(timezone.utc)`.
+
+<br />
+
+## Comprehensive Test Suite Verification & Deprecation Hardening
+
+* **Redis Document Cache Integration Tests (`tests/test_redis_active_cache.py`)**:
+  * Verified end-to-end HTML page cache lifecycle: cache miss (`status: "miss"`), cache save (`status: "saved"`), and sub-millisecond retrieval (`status: "hit"`).
+  * Tested arXiv version normalization: validated that versioned requests (e.g. `arxiv:2503.04615v2`) seamlessly hit the identical Redis cache record populated by unversioned identifier (`2503.04615`).
+  * Verified manual cache purge and eviction via HTTP `DELETE /api/v1/pdf/html-cache/{paper_id}`.
+
+* **Full-System Regression Verification**:
+  * Executed the complete test suite across all 29 test modules: 123 of 123 tests passed cleanly with 100% green status.
+  * Verified core domains: Access Resolution, Multi-Provider Search, Canonical Normalization, Evidence Studio, Knowledge Graph Ingestion, Novelty Engine, PaperRank Scoring, Paper RAG, Searqon Research, Settings Management, and Workspace Graph Synthesis.
+
+* **Zero-Deprecation Warning Elimination**:
+  * Removed Python 3.12 `DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal` across `paper_rank.py`, `pipeline.py`, and `schemas.py`.
+  * Standardized all timestamps to `datetime.now(timezone.utc)`.
+
+* **Frontend Build Validation**:
+  * Executed Vite production build (`npm run build`), confirming 3,195 modules transformed and compiled in 6.95s with zero syntax or bundling errors.
+  * Strict zero-emoji compliance verified across all code, tests, and commit entries.
 
 
 

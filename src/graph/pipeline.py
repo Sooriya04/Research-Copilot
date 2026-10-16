@@ -1,5 +1,5 @@
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 from src.core.logger import logger
 from src.core.schemas import (
@@ -140,7 +140,7 @@ class EvidenceSynthesisNode(BaseResearchNode):
 
         # Create structured artifact
         artifact = ResearchArtifact(
-            id=f"artifact-{state.session_id}-{int(datetime.utcnow().timestamp())}",
+            id=f"artifact-{state.session_id}-{int(datetime.now(timezone.utc).timestamp())}",
             kind=ResearchArtifactKind.REPORT,
             path=f"./artifacts/{state.session_id}/report.md",
             label="Executive Research Synthesis",

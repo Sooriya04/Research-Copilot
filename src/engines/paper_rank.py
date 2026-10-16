@@ -1,7 +1,7 @@
 import math
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 from src.core.config import settings
 from src.core.logger import logger
@@ -107,7 +107,7 @@ class PaperRankEngine:
             logger.debug("[PaperRank] Graph prestige calculation notice: %s", e)
             prestige_scores = {}
 
-        current_year = datetime.utcnow().year
+        current_year = datetime.now(timezone.utc).year
         query_tokens = self._tokenize(query)
         w = weights or self.DEFAULT_WEIGHTS
 

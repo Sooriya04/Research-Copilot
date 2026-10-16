@@ -413,7 +413,9 @@ export default function PaperReaderView() {
             paperFallback: currentDoc,
             onPageRendered: (pageData, pageNum, totalDocPages) => {
               if (!isMounted) return;
-              accumulatedPages.push(pageData);
+              if (!accumulatedPages.some((p) => p.pageNumber === pageData.pageNumber)) {
+                accumulatedPages.push(pageData);
+              }
               setConvertedPages((prev) => {
                 if (prev.some((p) => p.pageNumber === pageData.pageNumber)) return prev;
                 const next = [...prev, pageData].sort((a, b) => a.pageNumber - b.pageNumber);
@@ -429,7 +431,8 @@ export default function PaperReaderView() {
         );
 
         if (isMounted) {
-          const finalPages = convResult?.pages?.length > 0 ? convResult.pages : accumulatedPages;
+          const finalPages = (convResult?.pages?.length > 0 ? convResult.pages : accumulatedPages).slice();
+          finalPages.sort((a, b) => a.pageNumber - b.pageNumber);
           if (finalPages.length > 0) {
             cacheConvertedPaperPages(currentDoc, finalPages, convResult?.numPages || finalPages.length, currentDoc.title);
           }
@@ -437,6 +440,8 @@ export default function PaperReaderView() {
       } catch (err) {
         if (abortController.signal.aborted) return;
         console.warn('WASM conversion with primary source encountered issue, falling back to preprint buffer:', err);
+        accumulatedPages.length = 0;
+        setConvertedPages([]);
         try {
           const fallbackBytes = createFallbackPdfBuffer(currentDoc);
           const fallbackResult = await convertPdfToHtmlPages(
@@ -446,7 +451,9 @@ export default function PaperReaderView() {
               maxPages: 40,
               onPageRendered: (pageData, pageNum, totalDocPages) => {
                 if (!isMounted) return;
-                accumulatedPages.push(pageData);
+                if (!accumulatedPages.some((p) => p.pageNumber === pageData.pageNumber)) {
+                  accumulatedPages.push(pageData);
+                }
                 setConvertedPages((prev) => {
                   if (prev.some((p) => p.pageNumber === pageData.pageNumber)) return prev;
                   return [...prev, pageData].sort((a, b) => a.pageNumber - b.pageNumber);
@@ -461,7 +468,8 @@ export default function PaperReaderView() {
           );
 
           if (isMounted) {
-            const finalPages = fallbackResult?.pages?.length > 0 ? fallbackResult.pages : accumulatedPages;
+            const finalPages = (fallbackResult?.pages?.length > 0 ? fallbackResult.pages : accumulatedPages).slice();
+            finalPages.sort((a, b) => a.pageNumber - b.pageNumber);
             if (finalPages.length > 0) {
               cacheConvertedPaperPages(currentDoc, finalPages, fallbackResult?.numPages || finalPages.length, currentDoc.title);
             }

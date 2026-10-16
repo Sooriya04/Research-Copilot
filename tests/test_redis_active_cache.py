@@ -341,6 +341,12 @@ async def test_redis_html_pages_cache_and_endpoints():
         assert len(hit_data["pages"]) == 2
         assert hit_data["pages"][0]["pageNumber"] == 1
 
+        # Cache hit with version suffix arxiv:2503.04615v2
+        hit_v2_res = await client.get("/api/v1/pdf/html-cache/arxiv:2503.04615v2")
+        assert hit_v2_res.status_code == 200
+        assert hit_v2_res.json()["status"] == "hit"
+        assert hit_v2_res.json()["numPages"] == 2
+
         # DELETE / invalidate
         del_res = await client.delete("/api/v1/pdf/html-cache/2503.04615")
         assert del_res.status_code == 200

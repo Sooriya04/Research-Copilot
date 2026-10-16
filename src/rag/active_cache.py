@@ -76,9 +76,10 @@ class ActivePaperCache:
         return f"paper:{paper_id}:evidence"
 
     def _html_cache_key(self, paper_id: str) -> str:
-        match = re.search(r"(\d{4}\.\d{4,5}(?:v\d+)?|[a-z\-]+(?:\.[a-z]{2})?/\d{7})", paper_id)
+        match = re.search(r"(\d{4}\.\d{4,5})(?:v\d+)?|([a-z\-]+(?:\.[a-z]{2})?/\d{7})", paper_id)
         if match:
-            clean_id = f"arxiv_{match.group(1)}"
+            aid = match.group(1) or match.group(2)
+            clean_id = f"arxiv_{aid}"
         else:
             clean_id = re.sub(r"[^a-zA-Z0-9._-]", "_", paper_id.strip())
         return f"paper:{clean_id}:html_pages"

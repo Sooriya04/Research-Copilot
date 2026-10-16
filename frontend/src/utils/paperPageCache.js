@@ -14,12 +14,16 @@ const STORE_NAME = 'html_pages';
 function extractArxivId(str) {
   if (!str) return null;
   const s = String(str).trim();
-  const urlMatch = s.match(/arxiv\.org\/(?:abs|pdf)\/([0-9]{4}\.[0-9]{4,5}(?:v[0-9]+)?|[a-z\-]+(?:\.[a-z]{2})?\/[0-9]{7})(?:\.pdf)?/i);
+  const urlMatch = s.match(/arxiv\.org\/(?:abs|pdf)\/([0-9]{4}\.[0-9]{4,5})(?:v[0-9]+)?(?:\.pdf)?/i);
   if (urlMatch) return urlMatch[1];
-  const prefixMatch = s.match(/^arxiv:\s*([0-9]{4}\.[0-9]{4,5}(?:v[0-9]+)?|[a-z\-]+(?:\.[a-z]{2})?\/[0-9]{7})$/i);
+  const oldUrlMatch = s.match(/arxiv\.org\/(?:abs|pdf)\/([a-z\-]+(?:\.[a-z]{2})?\/[0-9]{7})(?:v[0-9]+)?(?:\.pdf)?/i);
+  if (oldUrlMatch) return oldUrlMatch[1];
+  const prefixMatch = s.match(/^arxiv:\s*([0-9]{4}\.[0-9]{4,5})(?:v[0-9]+)?$/i);
   if (prefixMatch) return prefixMatch[1];
-  const exactMatch = s.match(/^([0-9]{4}\.[0-9]{4,5}(?:v[0-9]+)?)$/i);
+  const exactMatch = s.match(/^([0-9]{4}\.[0-9]{4,5})(?:v[0-9]+)?$/i);
   if (exactMatch) return exactMatch[1];
+  const oldExact = s.match(/^([a-z\-]+(?:\.[a-z]{2})?\/[0-9]{7})(?:v[0-9]+)?$/i);
+  if (oldExact) return oldExact[1];
   return null;
 }
 
@@ -79,6 +83,8 @@ export async function getLocalPageCache(key) {
   return new Promise((resolve) => {
     try {
       const tx = db.transaction([STORE_NAME], 'readonly');
+      tx.onerror = () => resolve(null);
+      tx.onabort = () => resolve(null);
       const store = tx.objectStore(STORE_NAME);
       const req = store.get(key);
       req.onsuccess = () => {
@@ -103,6 +109,8 @@ export async function saveLocalPageCache(key, data) {
   return new Promise((resolve) => {
     try {
       const tx = db.transaction([STORE_NAME], 'readwrite');
+      tx.onerror = () => resolve(false);
+      tx.onabort = () => resolve(false);
       const store = tx.objectStore(STORE_NAME);
       const record = {
         key,
@@ -128,6 +136,8 @@ export async function deleteLocalPageCache(key) {
   return new Promise((resolve) => {
     try {
       const tx = db.transaction([STORE_NAME], 'readwrite');
+      tx.onerror = () => resolve(false);
+      tx.onabort = () => resolve(false);
       const store = tx.objectStore(STORE_NAME);
       const req = store.delete(key);
       req.onsuccess = () => resolve(true);
