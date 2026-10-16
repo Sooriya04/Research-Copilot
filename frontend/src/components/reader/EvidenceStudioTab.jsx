@@ -208,6 +208,7 @@ export default function EvidenceStudioTab({ paper, onHighlightEvidence, onJumpTo
         <FiguresGallery
           figures={figures}
           onJumpToPage={onJumpToPage}
+          onHighlightEvidence={onHighlightEvidence}
         />
       )}
 

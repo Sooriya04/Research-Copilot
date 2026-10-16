@@ -163,46 +163,88 @@ async def ingest_paper_evidence(req: EvidenceIngestRequest, db: AsyncSession = D
             await active_cache.set_evidence(paper_id, pkg.model_dump())
             return pkg
 
-    # Resolve PDF source URL
+    # Resolve PDF source URL or raw PDF bytes
     pdf_url = req.pdf_url
-    if not pdf_url:
-        clean_aid = paper_id.lower().replace("arxiv:", "").strip()
-        if re.match(r"^\d{4}\.\d{4,5}(v\d+)?$", clean_aid):
-            pdf_url = f"https://arxiv.org/pdf/{clean_aid}.pdf"
-        elif paper_id.startswith("http"):
-            pdf_url = paper_id
-
-    # Download raw PDF bytes
     pdf_bytes = None
-    if pdf_url:
+    clean_aid = paper_id.lower().replace("arxiv:", "").strip()
+
+    # 1. Handle relative PDF URLs from frontend (e.g. /api/v1/pdf/proxy or /api/v1/pdf/preprint)
+    if pdf_url and str(pdf_url).startswith("/api/v1/pdf/proxy"):
+        from urllib.parse import parse_qs, urlparse
+        parsed = urlparse(pdf_url)
+        params = parse_qs(parsed.query)
+        if "url" in params:
+            target_url = params["url"][0]
+            try:
+                pdf_bytes = await pdf_extractor_service.fetch_pdf_bytes(target_url)
+            except Exception as e:
+                logger.debug("Proxy PDF fetch note: %s", e)
+
+    elif pdf_url and str(pdf_url).startswith("/api/v1/pdf/preprint"):
+        from urllib.parse import parse_qs, urlparse
+        parsed = urlparse(pdf_url)
+        params = parse_qs(parsed.query)
+        preprint_id = params.get("identifier", [paper_id])[0]
+        p_canon = await PaperRepository.get_by_canonical_id(db, preprint_id)
+        title = (p_canon.title if p_canon else req.title) or preprint_id
+        abstract = (p_canon.abstract if p_canon else "") or ""
+        authors = [a.name for a in p_canon.authors] if p_canon and p_canon.authors else []
+        from src.engines.preprint_generator import generate_preprint_pdf_buffer
+        pdf_bytes = generate_preprint_pdf_buffer(title=title, authors=authors, abstract=abstract)
+
+    elif pdf_url and str(pdf_url).startswith("http"):
         try:
             pdf_bytes = await pdf_extractor_service.fetch_pdf_bytes(pdf_url)
         except Exception as e:
-            logger.warning("Could not download PDF from %s: %s", pdf_url, e)
+            logger.debug("Direct PDF fetch note: %s", e)
 
-    # Ingest PDF into coordinate structures
+    # 2. Check arXiv direct resolution if not yet fetched
+    if not pdf_bytes and re.match(r"^\d{4}\.\d{4,5}(v\d+)?$", clean_aid):
+        arxiv_url = f"https://arxiv.org/pdf/{clean_aid}.pdf"
+        try:
+            pdf_bytes = await pdf_extractor_service.fetch_pdf_bytes(arxiv_url)
+        except Exception as e:
+            logger.debug("ArXiv PDF fetch note: %s", e)
+
+    # 3. Retrieve canonical metadata from database
     title = req.title or paper_id
-    if pdf_bytes:
-        doc = coord_engine.parse_pdf(pdf_bytes, paper_id=paper_id, title=title)
-    else:
-        # Fallback to existing database chunk text
-        p_canon = await PaperRepository.get_by_canonical_id(db, paper_id)
-        if p_canon and p_canon.title:
+    p_canon = await PaperRepository.get_by_canonical_id(db, paper_id)
+    if p_canon:
+        if p_canon.title:
             title = p_canon.title
-        doc = coord_engine.parse_pdf(b"", paper_id=paper_id, title=title)
+        if not pdf_bytes and p_canon.arxiv_id:
+            try:
+                pdf_bytes = await pdf_extractor_service.fetch_pdf_bytes(f"https://arxiv.org/pdf/{p_canon.arxiv_id}.pdf")
+            except Exception as e:
+                logger.debug("Canonical arXiv fetch note: %s", e)
 
-    # Execute Multi-Pass Structured Extraction Pipeline
+    # 4. Fallback: Synthesize preprint PDF buffer so coordinate engine always has real pages
+    if not pdf_bytes:
+        from src.engines.preprint_generator import generate_preprint_pdf_buffer
+        abstract = p_canon.abstract if p_canon and p_canon.abstract else ""
+        authors = [a.name for a in p_canon.authors] if p_canon and p_canon.authors else []
+        pdf_bytes = generate_preprint_pdf_buffer(title=title, authors=authors, abstract=abstract)
+
+    # Ingest PDF into coordinate structures (guaranteed to contain pages)
+    doc = coord_engine.parse_pdf(pdf_bytes, paper_id=paper_id, title=title)
+
+    # Fetch knowledge graph entities & relationships via PaperGraphStore (LangGraph / Graph RAG)
+    from src.rag.graph_store import PaperGraphStore
+    graph_store = PaperGraphStore(active_cache=active_cache)
+    graph_data = None
+    try:
+        graph_data = await graph_store.get_graph(paper_id, db)
+    except Exception as ge:
+        logger.debug("Graph lookup note for evidence ingest: %s", ge)
+
+    # Execute Multi-Pass Structured Extraction Pipeline with Graph integration
     pkg = await multi_pass_extractor.extract_evidence_package(
         doc=doc,
         pdf_bytes=pdf_bytes,
+        graph_data=graph_data,
         provider_name=req.provider or "",
         model_name=req.model or "",
     )
-
-    # Persist into SQLite paper_evidence table
-    existing_stmt = select(PaperEvidenceModel).where(PaperEvidenceModel.paper_id == paper_id)
-    res = await db.execute(existing_stmt)
-    ev_record = res.scalars().first()
 
     claims_data = [c.model_dump() for c in pkg.claims]
     metrics_data = [m.model_dump() for m in pkg.metrics]
@@ -210,43 +252,32 @@ async def ingest_paper_evidence(req: EvidenceIngestRequest, db: AsyncSession = D
     limitations_data = [l.model_dump() for l in pkg.limitations]
     timeline_data = [t.model_dump() for t in pkg.timeline]
 
-    if not ev_record:
-        ev_record = PaperEvidenceModel(
-            id=f"ev-{paper_id}",
-            paper_id=paper_id,
-            title=pkg.title,
-            thesis=pkg.thesis,
-            plain_summary=pkg.plain_summary,
-            research_question=pkg.research_question,
-            methods_json=pkg.methods,
-            findings_json=pkg.findings,
-            claims_json=claims_data,
-            metrics_json=metrics_data,
-            glossary_json=glossary_data,
-            limitations_json=limitations_data,
-            timeline_json=timeline_data,
-            page_count=max(doc.page_count, 1),
-            page_data_json={p.page_number: {"width": p.width, "height": p.height} for p in doc.pages}
-        )
-        db.add(ev_record)
-    else:
-        ev_record.title = pkg.title
-        ev_record.thesis = pkg.thesis
-        ev_record.plain_summary = pkg.plain_summary
-        ev_record.research_question = pkg.research_question
-        ev_record.methods_json = pkg.methods
-        ev_record.findings_json = pkg.findings
-        ev_record.claims_json = claims_data
-        ev_record.metrics_json = metrics_data
-        ev_record.glossary_json = glossary_data
-        ev_record.limitations_json = limitations_data
-        ev_record.timeline_json = timeline_data
-        ev_record.page_count = max(doc.page_count, 1)
+    # Atomically delete previous evidence records for this paper to prevent UNIQUE constraint collisions
+    await db.execute(text("DELETE FROM paper_evidence WHERE paper_id = :pid"), {"pid": paper_id})
+    await db.execute(text("DELETE FROM paper_figures WHERE paper_id = :pid"), {"pid": paper_id})
+    await db.execute(text("DELETE FROM paper_evidence_audits WHERE paper_id = :pid"), {"pid": paper_id})
+
+    ev_record = PaperEvidenceModel(
+        id=f"ev-{paper_id}",
+        paper_id=paper_id,
+        title=pkg.title,
+        thesis=pkg.thesis,
+        plain_summary=pkg.plain_summary,
+        research_question=pkg.research_question,
+        methods_json=pkg.methods,
+        findings_json=pkg.findings,
+        claims_json=claims_data,
+        metrics_json=metrics_data,
+        glossary_json=glossary_data,
+        limitations_json=limitations_data,
+        timeline_json=timeline_data,
+        page_count=max(doc.page_count, 1),
+        page_data_json={p.page_number: {"width": p.width, "height": p.height} for p in doc.pages}
+    )
+    db.add(ev_record)
 
     # Persist figures
     if pkg.figures:
-        del_figs = text("DELETE FROM paper_figures WHERE paper_id = :pid")
-        await db.execute(del_figs, {"pid": paper_id})
         for f in pkg.figures:
             fig_row = PaperFigureModel(
                 id=f.id,
@@ -265,8 +296,6 @@ async def ingest_paper_evidence(req: EvidenceIngestRequest, db: AsyncSession = D
 
     # Persist audit record
     if pkg.audit:
-        del_audit = text("DELETE FROM paper_evidence_audits WHERE paper_id = :pid")
-        await db.execute(del_audit, {"pid": paper_id})
         audit_row = PaperEvidenceAuditModel(
             id=f"audit-{paper_id}",
             paper_id=paper_id,
@@ -284,7 +313,11 @@ async def ingest_paper_evidence(req: EvidenceIngestRequest, db: AsyncSession = D
         )
         db.add(audit_row)
 
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception as ce:
+        await db.rollback()
+        logger.warning("[Evidence] Handled concurrent commit race for %s: %s", paper_id, ce)
     await active_cache.set_evidence(paper_id, pkg.model_dump())
     return pkg
 

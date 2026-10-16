@@ -136,10 +136,13 @@ class DeterministicExcerptVerifier:
         self,
         claims: List[ClaimItem],
         doc: PageIndexedDocument,
+        figures: Optional[List[Any]] = None,
+        metrics: Optional[List[Any]] = None,
+        limitations: Optional[List[Any]] = None,
     ) -> Tuple[List[ClaimItem], EvidenceAuditResult]:
         """
         Verify every claim against the document. Downgrades claims with unlocated quotes
-        from verified to needs-review, and builds full EvidenceAuditResult.
+        from verified to needs-review, and builds full EvidenceAuditResult across all evidence types.
         """
         page_count = max(doc.page_count, 1)
         cited_pages_set = set()
@@ -180,6 +183,23 @@ class DeterministicExcerptVerifier:
                 needs_review_count += 1
 
             verified_claims.append(claim)
+
+        # Include pages cited by verified visual figures, tables, metrics, and limitations
+        if figures:
+            for f in figures:
+                p = getattr(f, "page", None)
+                if p:
+                    cited_pages_set.add(p)
+        if metrics:
+            for m in metrics:
+                sref = getattr(m, "source_ref", None)
+                if sref and getattr(sref, "page", None):
+                    cited_pages_set.add(sref.page)
+        if limitations:
+            for l in limitations:
+                sref = getattr(l, "source_ref", None)
+                if sref and getattr(sref, "page", None):
+                    cited_pages_set.add(sref.page)
 
         # Calculate coverage metrics
         all_pages = set(range(1, page_count + 1))

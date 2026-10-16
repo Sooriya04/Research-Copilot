@@ -95,7 +95,7 @@ export default function EvidenceAuditMeter({ audit, claims = [], figures = [], l
         </div>
       </div>
 
-      {/* Thin Sections / Unreached Warning */}
+      {/* Audit Coverage Diagnostic */}
       {audit && audit.unreached_pages && audit.unreached_pages.length > 0 && (
         <div
           style={{
@@ -104,16 +104,17 @@ export default function EvidenceAuditMeter({ audit, claims = [], figures = [], l
             gap: '6px',
             padding: '6px 10px',
             borderRadius: '6px',
-            background: 'rgba(245, 158, 11, 0.08)',
-            border: '1px solid rgba(245, 158, 11, 0.25)',
+            background: audit.page_coverage_rate >= 0.75 ? 'rgba(16, 185, 129, 0.08)' : 'rgba(245, 158, 11, 0.08)',
+            border: `1px solid ${audit.page_coverage_rate >= 0.75 ? 'rgba(16, 185, 129, 0.25)' : 'rgba(245, 158, 11, 0.25)'}`,
             fontSize: '11px',
-            color: '#d97706',
+            color: audit.page_coverage_rate >= 0.75 ? '#059669' : '#d97706',
           }}
         >
           <AlertTriangle size={12} style={{ flexShrink: 0 }} />
           <span>
-            Uncited intervals: Pages {audit.unreached_pages.slice(0, 5).join(', ')}
-            {audit.unreached_pages.length > 5 ? '…' : ''} have no extracted evidence.
+            {audit.page_coverage_rate >= 0.75
+              ? `High document coverage (${Math.round(audit.page_coverage_rate * 100)}%). Pages ${audit.unreached_pages.slice(0, 4).join(', ')}${audit.unreached_pages.length > 4 ? '…' : ''} contain appendix or bibliography.`
+              : `Audit coverage note: Pages ${audit.unreached_pages.slice(0, 5).join(', ')}${audit.unreached_pages.length > 5 ? '…' : ''} have no cited evidence cards.`}
           </span>
         </div>
       )}

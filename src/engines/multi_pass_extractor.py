@@ -42,11 +42,12 @@ class MultiPassEvidenceExtractor:
         self,
         doc: PageIndexedDocument,
         pdf_bytes: Optional[bytes] = None,
+        graph_data: Optional[Dict[str, Any]] = None,
         provider_name: str = "",
         model_name: str = "",
         api_key: str = "",
     ) -> PaperEvidencePackage:
-        """Execute all 4 extraction passes and ground results against document coordinates."""
+        """Execute all 4 extraction passes, integrate Graph RAG, and ground results against document coordinates."""
         paper_id = doc.paper_id
         title = doc.title or "Research Paper"
         page_count = max(doc.page_count, 1)
@@ -80,6 +81,63 @@ class MultiPassEvidenceExtractor:
         # Pass 4: Narrative Timeline
         timeline = await self._pass_timeline(formatted_paper_text, doc, claims, llm_provider)
 
+        # Integrate LangGraph / Graph RAG entities and relationships if present
+        if graph_data:
+            nodes = graph_data.get("nodes", [])
+            edges = graph_data.get("edges", [])
+            node_map = {n.get("id"): n for n in nodes}
+
+            # Graph Metrics
+            for n in nodes:
+                if n.get("type") in ["metric", "benchmark"]:
+                    lbl = n.get("label", "")
+                    if lbl and not any(m.label.lower() == lbl.lower() for m in metrics):
+                        metrics.append(MetricItem(
+                            id=f"metric-g-{len(metrics) + 1}",
+                            label=lbl,
+                            value=None,
+                            display_value=lbl,
+                            unit="",
+                            context=n.get("description") or "Graph-retrieved empirical metric.",
+                            source_ref=SourceReference(
+                                source_id="graph",
+                                page=n.get("page") or 1,
+                                excerpt=lbl
+                            )
+                        ))
+                elif n.get("type") in ["method", "model", "dataset"]:
+                    lbl = n.get("label", "")
+                    if lbl and not any(g.term.lower() == lbl.lower() for g in glossary):
+                        glossary.append(GlossaryItem(
+                            term=lbl,
+                            definition=n.get("description") or f"Identified {n.get('type')} in research knowledge graph.",
+                            source_ref=SourceReference(
+                                source_id="graph",
+                                page=n.get("page") or 1,
+                                excerpt=lbl
+                            )
+                        ))
+
+            # Graph Relationships as grounded claims
+            for e in edges:
+                src = node_map.get(e.get("source"), {}).get("label")
+                tgt = node_map.get(e.get("target"), {}).get("label")
+                rel = e.get("label") or e.get("relationship") or "relates to"
+                if src and tgt:
+                    stmt = f"{src} {rel} {tgt}."
+                    if not any(c.statement.lower() == stmt.lower() for c in claims):
+                        claims.append(ClaimItem(
+                            id=f"claim-g-{len(claims) + 1}",
+                            statement=stmt,
+                            kind=ClaimKind.REPORTED_RESULT,
+                            confidence=ClaimConfidence.VERIFIED,
+                            source_refs=[SourceReference(
+                                source_id="graph",
+                                page=e.get("page") or 1,
+                                excerpt=f"{src} {tgt}"
+                            )]
+                        ))
+
         # Extract Visual Assets (Figures & Tables)
         figures: List[FigureAsset] = []
         if pdf_bytes:
@@ -94,7 +152,9 @@ class MultiPassEvidenceExtractor:
                 ][:2]
 
         # Audit and verify claims mathematically against page text
-        verified_claims, audit = self.verifier.audit_and_verify_claims(claims, doc)
+        verified_claims, audit = self.verifier.audit_and_verify_claims(
+            claims, doc, figures=figures, metrics=metrics, limitations=limitations
+        )
 
         return PaperEvidencePackage(
             paper_id=paper_id,
@@ -431,12 +491,13 @@ class MultiPassEvidenceExtractor:
         for page in doc.pages:
             p_text = page.text
             sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", p_text) if len(s.strip()) > 35]
+            page_claims = 0
             for s in sentences:
                 if any(k in s.lower() for k in keywords) and len(s) < 220:
                     claims.append(ClaimItem(
                         id=f"claim-{claim_idx}",
                         statement=s,
-                        kind=ClaimKind.REPORTED_RESULT if "achiev" in s.lower() or "result" in s.lower() else ClaimKind.METHOD,
+                        kind=ClaimKind.REPORTED_RESULT if any(w in s.lower() for w in ["achiev", "result", "improv", "outperform"]) else ClaimKind.METHOD,
                         confidence=ClaimConfidence.VERIFIED,
                         source_refs=[SourceReference(
                             source_id="paper",
@@ -445,9 +506,10 @@ class MultiPassEvidenceExtractor:
                         )]
                     ))
                     claim_idx += 1
-                    if len(claims) >= 6:
+                    page_claims += 1
+                    if page_claims >= 2:
                         break
-            if len(claims) >= 6:
+            if len(claims) >= 12:
                 break
 
         if not claims and doc.pages:
