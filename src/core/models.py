@@ -225,3 +225,65 @@ class PaperSynthesisModel(Base):
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 
+
+class PaperEvidenceModel(Base):
+    """Complete grounded research evidence package stored in SQLite."""
+    __tablename__ = "paper_evidence"
+
+    id = Column(String, primary_key=True, index=True)
+    paper_id = Column(String, index=True, nullable=False, unique=True)
+    title = Column(String, nullable=False)
+    thesis = Column(Text, default="")
+    plain_summary = Column(Text, default="")
+    research_question = Column(Text, default="")
+    methods_json = Column(JSON, default=list)
+    findings_json = Column(JSON, default=list)
+    claims_json = Column(JSON, default=list)
+    metrics_json = Column(JSON, default=list)
+    glossary_json = Column(JSON, default=list)
+    limitations_json = Column(JSON, default=list)
+    timeline_json = Column(JSON, default=list)
+    page_count = Column(Integer, default=1)
+    page_data_json = Column(JSON, default=dict)  # per-page text and dimensions
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class PaperFigureModel(Base):
+    """Extracted figure and table visual assets from research papers."""
+    __tablename__ = "paper_figures"
+
+    id = Column(String, primary_key=True, index=True)
+    paper_id = Column(String, index=True, nullable=False)
+    label = Column(String, nullable=False)  # Figure 1, Table 2
+    caption = Column(Text, default="")
+    why_it_matters = Column(Text, default="")
+    page = Column(Integer, nullable=False)
+    asset_type = Column(String, default="figure")  # figure, table, architecture, plot
+    image_data_url = Column(Text, nullable=True)  # base64 data URL
+    asset_path = Column(String, nullable=True)
+    bbox_json = Column(JSON, default=list)
+    claim_ids_json = Column(JSON, default=list)
+    created_at = Column(DateTime, default=utcnow)
+
+
+class PaperEvidenceAuditModel(Base):
+    """Deterministic excerpt verification and evidence audit metrics stored in SQLite."""
+    __tablename__ = "paper_evidence_audits"
+
+    id = Column(String, primary_key=True, index=True)
+    paper_id = Column(String, index=True, nullable=False)
+    checked_at = Column(String, nullable=False)
+    page_count = Column(Integer, default=1)
+    total_claims = Column(Integer, default=0)
+    verified_claims = Column(Integer, default=0)
+    needs_review_claims = Column(Integer, default=0)
+    quote_match_rate = Column(Float, default=0.0)
+    page_coverage_rate = Column(Float, default=0.0)
+    cited_pages_json = Column(JSON, default=list)
+    unreached_pages_json = Column(JSON, default=list)
+    thin_sections_json = Column(JSON, default=list)
+    unlocated_json = Column(JSON, default=list)
+    created_at = Column(DateTime, default=utcnow)
+
+

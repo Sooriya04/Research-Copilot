@@ -185,7 +185,7 @@ export default function PaperReaderView() {
     return () => ro.disconnect();
   }, []);
 
-  const handleHighlightEvidence = (evidence) => {
+  const handleHighlightEvidence = async (evidence) => {
     if (!evidence) return;
     setActiveHighlight(evidence);
     const targetPage = Number(evidence.page) || 1;
@@ -198,7 +198,36 @@ export default function PaperReaderView() {
         }
       }, 50);
     }
+
+    // If highlight_rects are missing but excerpt exists, query deterministic verifier
+    if ((!evidence.highlight_rects || evidence.highlight_rects.length === 0) && (evidence.quote || evidence.text)) {
+      const pId = currentDoc?.arxiv_id || currentDoc?.id;
+      if (pId) {
+        try {
+          const res = await fetch('/api/v1/evidence/verify-excerpt', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              paper_id: pId,
+              page: targetPage,
+              excerpt: evidence.quote || evidence.text,
+            }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.highlight_rects && data.highlight_rects.length > 0) {
+              setActiveHighlight((prev) =>
+                prev ? { ...prev, highlight_rects: data.highlight_rects, page: data.verified_page || prev.page } : prev
+              );
+            }
+          }
+        } catch (e) {
+          // Fallback to text span highlighting
+        }
+      }
+    }
   };
+
 
   const handleExportHtml = () => {
     if (convertedPages.length === 0 || exportingHtml) return;
@@ -1307,9 +1336,34 @@ export default function PaperReaderView() {
                         );
                       })}
                     </div>
+
+                    {/* Deterministic Coordinate Highlight Bounding Boxes */}
+                    {activeHighlight &&
+                      Number(activeHighlight.page) === page.pageNumber &&
+                      activeHighlight.highlight_rects &&
+                      activeHighlight.highlight_rects.map((rect, rIdx) => (
+                        <div
+                          key={`coord-rect-${rIdx}`}
+                          className="pdf-coordinate-highlight-box"
+                          style={{
+                            position: 'absolute',
+                            left: `${(rect.x * displayWidth).toFixed(1)}px`,
+                            top: `${(rect.y * displayHeight).toFixed(1)}px`,
+                            width: `${(rect.width * displayWidth).toFixed(1)}px`,
+                            height: `${(rect.height * displayHeight).toFixed(1)}px`,
+                            background: 'rgba(250, 204, 21, 0.32)',
+                            borderBottom: '2.5px solid #eab308',
+                            boxShadow: '0 0 8px rgba(234, 179, 8, 0.4)',
+                            borderRadius: '2px',
+                            pointerEvents: 'none',
+                            zIndex: 4,
+                          }}
+                        />
+                      ))}
                   </div>
                 );
               })}
+
 
               {/* In-progress indicator at bottom when converting remaining pages */}
               {isConverting && convertedPages.length < totalPages && (

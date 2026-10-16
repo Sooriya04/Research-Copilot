@@ -18,7 +18,9 @@ from src.api.routes_workbench import router as workbench_router
 from src.api.routes_settings import router as settings_router
 from src.api.routes_novelty import router as novelty_router
 from src.api.routes_paper_rag import router as paper_rag_router
+from src.api.routes_evidence import router as evidence_router
 from src.core.config import settings
+
 from src.core.database import init_db
 from src.core.logger import logger
 
@@ -77,8 +79,10 @@ def create_app() -> FastAPI:
     app.include_router(settings_router)
     app.include_router(novelty_router)
     app.include_router(paper_rag_router)
+    app.include_router(evidence_router)
 
     # Static Assets & React SPA Frontend Serving
+
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
     dist_dir = os.path.join(project_root, "public_dist")
     assets_dir = os.path.join(dist_dir, "assets")

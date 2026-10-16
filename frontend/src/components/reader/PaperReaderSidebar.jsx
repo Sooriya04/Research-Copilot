@@ -23,6 +23,7 @@ import {
   Search,
   Settings,
   AlertTriangle,
+  ShieldCheck,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import MarkdownRenderer from '../common/MarkdownRenderer';
@@ -35,7 +36,9 @@ import {
   MissingEvidenceAlert,
 } from './EvidenceDrawer';
 import PaperSynthesisTab from './PaperSynthesisTab';
+import EvidenceStudioTab from './EvidenceStudioTab';
 import ModelConfigModal, { KNOWN_PROVIDER_DEFS } from '../modals/ModelConfigModal';
+
 
 // Helper to provide deterministic, paper-grounded source citations with diverse source types and confidence levels
 function enrichPaperGrounding(content, paper, query = '') {
@@ -1720,6 +1723,30 @@ export default function PaperReaderSidebar({
 
           <button
             type="button"
+            onClick={() => setActiveTab('evidence')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: '6px 11px',
+              borderRadius: 6,
+              border: 'none',
+              background: activeTab === 'evidence' ? 'var(--bg-card, #ffffff)' : 'transparent',
+              color: activeTab === 'evidence' ? 'var(--accent-violet, #6366f1)' : 'var(--text-muted, #64748b)',
+              fontWeight: activeTab === 'evidence' ? 600 : 500,
+              fontSize: 12,
+              cursor: 'pointer',
+              boxShadow: activeTab === 'evidence' ? '0 1px 3px rgba(0,0,0,0.06)' : 'none',
+              transition: 'all 0.12s ease',
+            }}
+            title="Deterministic Evidence Studio & Visual Grounding"
+          >
+            <ShieldCheck size={13} />
+            <span>Evidence</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setActiveTab('benchmarks')}
             style={{
               display: 'flex',
@@ -1797,9 +1824,17 @@ export default function PaperReaderSidebar({
           />
         )}
         {activeTab === 'synthesis' && <PaperSynthesisTab paper={paper} />}
+        {activeTab === 'evidence' && (
+          <EvidenceStudioTab
+            paper={paper}
+            onHighlightEvidence={onHighlightEvidence}
+            onJumpToPage={onJumpToPage}
+          />
+        )}
         {activeTab === 'benchmarks' && <BenchmarksTab paper={paper} />}
         {activeTab === 'details' && <DetailsTab paper={paper} />}
       </div>
+
     </aside>
   );
 

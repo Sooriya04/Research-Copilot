@@ -6,23 +6,40 @@ from sqlalchemy import select, or_, text, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.canonical_models import ExtractedClaim, VerificationStatus
 from src.core.database import get_db
-from src.core.models import PaperCacheModel, PaperSynthesisModel, PaperDocumentModel, PaperChunkModel
+from src.core.models import (
+    PaperCacheModel, PaperSynthesisModel, PaperDocumentModel, PaperChunkModel,
+    PaperEvidenceModel, PaperFigureModel, PaperEvidenceAuditModel
+)
 from src.core.normalized_models import (
     NormalizedPaperModel, ResearchGapModel, PaperSummaryModel,
     BenchmarkModel, CodeRepositoryModel
 )
 from src.core.logger import logger
 from src.core.schemas import Author, ChecklistRubric, Paper, ScoreBreakdown
+from src.core.evidence_schemas import (
+    HighlightRect, SourceReference, ClaimItem, MetricItem,
+    GlossaryItem, LimitationItem, FigureAsset, TimelineStage,
+    EvidenceAuditResult, PaperEvidencePackage
+)
 from src.engines.access_resolver import AccessResolver
 from src.engines.gap_extractor import ScientificGapExtractor
 from src.engines.paper_rank import PaperRankEngine
 from src.engines.rubric_evaluator import RubricEvaluator
+from src.engines.pdf_coordinate_engine import PDFCoordinateEngine
+from src.engines.excerpt_verifier import DeterministicExcerptVerifier
+from src.engines.multi_pass_extractor import MultiPassEvidenceExtractor
+from src.engines.pdf_extractor import PDFExtractor
 from src.providers.base import ChatMessage
 from src.providers.factory import get_llm_provider
 from src.core.paper_repository import PaperRepository
 from src.engines.claim_verifier import ClaimVerifier
 
 router = APIRouter(prefix="/api/v1", tags=["Research Intelligence & Comparison"])
+coord_engine = PDFCoordinateEngine()
+excerpt_verifier = DeterministicExcerptVerifier()
+multi_pass_extractor = MultiPassEvidenceExtractor()
+pdf_extractor_service = PDFExtractor()
+
 resolver = AccessResolver()
 rubric_evaluator = RubricEvaluator()
 rank_engine = PaperRankEngine()
@@ -1033,4 +1050,6 @@ async def verify_quote(req: QuoteVerifyRequest, db: AsyncSession = Depends(get_d
         matched_substring=matched,
         notes=notes,
     )
+
+
 

@@ -2237,6 +2237,51 @@ bundle compilation (`npm run build`).
   * Verified end-to-end ingestion on `arXiv:1706.03762` (2.2 MB PDF streamed and parsed via WASM) and closed DOI `10.1561/1500000061` (synthesized preprint rendered in WASM without errors).
   * Verified Vite frontend production build (`npm run build`) in `frontend/` succeeds with zero errors in 6.45s.
 
+<br />
+
+## Implement Foundational Substrate for Evidence Studio: Page-Indexed Coordinates, Deterministic Verification, Visual Asset Extraction, and Decoupled Split-Pane UI
+
+* **Page-Indexed PDF Ingestion & Coordinate Engine (`src/engines/pdf_coordinate_engine.py`)**:
+  * Built high-precision PDF parsing using PyMuPDF (`fitz`), preserving 1-indexed pages, exact point dimensions, reading order blocks, and word boxes (`x_min, y_min, x_max, y_max`).
+  * Implemented `locate_excerpt_rects`: employs letter-indexed character mapping and fragment resolution (supporting ellipses `...` and hyphenation) to produce normalized bounding box rectangles (`HighlightRect[x, y, width, height]` scaled 0.0 to 1.0) for resolution-independent visual overlays.
+
+* **Deterministic Substring Excerpt Verifier & Locator (`src/engines/excerpt_verifier.py`)**:
+  * Implemented quote authenticity checking with NFKC normalization, ligature conversion (`fi`, `fl`, `ffi`, `ffl`), smart quote standardization, and line-break hyphen stripping.
+  * Added adjacent-page lookup window (`[page-1, page+1]`) to resolve quotes spanning page boundaries, and whole-document fallback scanning.
+  * Implemented automated hallucination auditing: mechanically downgrades unlocated claims from `verified` to `needs-review`.
+  * Computes mechanical audit metrics: total claims, verified ratio, verbatim quote match rate, page coverage rate, and uncited interval detection.
+
+* **PDF Figure & Table Visual Extraction Engine (`src/engines/pdf_visual_extractor.py`)**:
+  * Scans text streams for caption patterns (`Figure \d+`, `Table \d+`, `Fig. \d+`).
+  * Extracts embedded raster streams or renders crisp 2x high-DPI vector pixmaps around caption boundaries.
+  * Converts visual assets to base64 PNG Data URLs paired with original captions, page numbers, and bounding coordinates.
+
+* **Unified Evidence & Audit Schemas (`src/core/evidence_schemas.py`, `src/core/models.py`)**:
+  * Defined Pydantic validation schemas for `HighlightRect`, `WordBox`, `SourceReference`, `ClaimItem`, `MetricItem`, `GlossaryItem`, `LimitationItem`, `FigureAsset`, `TimelineStage`, `EvidenceAuditResult`, and `PaperEvidencePackage`.
+  * Deployed SQLite relational tables `paper_evidence`, `paper_figures`, and `paper_evidence_audits` in `src/core/models.py`.
+
+* **Multi-Pass Structured Extraction Pipeline (`src/engines/multi_pass_extractor.py`)**:
+  * Decomposed paper analysis into 4 schema-enforced extraction stages: Pass 1 (Thesis, questions, and atomic claims), Pass 2 (Methods, findings, and numerical metrics), Pass 3 (Stated limitations, assumptions, and glossary), and Pass 4 (Narrative timeline).
+  * Built grounded heuristic fallbacks extracting sentences and metric patterns directly from PDF text when LLMs are offline.
+
+* **Decoupled Evidence Studio API Router (`src/api/routes_evidence.py`, `src/api/app.py`)**:
+  * Extracted evidence endpoints out of `routes_intelligence.py` into a dedicated router `src/api/routes_evidence.py`.
+  * Registered routes in `src/api/app.py`: `POST /api/v1/evidence/ingest`, `GET /api/v1/evidence/{paper_id}`, `POST /api/v1/evidence/verify-excerpt`, `GET /api/v1/evidence/{paper_id}/audit`, `GET /api/v1/evidence/{paper_id}/figures`, and `POST /api/v1/evidence/{paper_id}/claims/review`.
+
+* **Decoupled Split-Pane Evidence Reader UI (`frontend/src/components/reader/EvidenceStudioTab.jsx`, `frontend/src/components/reader/evidence/`, `frontend/src/views/PaperReaderView.jsx`)**:
+  * Decoupled the Evidence Studio into 7 single-responsibility subcomponents inside `frontend/src/components/reader/evidence/`: `EvidenceAuditMeter.jsx`, `ClaimsLedger.jsx`, `FiguresGallery.jsx`, `MetricsSummary.jsx`, `GlossaryList.jsx`, `LimitationsList.jsx`, and `NarrativeTimeline.jsx`.
+  * Refactored `EvidenceStudioTab.jsx` as a lightweight orchestrator component.
+  * Added dedicated `Evidence` tab in `PaperReaderSidebar.jsx`.
+  * Upgraded `PaperReaderView.jsx` with coordinate highlight bounding box overlays (`.pdf-coordinate-highlight-box`) rendered directly on top of the WASM PDF canvas.
+  * Enhanced `handleHighlightEvidence` with on-demand asynchronous coordinate verification via `/api/v1/evidence/verify-excerpt`.
+
+* **Verification & Test Suite**:
+  * Added comprehensive unit and integration tests in `tests/test_evidence_foundations.py`, all 5 passing.
+  * Verified full test suite (`pytest tests/test_evidence_foundations.py tests/test_intelligence_routes.py`), all 14 tests passing.
+  * Verified Vite frontend production build (`npm run build`) compiles cleanly in 8.47s with zero errors.
+  * Verified zero emojis across all code, markdown, and responses.
+
+
 
 
 
