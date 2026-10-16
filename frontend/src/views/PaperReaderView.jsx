@@ -31,6 +31,11 @@ import {
   downloadStandaloneHtmlFile,
   createFallbackPdfBuffer,
 } from '../utils/pdfWasmConverter';
+import {
+  loadCachedPaperPages,
+  cacheConvertedPaperPages,
+  clearPaperPagesCache,
+} from '../utils/paperPageCache';
 
 function extractArxivId(idStr) {
   if (!idStr) return null;
@@ -371,6 +376,20 @@ export default function PaperReaderView() {
       setConversionProgress({ percent: 5, status: 'Initializing WebAssembly runtime...' });
       setConvertedPages([]);
 
+      // 0. Check Dual-Layer Cache (IndexedDB & Redis Backend)
+      try {
+        const cached = await loadCachedPaperPages(currentDoc, abortController.signal);
+        if (cached?.data?.pages?.length > 0) {
+          if (!isMounted) return;
+          setConvertedPages(cached.data.pages);
+          setTotalPages(cached.data.numPages || cached.data.pages.length);
+          setIsConverting(false);
+          return;
+        }
+      } catch (cacheErr) {
+        if (abortController.signal.aborted) return;
+      }
+
       // 1. Resolve source
       let source = currentDoc.pdfUrl || resolvePaperPdf(currentDoc);
       if (!source) {
@@ -383,8 +402,9 @@ export default function PaperReaderView() {
         }
       }
 
+      const accumulatedPages = [];
       try {
-        await convertPdfToHtmlPages(
+        const convResult = await convertPdfToHtmlPages(
           source,
           {
             scale: 1.8,
@@ -393,6 +413,7 @@ export default function PaperReaderView() {
             paperFallback: currentDoc,
             onPageRendered: (pageData, pageNum, totalDocPages) => {
               if (!isMounted) return;
+              accumulatedPages.push(pageData);
               setConvertedPages((prev) => {
                 if (prev.some((p) => p.pageNumber === pageData.pageNumber)) return prev;
                 const next = [...prev, pageData].sort((a, b) => a.pageNumber - b.pageNumber);
@@ -406,18 +427,26 @@ export default function PaperReaderView() {
             setConversionProgress({ percent, status: statusMsg });
           }
         );
+
+        if (isMounted) {
+          const finalPages = convResult?.pages?.length > 0 ? convResult.pages : accumulatedPages;
+          if (finalPages.length > 0) {
+            cacheConvertedPaperPages(currentDoc, finalPages, convResult?.numPages || finalPages.length, currentDoc.title);
+          }
+        }
       } catch (err) {
         if (abortController.signal.aborted) return;
         console.warn('WASM conversion with primary source encountered issue, falling back to preprint buffer:', err);
         try {
           const fallbackBytes = createFallbackPdfBuffer(currentDoc);
-          await convertPdfToHtmlPages(
+          const fallbackResult = await convertPdfToHtmlPages(
             fallbackBytes,
             {
               scale: 1.8,
               maxPages: 40,
               onPageRendered: (pageData, pageNum, totalDocPages) => {
                 if (!isMounted) return;
+                accumulatedPages.push(pageData);
                 setConvertedPages((prev) => {
                   if (prev.some((p) => p.pageNumber === pageData.pageNumber)) return prev;
                   return [...prev, pageData].sort((a, b) => a.pageNumber - b.pageNumber);
@@ -430,6 +459,13 @@ export default function PaperReaderView() {
               setConversionProgress({ percent, status: statusMsg });
             }
           );
+
+          if (isMounted) {
+            const finalPages = fallbackResult?.pages?.length > 0 ? fallbackResult.pages : accumulatedPages;
+            if (finalPages.length > 0) {
+              cacheConvertedPaperPages(currentDoc, finalPages, fallbackResult?.numPages || finalPages.length, currentDoc.title);
+            }
+          }
         } catch (fallbackErr) {
           if (!isMounted) return;
           setConversionError(`Document conversion failed: ${fallbackErr.message}`);
@@ -992,6 +1028,21 @@ export default function PaperReaderView() {
                   <button
                     type="button"
                     className="reader-dropdown-item"
+                    onClick={async () => {
+                      setMoreMenuOpen(false);
+                      await clearPaperPagesCache(currentDoc);
+                      setConvertedPages([]);
+                      setCurrentDoc((prev) => (prev ? { ...prev } : null));
+                    }}
+                    title="Purge Redis and local cache and force full WebAssembly re-conversion"
+                  >
+                    <RefreshCw size={13} />
+                    <span>Re-convert (Bypass Cache)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    className="reader-dropdown-item"
                     onClick={() => {
                       setCurrentDoc(null);
                       setConvertedPages([]);
@@ -1193,7 +1244,8 @@ export default function PaperReaderView() {
               <button
                 type="button"
                 className="reader-topbar-btn"
-                onClick={() => {
+                onClick={async () => {
+                  await clearPaperPagesCache(currentDoc);
                   setConvertedPages([]);
                   setCurrentDoc((prev) => (prev ? { ...prev } : null));
                 }}

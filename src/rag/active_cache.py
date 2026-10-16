@@ -1,4 +1,5 @@
 import json
+import re
 import time
 from typing import Any, Dict, List, Optional
 try:
@@ -73,6 +74,14 @@ class ActivePaperCache:
 
     def _evidence_key(self, paper_id: str) -> str:
         return f"paper:{paper_id}:evidence"
+
+    def _html_cache_key(self, paper_id: str) -> str:
+        match = re.search(r"(\d{4}\.\d{4,5}(?:v\d+)?|[a-z\-]+(?:\.[a-z]{2})?/\d{7})", paper_id)
+        if match:
+            clean_id = f"arxiv_{match.group(1)}"
+        else:
+            clean_id = re.sub(r"[^a-zA-Z0-9._-]", "_", paper_id.strip())
+        return f"paper:{clean_id}:html_pages"
 
     def _active_key(self) -> str:
         return "active_paper:current"
@@ -176,6 +185,46 @@ class ActivePaperCache:
             return True
         except Exception as e:
             logger.warning("[ActivePaperCache] Error invalidating evidence for '%s': %s", paper_id, e)
+            return False
+
+    async def get_html_pages(self, paper_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve cached converted HTML page bundle from Redis."""
+        client = await self.get_client()
+        if not client:
+            return None
+        try:
+            raw = await client.get(self._html_cache_key(paper_id))
+            if raw:
+                return json.loads(raw)
+        except Exception as e:
+            logger.warning("[ActivePaperCache] Error getting html pages for '%s': %s", paper_id, e)
+        return None
+
+    async def set_html_pages(
+        self, paper_id: str, pages_data: Dict[str, Any], ttl: Optional[int] = None
+    ) -> bool:
+        """Store converted HTML page bundle into Redis cache."""
+        client = await self.get_client()
+        if not client:
+            return False
+        try:
+            ex_ttl = ttl or getattr(settings, "redis_html_cache_ttl", 604800)
+            await client.set(self._html_cache_key(paper_id), json.dumps(pages_data), ex=ex_ttl)
+            return True
+        except Exception as e:
+            logger.warning("[ActivePaperCache] Error caching html pages for '%s': %s", paper_id, e)
+            return False
+
+    async def invalidate_html_pages(self, paper_id: str) -> bool:
+        """Evict converted HTML page bundle from Redis cache."""
+        client = await self.get_client()
+        if not client:
+            return False
+        try:
+            await client.delete(self._html_cache_key(paper_id))
+            return True
+        except Exception as e:
+            logger.warning("[ActivePaperCache] Error deleting html pages for '%s': %s", paper_id, e)
             return False
 
     async def get_json(self, key: str) -> Optional[Any]:

@@ -261,3 +261,92 @@ async def test_active_paper_cache_evidence_and_json():
     assert await cache.get_evidence(paper_id) is not None
     await cache.invalidate_paper(paper_id)
     assert await cache.get_evidence(paper_id) is None
+
+
+@pytest.mark.asyncio
+async def test_redis_html_pages_cache_and_endpoints():
+    """Verify storing, retrieving, and invalidating converted HTML pages in Redis and via HTTP endpoints."""
+    fake_client = fake_aioredis.FakeRedis(decode_responses=True)
+    cache = ActivePaperCache(redis_client=fake_client, ttl_seconds=600, enabled=True)
+    paper_id = "arxiv:2503.04615"
+
+    sample_pages = [
+        {
+            "pageNumber": 1,
+            "width": 612.0,
+            "height": 792.0,
+            "bgDataUrl": "data:image/png;base64,samplepage1data",
+            "textItems": [
+                {"str": "HalluCounter: Towards Holistic Hallucination Evaluation", "left": 54, "top": 100, "fontSize": 18}
+            ],
+            "html": "<div class=\"pdf-page\">Page 1 Content</div>",
+            "fullText": "HalluCounter: Towards Holistic Hallucination Evaluation",
+        },
+        {
+            "pageNumber": 2,
+            "width": 612.0,
+            "height": 792.0,
+            "bgDataUrl": "data:image/png;base64,samplepage2data",
+            "textItems": [
+                {"str": "2. Methodology", "left": 54, "top": 80, "fontSize": 14}
+            ],
+            "html": "<div class=\"pdf-page\">Page 2 Content</div>",
+            "fullText": "2. Methodology",
+        },
+    ]
+
+    # 1. Direct ActivePaperCache check
+    assert await cache.get_html_pages(paper_id) is None
+    set_res = await cache.set_html_pages(paper_id, {"numPages": 2, "pages": sample_pages, "docTitle": "HalluCounter"})
+    assert set_res is True
+
+    # 2. Key normalization: arxiv_2503.04615 or 2503.04615 should hit the exact same cache
+    cached_pages_1 = await cache.get_html_pages("2503.04615")
+    assert cached_pages_1 is not None
+    assert cached_pages_1["numPages"] == 2
+    assert len(cached_pages_1["pages"]) == 2
+    assert cached_pages_1["pages"][0]["textItems"][0]["str"].startswith("HalluCounter")
+
+    # Invalidate
+    await cache.invalidate_html_pages("2503.04615")
+    assert await cache.get_html_pages(paper_id) is None
+
+    # 3. HTTP Endpoints
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Cache miss
+        miss_res = await client.get("/api/v1/pdf/html-cache/2503.04615")
+        assert miss_res.status_code == 200
+        assert miss_res.json()["status"] == "miss"
+
+        # POST / save into Redis cache
+        post_res = await client.post(
+            "/api/v1/pdf/html-cache/2503.04615",
+            json={
+                "numPages": 2,
+                "docTitle": "HalluCounter",
+                "pages": sample_pages,
+            },
+        )
+        assert post_res.status_code == 200
+        assert post_res.json()["status"] == "saved"
+        assert post_res.json()["numPages"] == 2
+
+        # Cache hit
+        hit_res = await client.get("/api/v1/pdf/html-cache/arxiv:2503.04615")
+        assert hit_res.status_code == 200
+        hit_data = hit_res.json()
+        assert hit_data["status"] == "hit"
+        assert hit_data["numPages"] == 2
+        assert len(hit_data["pages"]) == 2
+        assert hit_data["pages"][0]["pageNumber"] == 1
+
+        # DELETE / invalidate
+        del_res = await client.delete("/api/v1/pdf/html-cache/2503.04615")
+        assert del_res.status_code == 200
+        assert del_res.json()["status"] == "invalidated"
+
+        # Confirm miss after delete
+        miss_res2 = await client.get("/api/v1/pdf/html-cache/2503.04615")
+        assert miss_res2.status_code == 200
+        assert miss_res2.json()["status"] == "miss"

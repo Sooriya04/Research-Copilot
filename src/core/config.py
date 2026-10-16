@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     # Redis Active Paper Cache Configuration
     redis_url: str = "redis://localhost:6379"
     redis_active_paper_ttl: int = 3600
+    redis_html_cache_ttl: int = 604800
     redis_enabled: bool = True
 
     

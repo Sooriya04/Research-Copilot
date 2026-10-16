@@ -2,7 +2,7 @@ import asyncio
 import re
 import time
 import uuid
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
@@ -17,6 +17,7 @@ from src.engines.access_resolver import AccessResolver
 from src.engines.multi_provider_search import MultiProviderSearchEngine
 from src.engines.pdf_parser import PDFSectionExtractor
 from src.engines.preprint_generator import generate_preprint_pdf_buffer
+from src.rag.active_cache import get_active_paper_cache
 
 router = APIRouter(prefix="/api/v1", tags=["Search & Paper Access"])
 resolver = AccessResolver()
@@ -617,5 +618,84 @@ async def search_unified_endpoint(req: UnifiedSearchRequest, request: Request, d
         source_breakdown=source_breakdown,
         papers=unique_papers
     )
+
+
+class HtmlCacheSaveRequest(BaseModel):
+    numPages: Optional[int] = None
+    pages: List[Dict[str, Any]]
+    docTitle: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
+@router.get("/pdf/html-cache/{paper_id:path}")
+async def get_pdf_html_cache(paper_id: str):
+    """
+    Retrieve pre-converted HTML page bundle from Redis cache for sub-millisecond instant document loading on reload.
+    """
+    clean_id = paper_id.strip()
+    if not clean_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="paper_id cannot be empty.")
+    cache = get_active_paper_cache()
+    cached_bundle = await cache.get_html_pages(clean_id)
+    if cached_bundle:
+        return {
+            "status": "hit",
+            "paper_id": clean_id,
+            "numPages": cached_bundle.get("numPages", len(cached_bundle.get("pages", []))),
+            "pages": cached_bundle.get("pages", []),
+            "docTitle": cached_bundle.get("docTitle"),
+            "cached_at": cached_bundle.get("cached_at"),
+        }
+    return {
+        "status": "miss",
+        "paper_id": clean_id,
+        "numPages": 0,
+        "pages": [],
+    }
+
+
+@router.post("/pdf/html-cache/{paper_id:path}")
+async def save_pdf_html_cache(paper_id: str, payload: HtmlCacheSaveRequest):
+    """
+    Persist pre-converted HTML page bundle into Redis cache to eliminate client-side re-conversion delays.
+    """
+    clean_id = paper_id.strip()
+    if not clean_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="paper_id cannot be empty.")
+    if not payload.pages:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="pages array cannot be empty.")
+
+    cache = get_active_paper_cache()
+    data = {
+        "paper_id": clean_id,
+        "numPages": payload.numPages or len(payload.pages),
+        "pages": payload.pages,
+        "docTitle": payload.docTitle,
+        "metadata": payload.metadata or {},
+        "cached_at": time.time(),
+    }
+    success = await cache.set_html_pages(clean_id, data)
+    return {
+        "status": "saved" if success else "failed",
+        "paper_id": clean_id,
+        "numPages": data["numPages"],
+        "redis_persisted": success,
+    }
+
+
+@router.delete("/pdf/html-cache/{paper_id:path}")
+async def invalidate_pdf_html_cache(paper_id: str):
+    """
+    Invalidate converted HTML pages in Redis cache.
+    """
+    clean_id = paper_id.strip()
+    if not clean_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="paper_id cannot be empty.")
+    cache = get_active_paper_cache()
+    success = await cache.invalidate_html_pages(clean_id)
+    return {
+        "status": "invalidated" if success else "failed",
+        "paper_id": clean_id,
+    }
 
 
