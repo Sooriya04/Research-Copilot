@@ -1,4 +1,5 @@
 import asyncio
+from unittest.mock import patch
 import fakeredis.aioredis as fake_aioredis
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -312,47 +313,48 @@ async def test_redis_html_pages_cache_and_endpoints():
     assert await cache.get_html_pages(paper_id) is None
 
     # 3. HTTP Endpoints
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        # Cache miss
-        miss_res = await client.get("/api/v1/pdf/html-cache/2503.04615")
-        assert miss_res.status_code == 200
-        assert miss_res.json()["status"] == "miss"
+    with patch("src.api.routes_search.get_active_paper_cache", return_value=cache):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            # Cache miss
+            miss_res = await client.get("/api/v1/pdf/html-cache/2503.04615")
+            assert miss_res.status_code == 200
+            assert miss_res.json()["status"] == "miss"
 
-        # POST / save into Redis cache
-        post_res = await client.post(
-            "/api/v1/pdf/html-cache/2503.04615",
-            json={
-                "numPages": 2,
-                "docTitle": "HalluCounter",
-                "pages": sample_pages,
-            },
-        )
-        assert post_res.status_code == 200
-        assert post_res.json()["status"] == "saved"
-        assert post_res.json()["numPages"] == 2
+            # POST / save into Redis cache
+            post_res = await client.post(
+                "/api/v1/pdf/html-cache/2503.04615",
+                json={
+                    "numPages": 2,
+                    "docTitle": "HalluCounter",
+                    "pages": sample_pages,
+                },
+            )
+            assert post_res.status_code == 200
+            assert post_res.json()["status"] == "saved"
+            assert post_res.json()["numPages"] == 2
 
-        # Cache hit
-        hit_res = await client.get("/api/v1/pdf/html-cache/arxiv:2503.04615")
-        assert hit_res.status_code == 200
-        hit_data = hit_res.json()
-        assert hit_data["status"] == "hit"
-        assert hit_data["numPages"] == 2
-        assert len(hit_data["pages"]) == 2
-        assert hit_data["pages"][0]["pageNumber"] == 1
+            # Cache hit
+            hit_res = await client.get("/api/v1/pdf/html-cache/arxiv:2503.04615")
+            assert hit_res.status_code == 200
+            hit_data = hit_res.json()
+            assert hit_data["status"] == "hit"
+            assert hit_data["numPages"] == 2
+            assert len(hit_data["pages"]) == 2
+            assert hit_data["pages"][0]["pageNumber"] == 1
 
-        # Cache hit with version suffix arxiv:2503.04615v2
-        hit_v2_res = await client.get("/api/v1/pdf/html-cache/arxiv:2503.04615v2")
-        assert hit_v2_res.status_code == 200
-        assert hit_v2_res.json()["status"] == "hit"
-        assert hit_v2_res.json()["numPages"] == 2
+            # Cache hit with version suffix arxiv:2503.04615v2
+            hit_v2_res = await client.get("/api/v1/pdf/html-cache/arxiv:2503.04615v2")
+            assert hit_v2_res.status_code == 200
+            assert hit_v2_res.json()["status"] == "hit"
+            assert hit_v2_res.json()["numPages"] == 2
 
-        # DELETE / invalidate
-        del_res = await client.delete("/api/v1/pdf/html-cache/2503.04615")
-        assert del_res.status_code == 200
-        assert del_res.json()["status"] == "invalidated"
+            # DELETE / invalidate
+            del_res = await client.delete("/api/v1/pdf/html-cache/2503.04615")
+            assert del_res.status_code == 200
+            assert del_res.json()["status"] == "invalidated"
 
-        # Confirm miss after delete
-        miss_res2 = await client.get("/api/v1/pdf/html-cache/2503.04615")
-        assert miss_res2.status_code == 200
-        assert miss_res2.json()["status"] == "miss"
+            # Confirm miss after delete
+            miss_res2 = await client.get("/api/v1/pdf/html-cache/2503.04615")
+            assert miss_res2.status_code == 200
+            assert miss_res2.json()["status"] == "miss"

@@ -164,31 +164,18 @@ export default function Sidebar() {
           </div>
         </NavLink>
 
-        {/* 6. Novelty Studio */}
+        {/* 6. Novelty & Gap Studio */}
         <NavLink
           to="/novelty"
           className={({ isActive }) =>
-            `nav-item ${isActive || location.pathname === '/novelty-studio' ? 'active' : ''}`
+            `nav-item ${isActive || location.pathname === '/novelty-studio' || location.pathname === '/research-gaps' ? 'active' : ''}`
           }
-          title="Novelty Studio"
+          title="Novelty & Research Gap Studio"
           onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
         >
           <div className="nav-item-left">
             <Lightbulb size={15} />
-            <span>Novelty Studio</span>
-          </div>
-        </NavLink>
-
-        {/* 7. Research Gaps */}
-        <NavLink
-          to="/research-gaps"
-          className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-          title="Research Gap Finder"
-          onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
-        >
-          <div className="nav-item-left">
-            <Compass size={15} />
-            <span>Research Gaps</span>
+            <span>Novelty & Gaps</span>
           </div>
         </NavLink>
 

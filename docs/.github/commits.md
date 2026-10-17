@@ -2407,11 +2407,11 @@ bundle compilation (`npm run build`).
   * Executed Vite production build (`npm run build`), confirming 3,195 modules transformed and compiled in 6.95s with zero syntax or bundling errors.
   * Strict zero-emoji compliance verified across all code, tests, and commit entries.
 
+<br />
 
+## Consolidate Research Gaps into Novelty Studio
 
-
-
-
-
-
-
+* Merged redundant Research Gaps view into Novelty Studio with auto-redirect (`/research-gaps` -> `/novelty?mechanism=gap_realization`).
+* Updated navigation in Sidebar, Overview, Workspaces, and Command Palette to "Novelty & Gaps".
+* Added live combinatorial graph gaps panel (`/api/v1/graph/gaps`) with 1-click gap-to-hypothesis formulation.
+* Verified with clean frontend build and 22/22 backend tests passing.

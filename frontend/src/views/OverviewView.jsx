@@ -206,20 +206,11 @@ export default function OverviewView() {
           <button
             type="button"
             className="btn btn-secondary btn-sm"
-            onClick={() => navigate('/research-gaps')}
-            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
-          >
-            <Compass size={13} style={{ color: 'var(--accent-rose)' }} />
-            <span>5. Research Gaps</span>
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
             onClick={() => navigate('/novelty')}
             style={{ display: 'flex', alignItems: 'center', gap: 6 }}
           >
             <Lightbulb size={13} style={{ color: 'var(--accent-amber)' }} />
-            <span>6. Novelty Studio</span>
+            <span>5. Novelty & Gap Studio</span>
           </button>
           <button
             type="button"

@@ -36,13 +36,15 @@ import {
   Key,
   Brain,
   BrainCircuit,
+  Compass,
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import MathRenderer from '../components/common/MathRenderer';
 
 export default function NoveltyStudioView() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { searchQuery, activeWorkspace, theme, addedToGraphPaperIds, searchResults } = useApp();
 
   // Topic and Papers state
@@ -145,6 +147,53 @@ export default function NoveltyStudioView() {
   const [copiedId, setCopiedId] = useState(null);
   const [addedCandidateIds, setAddedCandidateIds] = useState(new Set());
   const [addingId, setAddingId] = useState(null);
+
+  // Topological Graph Gaps state (from Knowledge Graph SQLite)
+  const [detectedGraphGaps, setDetectedGraphGaps] = useState([]);
+  const [loadingGraphGaps, setLoadingGraphGaps] = useState(false);
+  const [showGapsBanner, setShowGapsBanner] = useState(true);
+
+  // Sync mechanism from URL query param (e.g. /novelty?mechanism=gap_realization)
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const mech = params.get('mechanism');
+    if (mech && ['recombination', 'contradiction_resolution', 'limitation_inversion', 'gap_realization'].includes(mech)) {
+      setMechanismFilter(mech);
+    }
+  }, [location.search]);
+
+  // Load real combinatorial gaps from Knowledge Graph SQLite
+  useEffect(() => {
+    setLoadingGraphGaps(true);
+    fetch('/api/v1/graph/gaps')
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data) => {
+        if (Array.isArray(data) && data.length > 0) {
+          setDetectedGraphGaps(data);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoadingGraphGaps(false));
+  }, []);
+
+  const handleSolveGap = (gap) => {
+    const methodStr = gap.method_id || 'Novel Method';
+    const datasetStr = gap.dataset_id || 'Benchmark Dataset';
+    setCustomForm({
+      title: `Evaluating ${methodStr} on ${datasetStr}`,
+      mechanism: 'gap_realization',
+      pitch: gap.description || `Resolving the combinatorial gap between ${methodStr} and ${datasetStr}.`,
+      novelty_statement: `We demonstrate the empirical effectiveness and boundary conditions of applying ${methodStr} to ${datasetStr}.`,
+      mathematical_formulation: '',
+      testable_hypothesis: `The application of ${methodStr} to ${datasetStr} will yield statistically significant performance gains over existing baseline models.`,
+      target_datasets: datasetStr,
+      baselines_to_beat: `Standard ${datasetStr} baselines`,
+      expected_metrics: 'Accuracy, F1-Score, Loss',
+      grounded_paper_ids: [],
+      confidence_score: 0.9,
+    });
+    setShowCustomModal(true);
+  };
 
   // Responsive Masonry Column state
   const [autoColumnCount, setAutoColumnCount] = useState(() => {
@@ -1978,6 +2027,85 @@ ${nov.mathematical_formulation || 'N/A'}
           )}
         </div>
       </div>
+
+      {/* 6.5. Detected Combinatorial Literature Gaps Panel */}
+      {detectedGraphGaps.length > 0 && (mechanismFilter === 'all' || mechanismFilter === 'gap_realization') && (
+        <div
+          className="card"
+          style={{
+            marginBottom: 20,
+            padding: '16px 20px',
+            borderLeft: '4px solid var(--accent-amber)',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Compass size={16} style={{ color: 'var(--accent-amber)' }} />
+              <h3 style={{ fontSize: 13.5, fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
+                Detected Combinatorial Literature Gaps ({detectedGraphGaps.length})
+              </h3>
+              <span className="badge badge-amber" style={{ fontSize: 10 }}>
+                Knowledge Graph
+              </span>
+            </div>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => setShowGapsBanner((v) => !v)}
+              style={{ fontSize: 11, padding: '2px 8px' }}
+            >
+              {showGapsBanner ? 'Hide Gaps' : 'Show Gaps'}
+            </button>
+          </div>
+
+          {showGapsBanner && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
+              {detectedGraphGaps.map((gap, idx) => (
+                <div
+                  key={gap.id || idx}
+                  style={{
+                    padding: 12,
+                    borderRadius: 'var(--radius-sm)',
+                    background: 'var(--bg-subtle)',
+                    border: '1px solid var(--border-subtle)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                  }}
+                >
+                  <div>
+                    <strong style={{ fontSize: 12.5, color: 'var(--text-primary)', display: 'block', marginBottom: 4 }}>
+                      Unexplored: {gap.method_id || 'Method'} x {gap.dataset_id || 'Dataset'}
+                    </strong>
+                    <p style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '0 0 10px', lineHeight: 1.4 }}>
+                      {gap.description || 'No existing publication evaluates this methodology on this benchmark dataset.'}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-secondary"
+                    onClick={() => handleSolveGap(gap)}
+                    style={{
+                      alignSelf: 'flex-start',
+                      fontSize: 11,
+                      padding: '3px 9px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      color: 'var(--accent-amber)',
+                      borderColor: 'rgba(245, 158, 11, 0.4)',
+                    }}
+                    title="Pre-populate authoring modal to formulate a hypothesis for this gap"
+                  >
+                    <Lightbulb size={11} />
+                    <span>Formulate Novelty from Gap</span>
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 7. Results View */}
       {synthesizing ? (

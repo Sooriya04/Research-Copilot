@@ -461,11 +461,11 @@ export default function WorkspacesView() {
             <button
               type="button"
               className="btn btn-secondary"
-              onClick={() => navigate('/research-gaps')}
+              onClick={() => navigate('/novelty')}
               style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5 }}
             >
               <Lightbulb size={14} />
-              <span>Research Gaps</span>
+              <span>Novelty & Gaps</span>
             </button>
           </div>
         </div>

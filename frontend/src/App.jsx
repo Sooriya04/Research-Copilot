@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
+import { Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
 import { useApp } from './context/AppContext';
 import Sidebar from './components/layout/Sidebar';
 import TopHeader from './components/layout/TopHeader';
@@ -72,7 +72,7 @@ export default function App() {
             <Route path="/pdf-inspector" element={<PaperReaderView />} />
             <Route path="/experiment-studio" element={<BenchmarksView />} />
             <Route path="/manuscript" element={<ManuscriptView />} />
-            <Route path="/research-gaps" element={<ResearchGapView />} />
+            <Route path="/research-gaps" element={<Navigate to="/novelty?mechanism=gap_realization" replace />} />
             <Route path="/settings" element={<SettingsView />} />
             <Route path="*" element={<OverviewView />} />
           </Routes>

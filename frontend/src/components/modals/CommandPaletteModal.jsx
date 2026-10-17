@@ -93,10 +93,10 @@ export default function CommandPaletteModal() {
             </div>
             <span className="kbd-badge">Jump</span>
           </div>
-          <div className="cmd-item" onClick={() => jumpTo('/research-gaps')}>
+          <div className="cmd-item" onClick={() => jumpTo('/novelty?mechanism=gap_realization')}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <Lightbulb size={15} style={{ color: 'var(--text-muted)' }} />
-              <span>Analyze Research Gaps</span>
+              <span>Explore Research Gaps & Novelty</span>
             </div>
             <span className="kbd-badge">Jump</span>
           </div>
