@@ -1610,16 +1610,20 @@ export default function PaperReaderSidebar({
   onClearContext,
   onHighlightEvidence,
 }) {
-  const [activeTab, setActiveTab] = useState('ask'); // 'ask' | 'benchmarks' | 'details'
+  const [activeTab, setActiveTab] = useState('ask'); // 'ask' | 'synthesis' | 'evidence' | 'benchmarks' | 'details'
   const [panelWidth, setPanelWidth] = useState(() => {
     try {
       const saved = localStorage.getItem('rc_reader_sidebar_width');
-      return saved ? Math.max(380, Math.min(800, Number(saved))) : 480;
+      return saved ? Math.max(340, Math.min(800, Number(saved))) : 390;
     } catch {
-      return 480;
+      return 390;
     }
   });
   const isDragging = useRef(false);
+
+  const togglePanelExpand = () => {
+    setPanelWidth((prev) => (prev > 450 ? 390 : 560));
+  };
 
   const handleMouseDown = (e) => {
     e.preventDefault();
@@ -1630,7 +1634,7 @@ export default function PaperReaderSidebar({
     const handleMouseMove = (moveEvent) => {
       if (!isDragging.current) return;
       const calculated = window.innerWidth - moveEvent.clientX;
-      const clamped = Math.max(380, Math.min(800, calculated));
+      const clamped = Math.max(340, Math.min(800, calculated));
       setPanelWidth(clamped);
     };
 
@@ -1669,56 +1673,35 @@ export default function PaperReaderSidebar({
           justifyContent: 'space-between',
           borderBottom: '1px solid var(--border-subtle, #e2e8f0)',
           background: 'var(--bg-subtle, #f8fafc)',
-          padding: '5px 8px',
+          padding: '6px 8px',
           flexShrink: 0,
+          gap: 6,
         }}
       >
-        <div style={{ display: 'flex', gap: 4 }}>
+        <div style={{ display: 'flex', gap: 3, flex: 1, overflowX: 'auto', scrollbarWidth: 'none' }}>
           <button
             type="button"
             onClick={() => setActiveTab('ask')}
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: 5,
-              padding: '6px 11px',
+              gap: 4,
+              padding: '5px 8px',
               borderRadius: 6,
               border: 'none',
               background: activeTab === 'ask' ? 'var(--bg-card, #ffffff)' : 'transparent',
               color: activeTab === 'ask' ? 'var(--accent-violet, #6366f1)' : 'var(--text-muted, #64748b)',
               fontWeight: activeTab === 'ask' ? 600 : 500,
-              fontSize: 12,
+              fontSize: 11.5,
               cursor: 'pointer',
               boxShadow: activeTab === 'ask' ? '0 1px 3px rgba(0,0,0,0.06)' : 'none',
               transition: 'all 0.12s ease',
+              whiteSpace: 'nowrap',
             }}
+            title="Chat with Paper Context"
           >
-            <MessageSquare size={13} />
+            <MessageSquare size={12} />
             <span>Chat</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('synthesis')}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 5,
-              padding: '6px 11px',
-              borderRadius: 6,
-              border: 'none',
-              background: activeTab === 'synthesis' ? 'var(--bg-card, #ffffff)' : 'transparent',
-              color: activeTab === 'synthesis' ? 'var(--accent-violet, #6366f1)' : 'var(--text-muted, #64748b)',
-              fontWeight: activeTab === 'synthesis' ? 600 : 500,
-              fontSize: 12,
-              cursor: 'pointer',
-              boxShadow: activeTab === 'synthesis' ? '0 1px 3px rgba(0,0,0,0.06)' : 'none',
-              transition: 'all 0.12s ease',
-            }}
-            title="Paper Synthesis & Rigor Audit"
-          >
-            <Sparkles size={13} />
-            <span>Synthesis</span>
           </button>
 
           <button
@@ -1727,22 +1710,48 @@ export default function PaperReaderSidebar({
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: 5,
-              padding: '6px 11px',
+              gap: 4,
+              padding: '5px 8px',
               borderRadius: 6,
               border: 'none',
               background: activeTab === 'evidence' ? 'var(--bg-card, #ffffff)' : 'transparent',
               color: activeTab === 'evidence' ? 'var(--accent-violet, #6366f1)' : 'var(--text-muted, #64748b)',
               fontWeight: activeTab === 'evidence' ? 600 : 500,
-              fontSize: 12,
+              fontSize: 11.5,
               cursor: 'pointer',
               boxShadow: activeTab === 'evidence' ? '0 1px 3px rgba(0,0,0,0.06)' : 'none',
               transition: 'all 0.12s ease',
+              whiteSpace: 'nowrap',
             }}
             title="Deterministic Evidence Studio & Visual Grounding"
           >
-            <ShieldCheck size={13} />
+            <ShieldCheck size={12} />
             <span>Evidence</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('synthesis')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '5px 8px',
+              borderRadius: 6,
+              border: 'none',
+              background: activeTab === 'synthesis' ? 'var(--bg-card, #ffffff)' : 'transparent',
+              color: activeTab === 'synthesis' ? 'var(--accent-violet, #6366f1)' : 'var(--text-muted, #64748b)',
+              fontWeight: activeTab === 'synthesis' ? 600 : 500,
+              fontSize: 11.5,
+              cursor: 'pointer',
+              boxShadow: activeTab === 'synthesis' ? '0 1px 3px rgba(0,0,0,0.06)' : 'none',
+              transition: 'all 0.12s ease',
+              whiteSpace: 'nowrap',
+            }}
+            title="Paper Synthesis & Rigor Audit"
+          >
+            <Sparkles size={12} />
+            <span>Synthesis</span>
           </button>
 
           <button
@@ -1751,20 +1760,22 @@ export default function PaperReaderSidebar({
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: 5,
-              padding: '6px 11px',
+              gap: 4,
+              padding: '5px 8px',
               borderRadius: 6,
               border: 'none',
               background: activeTab === 'benchmarks' ? 'var(--bg-card, #ffffff)' : 'transparent',
               color: activeTab === 'benchmarks' ? 'var(--accent-violet, #6366f1)' : 'var(--text-muted, #64748b)',
               fontWeight: activeTab === 'benchmarks' ? 600 : 500,
-              fontSize: 12,
+              fontSize: 11.5,
               cursor: 'pointer',
               boxShadow: activeTab === 'benchmarks' ? '0 1px 3px rgba(0,0,0,0.06)' : 'none',
               transition: 'all 0.12s ease',
+              whiteSpace: 'nowrap',
             }}
+            title="Benchmarks & Leaderboard"
           >
-            <Award size={13} />
+            <Award size={12} />
             <span>Benchmarks</span>
           </button>
 
@@ -1774,28 +1785,30 @@ export default function PaperReaderSidebar({
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: 5,
-              padding: '6px 11px',
+              gap: 4,
+              padding: '5px 8px',
               borderRadius: 6,
               border: 'none',
               background: activeTab === 'details' ? 'var(--bg-card, #ffffff)' : 'transparent',
               color: activeTab === 'details' ? 'var(--accent-violet, #6366f1)' : 'var(--text-muted, #64748b)',
               fontWeight: activeTab === 'details' ? 600 : 500,
-              fontSize: 12,
+              fontSize: 11.5,
               cursor: 'pointer',
               boxShadow: activeTab === 'details' ? '0 1px 3px rgba(0,0,0,0.06)' : 'none',
               transition: 'all 0.12s ease',
+              whiteSpace: 'nowrap',
             }}
+            title="Metadata & Citation Details"
           >
-            <Info size={13} />
+            <Info size={12} />
             <span>Details</span>
           </button>
         </div>
 
-        {onClose && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
           <button
             type="button"
-            onClick={onClose}
+            onClick={togglePanelExpand}
             style={{
               background: 'none',
               border: 'none',
@@ -1806,11 +1819,31 @@ export default function PaperReaderSidebar({
               alignItems: 'center',
               borderRadius: 4,
             }}
-            title="Close Sidebar"
+            title={panelWidth > 450 ? 'Narrow Sidebar' : 'Expand Sidebar'}
           >
-            <X size={15} />
+            {panelWidth > 450 ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
           </button>
-        )}
+
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'var(--text-muted, #64748b)',
+                cursor: 'pointer',
+                padding: 4,
+                display: 'flex',
+                alignItems: 'center',
+                borderRadius: 4,
+              }}
+              title="Close Sidebar"
+            >
+              <X size={15} />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Tab Body */}

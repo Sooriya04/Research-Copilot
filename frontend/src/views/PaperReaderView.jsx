@@ -17,11 +17,17 @@ import {
   ZoomIn,
   ZoomOut,
   Maximize2,
+  Minimize2,
   Copy,
   Check,
   Code2,
   AlertCircle,
   RefreshCw,
+  Sun,
+  Moon,
+  Coffee,
+  Info,
+  X,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import PaperReaderSidebar from '../components/reader/PaperReaderSidebar';
@@ -148,20 +154,34 @@ export default function PaperReaderView() {
   const [resolvingPdf, setResolvingPdf] = useState(false);
   const [currentDoc, setCurrentDoc] = useState(null);
   const [errorMessage, setErrorMessage] = useState(null);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  // Document Toolbar Controls
+  // Document Controls
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [zoom, setZoom] = useState(100);
-  const [fitWidth, setFitWidth] = useState(false);
+  const [fitWidth, setFitWidth] = useState(true);
   const [viewMode, setViewMode] = useState('continuous'); // 'continuous' | 'single'
   const [inDocSearch, setInDocSearch] = useState('');
+  const [showSearchInput, setShowSearchInput] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [copiedBibtex, setCopiedBibtex] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [exportingHtml, setExportingHtml] = useState(false);
   const [activeHighlight, setActiveHighlight] = useState(null);
+
+  // Comfort & Reading UX
+  const [readingTheme, setReadingTheme] = useState(() => {
+    try {
+      return localStorage.getItem('rc_reader_theme') || 'clean';
+    } catch {
+      return 'clean';
+    }
+  }); // 'clean' | 'sepia' | 'dark'
+  const [isZenMode, setIsZenMode] = useState(false);
+  const [showMetadataModal, setShowMetadataModal] = useState(false);
+  const [jumpPageOpen, setJumpPageOpen] = useState(false);
+  const [jumpPageValue, setJumpPageValue] = useState('');
 
   // Progressive WebAssembly conversion states
   const [convertedPages, setConvertedPages] = useState([]);
@@ -174,9 +194,18 @@ export default function PaperReaderView() {
   const [searchCurrentMatchIdx, setSearchCurrentMatchIdx] = useState(0);
 
   const canvasRef = useRef(null);
+  const searchInputRef = useRef(null);
   const [containerWidth, setContainerWidth] = useState(860);
 
-  // Measure container for crisp Fit Width calculation
+  // Save theme selection
+  const handleSelectTheme = (theme) => {
+    setReadingTheme(theme);
+    try {
+      localStorage.setItem('rc_reader_theme', theme);
+    } catch {}
+  };
+
+  // Measure container for Fit Width calculation
   useEffect(() => {
     if (!canvasRef.current) return;
     const ro = new ResizeObserver((entries) => {
@@ -189,6 +218,51 @@ export default function PaperReaderView() {
     ro.observe(canvasRef.current);
     return () => ro.disconnect();
   }, []);
+
+  // Global Keyboard Navigation
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      const isInputActive = ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName);
+
+      if (e.key === 'Escape') {
+        if (isZenMode) setIsZenMode(false);
+        if (showMetadataModal) setShowMetadataModal(false);
+        if (moreMenuOpen) setMoreMenuOpen(false);
+        if (showSearchInput && !isInputActive) setShowSearchInput(false);
+        if (jumpPageOpen) setJumpPageOpen(false);
+        return;
+      }
+
+      if (isInputActive) return;
+
+      // Zen mode toggle: F
+      if (e.key === 'f' || e.key === 'F') {
+        e.preventDefault();
+        setIsZenMode((v) => !v);
+        return;
+      }
+
+      // Search hotkey: / or Cmd+F
+      if (e.key === '/' || ((e.metaKey || e.ctrlKey) && e.key === 'f')) {
+        e.preventDefault();
+        setShowSearchInput(true);
+        setTimeout(() => searchInputRef.current?.focus(), 50);
+        return;
+      }
+
+      // Page flip
+      if (e.key === 'ArrowLeft' || e.key === 'PageUp' || e.key === 'h') {
+        e.preventDefault();
+        handleJumpToPage(currentPage - 1);
+      } else if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === 'l') {
+        e.preventDefault();
+        handleJumpToPage(currentPage + 1);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isZenMode, showMetadataModal, moreMenuOpen, showSearchInput, jumpPageOpen, currentPage, totalPages]);
 
   const handleHighlightEvidence = async (evidence) => {
     if (!evidence) return;
@@ -204,7 +278,6 @@ export default function PaperReaderView() {
       }, 50);
     }
 
-    // If highlight_rects are missing but excerpt exists, query deterministic verifier
     if ((!evidence.highlight_rects || evidence.highlight_rects.length === 0) && (evidence.quote || evidence.text)) {
       const pId = currentDoc?.arxiv_id || currentDoc?.id;
       if (pId) {
@@ -226,13 +299,10 @@ export default function PaperReaderView() {
               );
             }
           }
-        } catch (e) {
-          // Fallback to text span highlighting
-        }
+        } catch (e) {}
       }
     }
   };
-
 
   const handleExportHtml = () => {
     if (convertedPages.length === 0 || exportingHtml) return;
@@ -240,7 +310,6 @@ export default function PaperReaderView() {
     try {
       downloadStandaloneHtmlFile(convertedPages, downloadFilename.replace(/\.pdf$/i, '.html'));
     } catch (err) {
-      console.error('HTML export failed:', err);
       alert('HTML export failed: ' + err.message);
     } finally {
       setExportingHtml(false);
@@ -259,7 +328,7 @@ export default function PaperReaderView() {
     return () => window.removeEventListener('click', handleOutsideClick);
   }, [moreMenuOpen]);
 
-  // Resolve PDF url from OA lookup when no direct link
+  // Resolve PDF URL from OA lookup when no direct link
   const fetchOaCandidate = (lookupQuery) => {
     if (!lookupQuery) return;
     setResolvingPdf(true);
@@ -283,7 +352,6 @@ export default function PaperReaderView() {
             }
           }
         }
-        // Fallback publication preprint buffer endpoint
         const fallbackUrl = `/api/v1/pdf/preprint?identifier=${encodeURIComponent(lookupQuery)}`;
         setCurrentDoc((prev) => (prev ? { ...prev, pdfUrl: fallbackUrl } : null));
       })
@@ -297,7 +365,6 @@ export default function PaperReaderView() {
   };
 
   useEffect(() => {
-    // If activeReaderPaper exists in context, load it
     if (activeReaderPaper) {
       const pId =
         activeReaderPaper.id ||
@@ -322,7 +389,6 @@ export default function PaperReaderView() {
       return;
     }
 
-    // Check localStorage fallback for library paper
     try {
       const saved = localStorage.getItem('rc_active_library_paper');
       if (saved) {
@@ -337,7 +403,6 @@ export default function PaperReaderView() {
       }
     } catch {}
 
-    // Ensure paper RAG chunks & embeddings are indexed in SQLite
     const activeDoc = activeReaderPaper || (localStorage.getItem('rc_active_library_paper') ? JSON.parse(localStorage.getItem('rc_active_library_paper')) : null);
     const paperId = activeDoc?.id || activeDoc?.arxiv_id;
     if (paperId) {
@@ -359,7 +424,7 @@ export default function PaperReaderView() {
     }
   }, [activeReaderPaper]);
 
-  // ─── Progressive WebAssembly Conversion Engine ───────────────────────────
+  // Progressive WebAssembly Conversion Engine
   useEffect(() => {
     if (!currentDoc) {
       setConvertedPages([]);
@@ -376,7 +441,6 @@ export default function PaperReaderView() {
       setConversionProgress({ percent: 5, status: 'Initializing WebAssembly runtime...' });
       setConvertedPages([]);
 
-      // 0. Check Dual-Layer Cache (IndexedDB & Redis Backend)
       try {
         const cached = await loadCachedPaperPages(currentDoc, abortController.signal);
         if (cached?.data?.pages?.length > 0) {
@@ -390,7 +454,6 @@ export default function PaperReaderView() {
         if (abortController.signal.aborted) return;
       }
 
-      // 1. Resolve source
       let source = currentDoc.pdfUrl || resolvePaperPdf(currentDoc);
       if (!source) {
         if (currentDoc.doi) {
@@ -439,7 +502,6 @@ export default function PaperReaderView() {
         }
       } catch (err) {
         if (abortController.signal.aborted) return;
-        console.warn('WASM conversion with primary source encountered issue, falling back to preprint buffer:', err);
         accumulatedPages.length = 0;
         setConvertedPages([]);
         try {
@@ -536,6 +598,16 @@ export default function PaperReaderView() {
         el.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
     }
+  };
+
+  const handleJumpPageSubmit = (e) => {
+    e.preventDefault();
+    const parsed = parseInt(jumpPageValue, 10);
+    if (!isNaN(parsed)) {
+      handleJumpToPage(parsed);
+    }
+    setJumpPageOpen(false);
+    setJumpPageValue('');
   };
 
   // Real-time search highlighting counter
@@ -668,7 +740,6 @@ export default function PaperReaderView() {
     setTimeout(() => setCopiedLink(false), 2000);
   };
 
-  // Metadata labels
   const cleanArxiv =
     currentDoc &&
     (extractArxivId(currentDoc.arxiv_id) ||
@@ -692,7 +763,7 @@ export default function PaperReaderView() {
   const firstPage = convertedPages[0];
   const basePageWidth = firstPage?.width || 612;
   const displayScale = fitWidth
-    ? Math.min(2.2, Math.max(0.6, (containerWidth - 48) / basePageWidth))
+    ? Math.min(2.2, Math.max(0.6, (containerWidth - 64) / basePageWidth))
     : zoom / 100;
 
   const pagesToDisplay =
@@ -700,82 +771,82 @@ export default function PaperReaderView() {
       ? convertedPages
       : convertedPages.filter((p) => p.pageNumber === currentPage);
 
-  // ─── No paper: show clean reading desk empty state ─────────────────────────
+  // ─── No paper: Clean Reading Desk Empty State ─────────────────────────────
   if (!currentDoc) {
     return (
       <div className="reader-workspace-root">
         <div className="reader-center-panel">
-          {/* Top Bar Placeholder */}
-          <div className="reader-topbar">
-            <div className="reader-topbar-left">
+          {/* Minimal Top Bar */}
+          <header className="reader-unified-header">
+            <div className="reader-header-left">
               <button
                 type="button"
                 className="reader-topbar-btn"
                 onClick={() => navigate(-1)}
-                title="Back"
+                title="Back to Previous Page"
               >
                 <ArrowLeft size={14} />
                 <span>Back</span>
               </button>
-              <div className="reader-meta-divider" />
-              <h1 className="reader-paper-title" style={{ color: 'var(--text-muted)' }}>
-                Paper Reader Workspace
-              </h1>
+              <div className="reader-pill-divider" />
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)' }}>
+                Research Paper Reader
+              </span>
             </div>
-            <div className="reader-topbar-right">
+            <div className="reader-header-right">
               <button
                 type="button"
                 className={`reader-topbar-btn ${sidebarOpen ? 'active' : ''}`}
                 onClick={() => setSidebarOpen((v) => !v)}
               >
-                <MessageSquare size={13} />
-                <span>AI Copilot</span>
+                <Sparkles size={13} />
+                <span>AI Assistant</span>
               </button>
             </div>
-          </div>
+          </header>
 
-          {/* Reading Canvas with Minimal Desk Card */}
-          <div className="reader-canvas" style={{ alignItems: 'center' }}>
-            <div className="reader-empty-sheet">
-              <div style={{ textAlign: 'center', marginBottom: 24 }}>
+          {/* Reading Desk */}
+          <div className="reader-canvas" style={{ alignItems: 'center', justifyContent: 'center' }}>
+            <div className="reader-empty-sheet" style={{ maxWidth: 660, padding: '36px 32px' }}>
+              <div style={{ textAlign: 'center', marginBottom: 28 }}>
                 <div
                   style={{
-                    width: 44,
-                    height: 44,
-                    borderRadius: 12,
+                    width: 48,
+                    height: 48,
+                    borderRadius: 14,
                     background: 'rgba(99, 102, 241, 0.08)',
                     color: 'var(--accent-violet, #6366f1)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    margin: '0 auto 12px',
+                    margin: '0 auto 14px',
                   }}
                 >
-                  <FileText size={22} />
+                  <BookOpen size={24} />
                 </div>
-                <h2 style={{ fontSize: 18, fontWeight: 700, margin: '0 0 6px', color: 'var(--text-primary)' }}>
-                  Research Paper Reader
+                <h2 style={{ fontSize: 19, fontWeight: 700, margin: '0 0 8px', color: 'var(--text-primary)' }}>
+                  Comfortable Research Reading Desk
                 </h2>
-                <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>
-                  Render any publication directly as HTML pages using WebAssembly — enter an arXiv ID, DOI, URL, or upload a PDF.
+                <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0, lineHeight: 1.5 }}>
+                  High-fidelity WebAssembly document engine. Instant reloads, citation grounding, and eye-care reading themes.
                 </p>
               </div>
 
-              {/* Input Row */}
-              <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+              {/* Input Form */}
+              <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
                 <input
                   type="text"
                   value={inputVal}
                   onChange={(e) => setInputVal(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleExtract()}
-                  placeholder="arXiv ID (e.g. 2503.04615, 1706.03762), DOI (e.g. 10.1561/1500000061)..."
+                  placeholder="arXiv ID (e.g. 2503.04615, 1706.03762), DOI, or paper title..."
                   style={{
                     flex: 1,
-                    padding: '8px 12px',
+                    padding: '9px 14px',
                     border: '1px solid var(--border-subtle, #e2e8f0)',
                     borderRadius: 8,
                     fontSize: 13,
-                    background: 'var(--bg-subtle, #f4f4f5)',
+                    background: 'var(--bg-subtle, #f8fafc)',
                     color: 'var(--text-primary)',
                     outline: 'none',
                   }}
@@ -785,10 +856,10 @@ export default function PaperReaderView() {
                   className="reader-topbar-btn primary"
                   onClick={() => handleExtract()}
                   disabled={loading}
-                  style={{ padding: '0 14px', height: 38 }}
+                  style={{ padding: '0 16px', height: 40, borderRadius: 8 }}
                 >
                   <Sparkles size={14} />
-                  <span>{loading ? 'Loading…' : 'Read Paper'}</span>
+                  <span>{loading ? 'Loading...' : 'Read Paper'}</span>
                 </button>
                 <label
                   className="reader-topbar-btn"
@@ -797,10 +868,11 @@ export default function PaperReaderView() {
                     display: 'flex',
                     alignItems: 'center',
                     gap: 6,
-                    height: 38,
-                    padding: '0 12px',
+                    height: 40,
+                    padding: '0 14px',
                     border: '1px solid var(--border-subtle, #e2e8f0)',
                     background: 'var(--bg-card, #ffffff)',
+                    borderRadius: 8,
                   }}
                 >
                   <Upload size={14} />
@@ -817,57 +889,60 @@ export default function PaperReaderView() {
               {loading && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: 'var(--accent-violet, #6366f1)', marginBottom: 16 }}>
                   <Loader2 size={14} className="animate-spin" />
-                  <span>Resolving publication and open-access stream…</span>
+                  <span>Resolving publication and open-access stream...</span>
                 </div>
               )}
 
               {errorMessage && (
-                <div style={{ padding: '8px 12px', borderRadius: 6, background: 'rgba(239, 68, 68, 0.08)', color: '#ef4444', fontSize: 12.5, marginBottom: 16 }}>
+                <div style={{ padding: '10px 14px', borderRadius: 8, background: 'rgba(239, 68, 68, 0.08)', color: '#ef4444', fontSize: 12.5, marginBottom: 16 }}>
                   {errorMessage}
                 </div>
               )}
 
-              {/* Quick Sample Papers */}
-              <div>
-                <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 10 }}>
-                  Quick Start Sample Papers
+              {/* Sample Papers */}
+              <div style={{ marginTop: 24 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 10 }}>
+                  Curated Open-Access Papers
                 </span>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 10 }}>
                   {SAMPLE_PAPERS.map((sample, idx) => (
                     <button
                       key={idx}
                       type="button"
                       onClick={() => handleLoadSample(sample)}
                       style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        padding: '10px 14px',
+                        padding: '12px 14px',
                         borderRadius: 8,
                         border: '1px solid var(--border-subtle, #e2e8f0)',
                         background: 'var(--bg-card, #ffffff)',
                         cursor: 'pointer',
                         textAlign: 'left',
-                        transition: 'all 0.12s ease',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                        gap: 8,
+                        transition: 'all 0.15s ease',
                       }}
                       onMouseEnter={(e) => {
                         e.currentTarget.style.borderColor = 'var(--accent-violet, #6366f1)';
-                        e.currentTarget.style.background = 'var(--bg-subtle, #f8fafc)';
+                        e.currentTarget.style.transform = 'translateY(-1px)';
+                        e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.05)';
                       }}
                       onMouseLeave={(e) => {
                         e.currentTarget.style.borderColor = 'var(--border-subtle, #e2e8f0)';
-                        e.currentTarget.style.background = 'var(--bg-card, #ffffff)';
+                        e.currentTarget.style.transform = 'none';
+                        e.currentTarget.style.boxShadow = 'none';
                       }}
                     >
-                      <div style={{ minWidth: 0, paddingRight: 10 }}>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 2 }}>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4, lineHeight: 1.3 }}>
                           {sample.title}
                         </div>
                         <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
                           {sample.authors.join(', ')} • {sample.year}
                         </div>
                       </div>
-                      <span className="reader-arxiv-badge">
+                      <span className="reader-arxiv-badge" style={{ alignSelf: 'flex-start' }}>
                         arXiv:{sample.arxiv_id}
                       </span>
                     </button>
@@ -878,7 +953,6 @@ export default function PaperReaderView() {
           </div>
         </div>
 
-        {/* Right Assistant Panel */}
         {sidebarOpen && (
           <PaperReaderSidebar
             paper={null}
@@ -889,317 +963,482 @@ export default function PaperReaderView() {
     );
   }
 
-  // ─── Paper Loaded: Full WebAssembly PDF-to-HTML Reader ─────────────────────
+  // ─── Paper Loaded: Comfortable High-Fidelity Reader ───────────────────────
   return (
-    <div className="reader-workspace-root">
+    <div className={`reader-workspace-root ${isZenMode ? 'zen-mode' : ''}`}>
       <div className="reader-center-panel">
-        {/* ── 1. Clean Top Bar ── */}
-        <div className="reader-topbar">
-          <div className="reader-topbar-left">
-            <button
-              type="button"
-              className="reader-topbar-btn"
-              onClick={() => {
-                if (window.history.length > 1) {
-                  navigate(-1);
-                } else {
-                  setCurrentDoc(null);
-                }
-              }}
-              title="Back"
-            >
-              <ArrowLeft size={14} />
-              <span>Back</span>
-            </button>
-
-            <div className="reader-meta-divider" />
-
-            {/* Paper Title & Authors */}
-            <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
-              <h1 className="reader-paper-title" title={currentDoc.title || 'Untitled Document'}>
-                {currentDoc.title || 'Untitled Document'}
-              </h1>
-              <span className="reader-paper-authors" title={authorsText}>
-                {authorsText}
-              </span>
-            </div>
-
-            {/* arXiv / DOI Badge */}
-            {badgeUrl ? (
-              <a
-                href={badgeUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="reader-arxiv-badge"
-                title={`Open publication link (${badgeLabel})`}
-              >
-                <FileText size={11} />
-                <span>{badgeLabel}</span>
-              </a>
-            ) : (
-              <span className="reader-arxiv-badge">
-                <FileText size={11} />
-                <span>{badgeLabel}</span>
-              </span>
-            )}
-          </div>
-
-          <div className="reader-topbar-right">
-            {/* Quick search to switch papers */}
-            <div className="reader-quick-search" title="Load another paper by arXiv ID, DOI, or title">
-              <Search size={13} style={{ color: 'var(--text-muted)' }} />
-              <input
-                type="text"
-                value={inputVal}
-                onChange={(e) => setInputVal(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleExtract()}
-                placeholder="arXiv / DOI..."
-              />
-            </div>
-
-            {/* Download Button */}
-            {currentDoc.pdfUrl && (
-              <a
-                href={currentDoc.pdfUrl}
-                download={downloadFilename}
-                className="reader-topbar-btn"
-                title="Download PDF"
-              >
-                <Download size={13} />
-                <span>Download</span>
-              </a>
-            )}
-
-            {/* More Actions Dropdown */}
-            <div className="reader-dropdown-container" style={{ position: 'relative' }}>
+        {/* ── 1. Unified Sleek Reader Header (Single 50px bar) ── */}
+        {!isZenMode && (
+          <header className="reader-unified-header">
+            {/* Left: Back & Paper Info */}
+            <div className="reader-header-left">
               <button
                 type="button"
                 className="reader-topbar-btn"
-                onClick={() => setMoreMenuOpen((v) => !v)}
-                title="More actions"
+                onClick={() => {
+                  if (window.history.length > 1) {
+                    navigate(-1);
+                  } else {
+                    setCurrentDoc(null);
+                  }
+                }}
+                title="Back"
               >
-                <MoreHorizontal size={14} />
-                <span>More</span>
+                <ArrowLeft size={14} />
+                <span>Back</span>
               </button>
 
-              {moreMenuOpen && (
-                <div className="reader-dropdown-menu">
-                  <button
-                    type="button"
-                    className="reader-dropdown-item"
-                    onClick={handleCopyBibtex}
-                  >
-                    {copiedBibtex ? <Check size={13} style={{ color: '#10b981' }} /> : <Copy size={13} />}
-                    <span>{copiedBibtex ? 'BibTeX Copied' : 'Copy BibTeX Citation'}</span>
-                  </button>
+              <div className="reader-pill-divider" />
 
-                  <button
-                    type="button"
-                    className="reader-dropdown-item"
-                    onClick={handleCopyLink}
-                  >
-                    {copiedLink ? <Check size={13} style={{ color: '#10b981' }} /> : <ExternalLink size={13} />}
-                    <span>{copiedLink ? 'Link Copied' : 'Copy Paper Link'}</span>
-                  </button>
-
-                  {currentDoc.pdfUrl && (
+              <div className="reader-header-title-box">
+                <h1
+                  className="reader-header-paper-title"
+                  onClick={() => setShowMetadataModal(true)}
+                  title="Click to view full paper abstract & citation details"
+                >
+                  {currentDoc.title || 'Untitled Document'}
+                </h1>
+                <div className="reader-header-subline">
+                  <span>{authorsText}</span>
+                  {badgeUrl ? (
                     <a
-                      href={currentDoc.pdfUrl}
+                      href={badgeUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="reader-dropdown-item"
-                      style={{ textDecoration: 'none' }}
-                      onClick={() => setMoreMenuOpen(false)}
+                      className="reader-arxiv-badge"
+                      style={{ padding: '1px 6px', fontSize: 10 }}
+                      title={`Open source publication (${badgeLabel})`}
                     >
-                      <ExternalLink size={13} />
-                      <span>Open PDF in Tab</span>
+                      <FileText size={10} />
+                      <span>{badgeLabel}</span>
                     </a>
+                  ) : (
+                    <span className="reader-arxiv-badge" style={{ padding: '1px 6px', fontSize: 10 }}>
+                      <FileText size={10} />
+                      <span>{badgeLabel}</span>
+                    </span>
                   )}
+                </div>
+              </div>
 
-                  {convertedPages.length > 0 && (
+              <button
+                type="button"
+                className="reader-pill-btn"
+                style={{ width: 24, height: 24, padding: 0 }}
+                onClick={() => setShowMetadataModal(true)}
+                title="Paper Metadata & Abstract"
+              >
+                <Info size={13} />
+              </button>
+            </div>
+
+            {/* Center: Integrated Navigation Pill Toolbar */}
+            <div className="reader-header-center">
+              <div className="reader-pill-toolbar">
+                {/* Previous Page */}
+                <button
+                  type="button"
+                  className="reader-pill-btn"
+                  onClick={() => handleJumpToPage(currentPage - 1)}
+                  disabled={currentPage <= 1}
+                  title="Previous Page (ArrowLeft)"
+                >
+                  <ChevronLeft size={14} />
+                </button>
+
+                {/* Page Indicator (Clickable for quick jump) */}
+                {jumpPageOpen ? (
+                  <form onSubmit={handleJumpPageSubmit} style={{ display: 'inline-flex', alignItems: 'center' }}>
+                    <input
+                      type="number"
+                      autoFocus
+                      min={1}
+                      max={totalPages}
+                      value={jumpPageValue}
+                      onChange={(e) => setJumpPageValue(e.target.value)}
+                      onBlur={() => setJumpPageOpen(false)}
+                      style={{
+                        width: 44,
+                        height: 22,
+                        padding: '0 4px',
+                        fontSize: 11,
+                        textAlign: 'center',
+                        border: '1px solid var(--accent-violet, #6366f1)',
+                        borderRadius: 4,
+                        outline: 'none',
+                        background: 'var(--bg-card, #ffffff)',
+                        color: 'var(--text-primary)',
+                      }}
+                    />
+                  </form>
+                ) : (
+                  <button
+                    type="button"
+                    className="reader-pill-btn"
+                    onClick={() => {
+                      setJumpPageValue(String(currentPage));
+                      setJumpPageOpen(true);
+                    }}
+                    title="Click to jump directly to page"
+                    style={{ fontSize: 11.5 }}
+                  >
+                    <span>{currentPage} / {totalPages || 1}</span>
+                  </button>
+                )}
+
+                {/* Next Page */}
+                <button
+                  type="button"
+                  className="reader-pill-btn"
+                  onClick={() => handleJumpToPage(currentPage + 1)}
+                  disabled={currentPage >= totalPages}
+                  title="Next Page (ArrowRight)"
+                >
+                  <ChevronRight size={14} />
+                </button>
+
+                <div className="reader-pill-divider" />
+
+                {/* View Mode: Continuous Scroll vs Single Page */}
+                <button
+                  type="button"
+                  className={`reader-pill-btn ${viewMode === 'continuous' ? 'active' : ''}`}
+                  onClick={() => setViewMode('continuous')}
+                  title="Continuous Scroll Mode"
+                >
+                  <FileText size={12} />
+                  <span>Scroll</span>
+                </button>
+                <button
+                  type="button"
+                  className={`reader-pill-btn ${viewMode === 'single' ? 'active' : ''}`}
+                  onClick={() => setViewMode('single')}
+                  title="Single Page Mode"
+                >
+                  <BookOpen size={12} />
+                  <span>Page</span>
+                </button>
+
+                <div className="reader-pill-divider" />
+
+                {/* Zoom Controls */}
+                <button
+                  type="button"
+                  className="reader-pill-btn"
+                  onClick={() => {
+                    setZoom((z) => Math.max(50, z - 10));
+                    setFitWidth(false);
+                  }}
+                  title="Zoom Out"
+                >
+                  <ZoomOut size={13} />
+                </button>
+
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontFamily: 'var(--font-code, monospace)',
+                    minWidth: 36,
+                    textAlign: 'center',
+                    color: 'var(--text-secondary)',
+                    fontWeight: 600,
+                  }}
+                >
+                  {fitWidth ? 'Fit' : `${zoom}%`}
+                </span>
+
+                <button
+                  type="button"
+                  className="reader-pill-btn"
+                  onClick={() => {
+                    setZoom((z) => Math.min(220, z + 10));
+                    setFitWidth(false);
+                  }}
+                  title="Zoom In"
+                >
+                  <ZoomIn size={13} />
+                </button>
+
+                {/* Fit Width Toggle */}
+                <button
+                  type="button"
+                  className={`reader-pill-btn ${fitWidth ? 'active' : ''}`}
+                  onClick={() => setFitWidth((w) => !w)}
+                  title="Fit document width to reading container"
+                >
+                  <Maximize2 size={12} />
+                  <span>Fit</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Right: Search, Theme, Zen, More, AI Toggle */}
+            <div className="reader-header-right">
+              {/* Expandable In-Paper Search */}
+              {showSearchInput ? (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    background: 'var(--bg-subtle, #f4f4f5)',
+                    border: '1px solid var(--border-subtle, #e4e4e7)',
+                    borderRadius: 16,
+                    padding: '2px 8px',
+                    height: 28,
+                  }}
+                >
+                  <Search size={12} style={{ color: 'var(--text-muted)' }} />
+                  <input
+                    ref={searchInputRef}
+                    type="text"
+                    value={inDocSearch}
+                    onChange={(e) => {
+                      setInDocSearch(e.target.value);
+                      setSearchCurrentMatchIdx(0);
+                    }}
+                    onKeyDown={handleSearchKeyDown}
+                    placeholder="Find in text..."
+                    style={{
+                      border: 'none',
+                      background: 'transparent',
+                      fontSize: 11.5,
+                      outline: 'none',
+                      width: 110,
+                      color: 'var(--text-primary)',
+                    }}
+                  />
+                  {searchLower && (
+                    <span className="toolbar-search-badge" style={{ fontSize: 10, padding: '1px 5px' }}>
+                      {searchMatchCount}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setInDocSearch('');
+                      setShowSearchInput(false);
+                    }}
+                    style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 0, color: 'var(--text-muted)' }}
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="reader-pill-btn"
+                  onClick={() => {
+                    setShowSearchInput(true);
+                    setTimeout(() => searchInputRef.current?.focus(), 50);
+                  }}
+                  title="Find inside paper text (press /)"
+                >
+                  <Search size={13} />
+                  <span>Find</span>
+                </button>
+              )}
+
+              {/* Eye Care & Reading Themes */}
+              <div className="reader-theme-selector" title="Eye Comfort Reading Themes">
+                <button
+                  type="button"
+                  className={`reader-theme-btn ${readingTheme === 'clean' ? 'active' : ''}`}
+                  onClick={() => handleSelectTheme('clean')}
+                  title="Default Clean Paper"
+                >
+                  <Sun size={12} />
+                </button>
+                <button
+                  type="button"
+                  className={`reader-theme-btn ${readingTheme === 'sepia' ? 'active' : ''}`}
+                  onClick={() => handleSelectTheme('sepia')}
+                  title="Eye-Care Warm Sepia"
+                >
+                  <Coffee size={12} />
+                </button>
+                <button
+                  type="button"
+                  className={`reader-theme-btn ${readingTheme === 'dark' ? 'active' : ''}`}
+                  onClick={() => handleSelectTheme('dark')}
+                  title="Night Contrast Slate"
+                >
+                  <Moon size={12} />
+                </button>
+              </div>
+
+              {/* Zen / Focus Mode Toggle */}
+              <button
+                type="button"
+                className={`reader-topbar-btn ${isZenMode ? 'active' : ''}`}
+                onClick={() => setIsZenMode((v) => !v)}
+                title="Zen Focus Mode (press F)"
+              >
+                <Maximize2 size={13} />
+                <span>Focus</span>
+              </button>
+
+              {/* Actions Dropdown */}
+              <div className="reader-dropdown-container" style={{ position: 'relative' }}>
+                <button
+                  type="button"
+                  className="reader-topbar-btn"
+                  onClick={() => setMoreMenuOpen((v) => !v)}
+                  title="Document Actions"
+                >
+                  <MoreHorizontal size={14} />
+                </button>
+
+                {moreMenuOpen && (
+                  <div className="reader-dropdown-menu">
                     <button
                       type="button"
                       className="reader-dropdown-item"
-                      onClick={handleExportHtml}
-                      disabled={exportingHtml}
-                      title="Download complete standalone HTML file powered by WebAssembly"
+                      onClick={handleCopyBibtex}
                     >
-                      {exportingHtml ? (
-                        <Loader2 size={13} className="animate-spin" style={{ color: 'var(--accent-violet, #6366f1)' }} />
-                      ) : (
-                        <Code2 size={13} style={{ color: 'var(--accent-violet, #6366f1)' }} />
-                      )}
-                      <span>{exportingHtml ? 'Preparing HTML...' : 'Export Standalone HTML'}</span>
+                      {copiedBibtex ? <Check size={13} style={{ color: '#10b981' }} /> : <Copy size={13} />}
+                      <span>{copiedBibtex ? 'BibTeX Copied' : 'Copy BibTeX Citation'}</span>
                     </button>
-                  )}
 
-                  <button
-                    type="button"
-                    className="reader-dropdown-item"
-                    onClick={async () => {
-                      setMoreMenuOpen(false);
-                      await clearPaperPagesCache(currentDoc);
-                      setConvertedPages([]);
-                      setCurrentDoc((prev) => (prev ? { ...prev } : null));
-                    }}
-                    title="Purge Redis and local cache and force full WebAssembly re-conversion"
-                  >
-                    <RefreshCw size={13} />
-                    <span>Re-convert (Bypass Cache)</span>
-                  </button>
+                    <button
+                      type="button"
+                      className="reader-dropdown-item"
+                      onClick={handleCopyLink}
+                    >
+                      {copiedLink ? <Check size={13} style={{ color: '#10b981' }} /> : <ExternalLink size={13} />}
+                      <span>{copiedLink ? 'Link Copied' : 'Copy Paper Link'}</span>
+                    </button>
 
-                  <button
-                    type="button"
-                    className="reader-dropdown-item"
-                    onClick={() => {
-                      setCurrentDoc(null);
-                      setConvertedPages([]);
-                      setMoreMenuOpen(false);
-                    }}
-                  >
-                    <BookOpen size={13} />
-                    <span>Open Another Paper</span>
-                  </button>
-                </div>
-              )}
+                    {currentDoc.pdfUrl && (
+                      <a
+                        href={currentDoc.pdfUrl}
+                        download={downloadFilename}
+                        className="reader-dropdown-item"
+                        style={{ textDecoration: 'none' }}
+                        onClick={() => setMoreMenuOpen(false)}
+                      >
+                        <Download size={13} />
+                        <span>Download PDF File</span>
+                      </a>
+                    )}
+
+                    {convertedPages.length > 0 && (
+                      <button
+                        type="button"
+                        className="reader-dropdown-item"
+                        onClick={handleExportHtml}
+                        disabled={exportingHtml}
+                        title="Download standalone HTML document"
+                      >
+                        {exportingHtml ? (
+                          <Loader2 size={13} className="animate-spin" style={{ color: 'var(--accent-violet, #6366f1)' }} />
+                        ) : (
+                          <Code2 size={13} style={{ color: 'var(--accent-violet, #6366f1)' }} />
+                        )}
+                        <span>{exportingHtml ? 'Preparing HTML...' : 'Export Standalone HTML'}</span>
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      className="reader-dropdown-item"
+                      onClick={async () => {
+                        setMoreMenuOpen(false);
+                        await clearPaperPagesCache(currentDoc);
+                        setConvertedPages([]);
+                        setCurrentDoc((prev) => (prev ? { ...prev } : null));
+                      }}
+                      title="Purge cache and re-convert with WebAssembly"
+                    >
+                      <RefreshCw size={13} />
+                      <span>Re-convert (Bypass Cache)</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      className="reader-dropdown-item"
+                      onClick={() => {
+                        setCurrentDoc(null);
+                        setConvertedPages([]);
+                        setMoreMenuOpen(false);
+                      }}
+                    >
+                      <BookOpen size={13} />
+                      <span>Open Another Paper</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* AI Copilot Toggle */}
+              <button
+                type="button"
+                className={`reader-topbar-btn ${sidebarOpen ? 'active' : ''}`}
+                onClick={() => setSidebarOpen((v) => !v)}
+                title={sidebarOpen ? 'Hide Assistant' : 'Open Assistant'}
+                style={{
+                  background: sidebarOpen ? 'rgba(99, 102, 241, 0.12)' : 'transparent',
+                  color: sidebarOpen ? 'var(--accent-violet, #6366f1)' : 'var(--text-secondary)',
+                  fontWeight: 600,
+                }}
+              >
+                <Sparkles size={13} />
+                <span>Assistant</span>
+              </button>
             </div>
-          </div>
-        </div>
+          </header>
+        )}
 
-        {/* ── 2. Compact Document Toolbar ── */}
-        <div className="reader-doc-toolbar">
-          {/* Left: Page Navigation & Reading Mode */}
-          <div className="toolbar-group">
+        {/* ── 2. Floating Zen HUD (when in Focus Mode) ── */}
+        {isZenMode && (
+          <div className="reader-zen-floating-hud">
             <button
               type="button"
-              className="toolbar-btn"
+              className="reader-zen-btn"
               onClick={() => handleJumpToPage(currentPage - 1)}
               disabled={currentPage <= 1}
-              title="Previous page"
+              title="Previous Page"
             >
               <ChevronLeft size={14} />
             </button>
-
-            <span className="toolbar-page-indicator">
-              Page {currentPage} / {totalPages || 1}
-            </span>
-
+            <span>Page {currentPage} / {totalPages || 1}</span>
             <button
               type="button"
-              className="toolbar-btn"
+              className="reader-zen-btn"
               onClick={() => handleJumpToPage(currentPage + 1)}
               disabled={currentPage >= totalPages}
-              title="Next page"
+              title="Next Page"
             >
               <ChevronRight size={14} />
             </button>
 
-            <div className="toolbar-divider" />
-
-            {/* Reading Mode Switcher (Continuous vs Single Page) */}
-            <div className="reader-mode-toggle" title="Switch reading mode">
-              <button
-                type="button"
-                className={`reader-mode-toggle-btn ${viewMode === 'continuous' ? 'active' : ''}`}
-                onClick={() => setViewMode('continuous')}
-                title="Continuous Scroll Mode"
-              >
-                <FileText size={12} />
-                <span>Scroll</span>
-              </button>
-              <button
-                type="button"
-                className={`reader-mode-toggle-btn ${viewMode === 'single' ? 'active' : ''}`}
-                onClick={() => setViewMode('single')}
-                title="Page-by-page Mode"
-              >
-                <BookOpen size={12} />
-                <span>Page</span>
-              </button>
-            </div>
-
-            <div className="toolbar-divider" />
-
-            {/* Zoom Controls */}
-            <button
-              type="button"
-              className="toolbar-btn"
-              onClick={() => {
-                setZoom((z) => Math.max(50, z - 10));
-                setFitWidth(false);
-              }}
-              title="Zoom out"
-            >
-              <ZoomOut size={13} />
-            </button>
-
-            <span className="toolbar-zoom-label">
-              {fitWidth ? 'Auto' : `${zoom}%`}
-            </span>
+            <span style={{ opacity: 0.4 }}>|</span>
 
             <button
               type="button"
-              className="toolbar-btn"
-              onClick={() => {
-                setZoom((z) => Math.min(200, z + 10));
-                setFitWidth(false);
-              }}
-              title="Zoom in"
-            >
-              <ZoomIn size={13} />
-            </button>
-
-            {/* Fit Width */}
-            <button
-              type="button"
-              className={`toolbar-btn ${fitWidth ? 'active' : ''}`}
+              className="reader-zen-btn"
               onClick={() => setFitWidth((w) => !w)}
-              title="Fit to container width"
             >
-              <Maximize2 size={13} />
-              <span>Fit Width</span>
+              {fitWidth ? '100%' : 'Fit'}
             </button>
-          </div>
 
-          {/* Right: In-Paper Search & AI Copilot Toggle */}
-          <div className="toolbar-group">
-            {/* Search within paper */}
-            <div className="toolbar-search-input" title="Find inside paper text (press Enter for next)">
-              <Search size={12} style={{ color: 'var(--text-muted)' }} />
-              <input
-                type="text"
-                value={inDocSearch}
-                onChange={(e) => {
-                  setInDocSearch(e.target.value);
-                  setSearchCurrentMatchIdx(0);
-                }}
-                onKeyDown={handleSearchKeyDown}
-                placeholder="Find in paper..."
-              />
-              {searchLower && (
-                <span className="toolbar-search-badge">
-                  {searchMatchCount} match{searchMatchCount === 1 ? '' : 'es'}
-                </span>
-              )}
-            </div>
+            <span style={{ opacity: 0.4 }}>|</span>
 
-            <div className="toolbar-divider" />
-
-            {/* AI Copilot Drawer Toggle */}
             <button
               type="button"
-              className={`toolbar-btn ${sidebarOpen ? 'active' : ''}`}
-              onClick={() => setSidebarOpen((v) => !v)}
-              title={sidebarOpen ? 'Hide AI Assistant' : 'Open AI Assistant'}
+              className="reader-zen-btn"
+              onClick={() => setIsZenMode(false)}
+              title="Exit Focus Mode (Esc)"
+              style={{ background: 'rgba(255, 255, 255, 0.2)', padding: '3px 10px' }}
             >
-              <Sparkles size={13} />
-              <span>AI Copilot</span>
+              <Minimize2 size={12} />
+              <span>Exit Focus (Esc)</span>
             </button>
           </div>
-        </div>
+        )}
 
-        {/* ── 3. Subtle Gray Reading Canvas with Clean White Document Surface ── */}
-        <div className="reader-canvas" ref={canvasRef}>
+        {/* ── 3. Comfortable Reading Canvas with Eye-Care Themes ── */}
+        <div className={`reader-canvas theme-${readingTheme}`} ref={canvasRef}>
           {activeHighlight && (
             <EvidenceHighlightBanner
               highlight={activeHighlight}
@@ -1212,22 +1451,14 @@ export default function PaperReaderView() {
             />
           )}
 
-          {/* Progressive WASM Conversion Banner */}
+          {/* Floating Subtle Progress Pill (Zero layout shift) */}
           {isConverting && (
-            <div className="reader-conversion-banner">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Loader2 size={13} className="animate-spin" />
-                <span>
-                  {conversionProgress.status ||
-                    `Converting Page ${convertedPages.length} of ${totalPages} via WebAssembly (${conversionProgress.percent}%)`}
-                </span>
-              </div>
-              <div className="reader-conversion-progress-track">
-                <div
-                  className="reader-conversion-progress-bar"
-                  style={{ width: `${Math.max(5, conversionProgress.percent)}%` }}
-                />
-              </div>
+            <div className="reader-floating-progress-pill">
+              <Loader2 size={13} className="animate-spin" />
+              <span>
+                {conversionProgress.status ||
+                  `Converting page ${convertedPages.length} of ${totalPages} (${conversionProgress.percent}%)`}
+              </span>
             </div>
           )}
 
@@ -1264,7 +1495,7 @@ export default function PaperReaderView() {
             </div>
           )}
 
-          {/* Loading state before first page is converted */}
+          {/* Initial Loading Screen */}
           {convertedPages.length === 0 && (isConverting || resolvingPdf) && (
             <div
               style={{
@@ -1293,7 +1524,7 @@ export default function PaperReaderView() {
             </div>
           )}
 
-          {/* ── WebAssembly Rendered HTML Pages Container ── */}
+          {/* WebAssembly Rendered HTML Pages */}
           {convertedPages.length > 0 && (
             <div
               className="wasm-pdf-document"
@@ -1319,12 +1550,11 @@ export default function PaperReaderView() {
                       width: `${displayWidth}px`,
                       height: `${displayHeight}px`,
                       position: 'relative',
-                      margin: '0 auto 20px',
-                      background: '#ffffff',
-                      boxShadow: '0 4px 16px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.04)',
-                      borderRadius: 2,
+                      margin: '0 auto 28px',
+                      borderRadius: 4,
                       overflow: 'hidden',
                       display: 'block',
+                      transition: 'box-shadow 0.2s ease',
                     }}
                   >
                     {/* Background Visual Layer */}
@@ -1423,31 +1653,13 @@ export default function PaperReaderView() {
                   </div>
                 );
               })}
-
-
-              {/* In-progress indicator at bottom when converting remaining pages */}
-              {isConverting && convertedPages.length < totalPages && (
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    padding: '12px 20px',
-                    fontSize: 12.5,
-                    color: 'var(--text-muted)',
-                  }}
-                >
-                  <Loader2 size={14} className="animate-spin" />
-                  <span>Converting page {convertedPages.length + 1} of {totalPages}...</span>
-                </div>
-              )}
             </div>
           )}
         </div>
       </div>
 
-      {/* ── 4. Right AI Assistant Panel ── */}
-      {sidebarOpen && (
+      {/* ── 4. Right Assistant Panel ── */}
+      {sidebarOpen && !isZenMode && (
         <PaperReaderSidebar
           paper={currentDoc}
           onClose={() => setSidebarOpen(false)}
@@ -1459,6 +1671,95 @@ export default function PaperReaderView() {
           }}
           onHighlightEvidence={handleHighlightEvidence}
         />
+      )}
+
+      {/* ── 5. Paper Metadata & Abstract Modal ── */}
+      {showMetadataModal && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 10001,
+            background: 'rgba(0, 0, 0, 0.45)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 20,
+          }}
+          onClick={() => setShowMetadataModal(false)}
+        >
+          <div
+            style={{
+              background: 'var(--bg-card, #ffffff)',
+              borderRadius: 12,
+              border: '1px solid var(--border-subtle, #e2e8f0)',
+              maxWidth: 600,
+              width: '100%',
+              padding: 24,
+              boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
+              position: 'relative',
+              maxHeight: '85vh',
+              overflowY: 'auto',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+              <span className="reader-arxiv-badge" style={{ fontSize: 11 }}>
+                {badgeLabel}
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowMetadataModal(false)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 8px', lineHeight: 1.35 }}>
+              {currentDoc.title}
+            </h3>
+
+            <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 16 }}>
+              {authorsText} {currentDoc.year ? `• ${currentDoc.year}` : ''}
+            </div>
+
+            {currentDoc.abstract && (
+              <div style={{ marginBottom: 20 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'block', marginBottom: 6 }}>
+                  Abstract
+                </span>
+                <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+                  {currentDoc.abstract}
+                </p>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, borderTop: '1px solid var(--border-subtle, #e2e8f0)', paddingTop: 14 }}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={handleCopyBibtex}
+              >
+                {copiedBibtex ? <Check size={12} style={{ color: '#10b981' }} /> : <Copy size={12} />}
+                <span>{copiedBibtex ? 'BibTeX Copied' : 'Copy BibTeX'}</span>
+              </button>
+              {badgeUrl && (
+                <a
+                  href={badgeUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn btn-primary btn-sm"
+                  style={{ textDecoration: 'none' }}
+                >
+                  <ExternalLink size={12} />
+                  <span>Open Publication</span>
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

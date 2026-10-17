@@ -2415,3 +2415,13 @@ bundle compilation (`npm run build`).
 * Updated navigation in Sidebar, Overview, Workspaces, and Command Palette to "Novelty & Gaps".
 * Added live combinatorial graph gaps panel (`/api/v1/graph/gaps`) with 1-click gap-to-hypothesis formulation.
 * Verified with clean frontend build and 22/22 backend tests passing.
+
+<br />
+
+## Paper Reader UI/UX Overhaul & Comfortable Reading Desk
+
+* Merged double-stacked toolbars into a single 50px unified navigation bar with clean pill controls.
+* Added eye-care reading themes (Clean White, Warm Sepia, Night Dark) and distraction-free Zen Focus mode.
+* Upgraded sidebar with responsive tab pills, 1-click width toggling (390px/560px), and non-intrusive floating progress.
+* Verified with clean production frontend build and 22/22 backend regression tests passing.
+
