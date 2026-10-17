@@ -111,6 +111,8 @@ class ResearchGapNode(BaseGraphNode):
     description: str
     method_id: str
     dataset_id: str
+    method_name: Optional[str] = None
+    dataset_name: Optional[str] = None
     confidence: float = Field(default=0.8, ge=0.0, le=1.0)
     node_type: Literal[NodeType.GAP] = NodeType.GAP
 

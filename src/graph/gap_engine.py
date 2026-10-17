@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from src.graph.schema import (
     DatasetNode,
@@ -20,14 +20,49 @@ class GapDetectionEngine:
     def __init__(self, store: ResearchGraphStore):
         self.store = store
 
-    async def detect_method_dataset_gaps(self) -> List[ResearchGapNode]:
-        """Identify unexplored combinatorial pairs between known methods and datasets."""
-        methods: List[MethodNode] = [
-            n for n in await self.store.get_all_nodes_by_type(NodeType.METHOD) if isinstance(n, MethodNode)
-        ]
-        datasets: List[DatasetNode] = [
-            n for n in await self.store.get_all_nodes_by_type(NodeType.DATASET) if isinstance(n, DatasetNode)
-        ]
+    async def detect_method_dataset_gaps(self, workspace_id: Optional[str] = None) -> List[ResearchGapNode]:
+        """Identify unexplored combinatorial pairs between known methods and datasets.
+        
+        If workspace_id is provided, scopes methods and datasets to papers associated with that workspace.
+        """
+        await self.store._ensure_initialized()
+
+        if workspace_id and workspace_id.strip():
+            ws_clean = workspace_id.strip()
+            # Find papers in this workspace
+            paper_ids = set()
+            for cand_id in [ws_clean, f"ws-{ws_clean}"]:
+                if cand_id in self.store.graph:
+                    for succ in self.store.graph.successors(cand_id):
+                        node_data = self.store.graph.nodes.get(succ, {})
+                        if node_data.get("node_type") == "paper":
+                            paper_ids.add(succ)
+                    for pred in self.store.graph.predecessors(cand_id):
+                        node_data = self.store.graph.nodes.get(pred, {})
+                        if node_data.get("node_type") == "paper":
+                            paper_ids.add(pred)
+
+            if not paper_ids:
+                return []
+
+            methods_map: Dict[str, MethodNode] = {}
+            datasets_map: Dict[str, DatasetNode] = {}
+            for pid in paper_ids:
+                for succ in self.store.graph.successors(pid):
+                    node = await self.store.get_node(succ)
+                    if isinstance(node, MethodNode):
+                        methods_map[node.id] = node
+                    elif isinstance(node, DatasetNode):
+                        datasets_map[node.id] = node
+            methods = list(methods_map.values())
+            datasets = list(datasets_map.values())
+        else:
+            methods: List[MethodNode] = [
+                n for n in await self.store.get_all_nodes_by_type(NodeType.METHOD) if isinstance(n, MethodNode)
+            ]
+            datasets: List[DatasetNode] = [
+                n for n in await self.store.get_all_nodes_by_type(NodeType.DATASET) if isinstance(n, DatasetNode)
+            ]
 
         gaps: List[ResearchGapNode] = []
 
@@ -41,6 +76,8 @@ class GapDetectionEngine:
                         description=f"No papers found applying {method.name} on {dataset.name}",
                         method_id=method.id,
                         dataset_id=dataset.id,
+                        method_name=method.name,
+                        dataset_name=dataset.name,
                         confidence=0.8,
                     )
                     gaps.append(gap_node)

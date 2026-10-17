@@ -379,9 +379,11 @@ async def get_research_space_summary():
 
 
 @router.get("/gaps", response_model=List[ResearchGapNode])
-async def get_detected_research_gaps():
+async def get_detected_research_gaps(
+    workspace_id: Optional[str] = Query(None, description="Optional workspace ID to isolate gaps to its papers")
+):
     """Return all detected combinatorial research gaps between methods and datasets."""
-    return await gap_detection_engine.detect_method_dataset_gaps()
+    return await gap_detection_engine.detect_method_dataset_gaps(workspace_id=workspace_id)
 
 
 @router.get("/underexplored")

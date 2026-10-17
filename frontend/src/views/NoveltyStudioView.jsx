@@ -122,6 +122,7 @@ export default function NoveltyStudioView() {
   const [lastTelemetry, setLastTelemetry] = useState(null);
   const [errorMsg, setErrorMsg] = useState(null);
   const [toastMsg, setToastMsg] = useState(null);
+  const [showControlConsole, setShowControlConsole] = useState(() => noveltyResults.length === 0);
 
   // Custom Novelty Authoring Modal state
   const [showCustomModal, setShowCustomModal] = useState(false);
@@ -165,20 +166,21 @@ export default function NoveltyStudioView() {
   // Load real combinatorial gaps from Knowledge Graph SQLite
   useEffect(() => {
     setLoadingGraphGaps(true);
-    fetch('/api/v1/graph/gaps')
+    const wsParam = activeWorkspace?.id ? `?workspace_id=${encodeURIComponent(activeWorkspace.id)}` : '';
+    fetch(`/api/v1/graph/gaps${wsParam}`)
       .then((res) => (res.ok ? res.json() : []))
       .then((data) => {
-        if (Array.isArray(data) && data.length > 0) {
+        if (Array.isArray(data)) {
           setDetectedGraphGaps(data);
         }
       })
       .catch(() => {})
       .finally(() => setLoadingGraphGaps(false));
-  }, []);
+  }, [activeWorkspace?.id]);
 
   const handleSolveGap = (gap) => {
-    const methodStr = gap.method_id || 'Novel Method';
-    const datasetStr = gap.dataset_id || 'Benchmark Dataset';
+    const methodStr = gap.method_name || gap.method_id || 'Novel Method';
+    const datasetStr = gap.dataset_name || gap.dataset_id || 'Benchmark Dataset';
     setCustomForm({
       title: `Evaluating ${methodStr} on ${datasetStr}`,
       mechanism: 'gap_realization',
@@ -197,12 +199,11 @@ export default function NoveltyStudioView() {
 
   // Responsive Masonry Column state
   const [autoColumnCount, setAutoColumnCount] = useState(() => {
-    if (typeof window === 'undefined') return 3;
+    if (typeof window === 'undefined') return 2;
     const width = window.innerWidth;
-    if (width < 768) return 1;
-    if (width < 1280) return 2;
-    if (width < 1800) return 3;
-    return 4;
+    if (width < 900) return 1;
+    if (width < 1550) return 2;
+    return 3;
   });
   const [customColumnCount, setCustomColumnCount] = useState(null);
   const activeColumnCount = customColumnCount || autoColumnCount;
@@ -210,10 +211,9 @@ export default function NoveltyStudioView() {
   useEffect(() => {
     const handleResize = () => {
       const width = window.innerWidth;
-      if (width < 768) setAutoColumnCount(1);
-      else if (width < 1280) setAutoColumnCount(2);
-      else if (width < 1800) setAutoColumnCount(3);
-      else setAutoColumnCount(4);
+      if (width < 900) setAutoColumnCount(1);
+      else if (width < 1550) setAutoColumnCount(2);
+      else setAutoColumnCount(3);
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
@@ -781,11 +781,33 @@ ${nov.mathematical_formulation || 'N/A'}
 
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => setShowControlConsole((prev) => !prev)}
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <SlidersHorizontal size={13} />
+            <span>Configure & Grounding</span>
+            <span
+              className="badge"
+              style={{
+                fontSize: 10,
+                padding: '1px 6px',
+                background: selectedPaperIds.length > 0 ? (isDark ? 'rgba(16, 185, 129, 0.2)' : '#ecfdf5') : 'var(--bg-subtle)',
+                color: selectedPaperIds.length > 0 ? '#10b981' : 'var(--text-muted)',
+              }}
+            >
+              {selectedPaperIds.length} Staged
+            </span>
+            {showControlConsole ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+          </button>
+
+          <button
             className="btn btn-secondary btn-sm"
             onClick={() => setShowConfigDrawer(!showConfigDrawer)}
             style={{ display: 'flex', alignItems: 'center', gap: 6 }}
           >
-            <SlidersHorizontal size={13} />
+            <Key size={13} />
             <span>Engines & Keys</span>
             {showConfigDrawer ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
           </button>
@@ -903,18 +925,19 @@ ${nov.mathematical_formulation || 'N/A'}
       )}
 
       {/* 2. Unified Novelty Studio Control Console */}
-      <div
-        className="card"
-        style={{
-          padding: '16px 20px',
-          marginBottom: 16,
-          background: 'var(--bg-card)',
-          border: '1px solid var(--border-subtle)',
-          borderRadius: 'var(--radius-md, 8px)',
-          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.03)',
-        }}
-      >
-        {/* Row A: Target LLM Engine & Tournament Mode */}
+      {showControlConsole ? (
+        <div
+          className="card"
+          style={{
+            padding: '16px 20px',
+            marginBottom: 16,
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-md, 8px)',
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.03)',
+          }}
+        >
+          {/* Row A: Target LLM Engine & Tournament Mode */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 11.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-secondary)' }}>
@@ -1006,6 +1029,17 @@ ${nov.mathematical_formulation || 'N/A'}
             >
               <Key size={12} />
               <span>Keys & Models</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowControlConsole(false)}
+              className="btn btn-secondary btn-sm"
+              style={{ fontSize: 11.5, padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 5 }}
+              title="Collapse setup console to focus on proposals"
+            >
+              <ChevronUp size={12} />
+              <span>Collapse</span>
             </button>
           </div>
         </div>
@@ -1163,6 +1197,42 @@ ${nov.mathematical_formulation || 'N/A'}
           )}
         </div>
       </div>
+    ) : (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '10px 16px',
+            marginBottom: 16,
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-md, 8px)',
+            fontSize: 12.5,
+            gap: 12,
+            flexWrap: 'wrap',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <span style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>Topic:</span>
+            <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{topic || 'General Synthesis'}</span>
+            <span style={{ color: 'var(--border-subtle)' }}>|</span>
+            <span style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>Active Engines:</span>
+            <span style={{ fontWeight: 600, color: '#10b981' }}>{selectedProviders.map((p) => p.toUpperCase()).join(', ')}</span>
+            <span style={{ color: 'var(--border-subtle)' }}>|</span>
+            <span style={{ color: 'var(--text-muted)' }}>{selectedPaperIds.length} of {availablePapers.length} Grounding Papers Staged</span>
+          </div>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => setShowControlConsole(true)}
+            style={{ fontSize: 11.5, padding: '4px 12px', display: 'flex', alignItems: 'center', gap: 5 }}
+          >
+            <SlidersHorizontal size={12} />
+            <span>Expand Settings & Grounding</span>
+          </button>
+        </div>
+      )}
       
 {/* 3. Provider Settings & Connection Test Drawer */}
       {showConfigDrawer && (
@@ -1887,19 +1957,25 @@ ${nov.mathematical_formulation || 'N/A'}
             )}
           </div>
 
-          {/* Mechanism filter */}
-          <select
-            className="input"
-            value={mechanismFilter}
-            onChange={(e) => setMechanismFilter(e.target.value)}
-            style={{ fontSize: 11.5, padding: '4px 8px' }}
-          >
-            <option value="all">All Mechanisms</option>
-            <option value="recombination"> Recombination</option>
-            <option value="contradiction_resolution">Tension Resolution</option>
-            <option value="limitation_inversion">Limitation Inversion</option>
-            <option value="gap_realization"> Gap Realization</option>
-          </select>
+          {/* Mechanism filter pills */}
+          <div className="novelty-pill-toolbar" style={{ display: 'inline-flex', gap: 4 }}>
+            {[
+              { id: 'all', label: 'All' },
+              { id: 'recombination', label: 'Recombination' },
+              { id: 'contradiction_resolution', label: 'Tension Resolution' },
+              { id: 'limitation_inversion', label: 'Limitation Inversion' },
+              { id: 'gap_realization', label: 'Gap Realization' },
+            ].map((mech) => (
+              <button
+                key={mech.id}
+                type="button"
+                className={`novelty-pill-btn ${mechanismFilter === mech.id ? 'active' : ''}`}
+                onClick={() => setMechanismFilter(mech.id)}
+              >
+                {mech.label}
+              </button>
+            ))}
+          </div>
 
           {/* Provider filter */}
           <select
@@ -1909,7 +1985,7 @@ ${nov.mathematical_formulation || 'N/A'}
             style={{ fontSize: 11.5, padding: '4px 8px' }}
           >
             <option value="all">All Engines</option>
-            <option value="custom"> User Authored</option>
+            <option value="custom">User Authored</option>
             <option value="gemini">Google Gemini</option>
             <option value="groq">Groq LPU</option>
             <option value="ollama">Local Ollama</option>
@@ -2075,7 +2151,7 @@ ${nov.mathematical_formulation || 'N/A'}
                 >
                   <div>
                     <strong style={{ fontSize: 12.5, color: 'var(--text-primary)', display: 'block', marginBottom: 4 }}>
-                      Unexplored: {gap.method_id || 'Method'} x {gap.dataset_id || 'Dataset'}
+                      Unexplored: {gap.method_name || gap.method_id || 'Method'} x {gap.dataset_name || gap.dataset_id || 'Dataset'}
                     </strong>
                     <p style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: '0 0 10px', lineHeight: 1.4 }}>
                       {gap.description || 'No existing publication evaluates this methodology on this benchmark dataset.'}
@@ -2559,12 +2635,12 @@ function NoveltyCardItem({ novelty, isDark, isAdded, isAdding, copied, onAddToGr
   const mech = (novelty.mechanism || '').toLowerCase();
   let badgeBg = 'var(--bg-secondary)';
   let badgeColor = 'var(--accent-primary)';
-  let badgeLabel = ' Proposal';
+  let badgeLabel = 'Proposal';
 
   if (mech.includes('recombination') || mech.includes('orthogonal')) {
     badgeBg = isDark ? '#064e3b' : '#ecfdf5';
     badgeColor = isDark ? '#34d399' : '#059669';
-    badgeLabel = ' Recombination';
+    badgeLabel = 'Recombination';
   } else if (mech.includes('contradict') || mech.includes('tension')) {
     badgeBg = isDark ? '#451a03' : '#fffbeb';
     badgeColor = isDark ? '#fbbf24' : '#b45309';
@@ -2576,7 +2652,7 @@ function NoveltyCardItem({ novelty, isDark, isAdded, isAdding, copied, onAddToGr
   } else if (mech.includes('gap') || mech.includes('realization')) {
     badgeBg = isDark ? '#500724' : '#fdf2f8';
     badgeColor = isDark ? '#f472b6' : '#be185d';
-    badgeLabel = ' Gap Realization';
+    badgeLabel = 'Gap Realization';
   }
 
   const eng = (novelty.engine || 'gemini').toLowerCase();
@@ -2601,35 +2677,25 @@ function NoveltyCardItem({ novelty, isDark, isAdded, isAdding, copied, onAddToGr
     engineBadge = 'Heuristic';
     engineColor = '#64748b';
   } else if (eng === 'custom' || novelty.is_custom) {
-    engineBadge = ' User Authored';
+    engineBadge = 'User Authored';
     engineColor = '#a855f7';
   }
 
   return (
-    <div
-      className="card"
-      style={{
-        padding: '16px 18px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 10,
-        borderRadius: 'var(--radius-sm)',
-        background: 'var(--bg-card)',
-        border: '1px solid var(--border-subtle)',
-        transition: 'transform 0.15s, border-color 0.15s',
-      }}
-    >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
+    <div className="novelty-proposal-card">
+      {/* Top Header: Mechanism, Engine, and Confidence */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <span
             style={{
-              fontSize: 10,
+              fontSize: 10.5,
               fontWeight: 700,
-              padding: '2px 8px',
-              borderRadius: 10,
+              padding: '2px 9px',
+              borderRadius: 12,
               background: badgeBg,
               color: badgeColor,
               textTransform: 'uppercase',
+              letterSpacing: '0.03em',
             }}
           >
             {badgeLabel}
@@ -2639,7 +2705,7 @@ function NoveltyCardItem({ novelty, isDark, isAdded, isAdding, copied, onAddToGr
             style={{
               fontSize: 10,
               fontWeight: 700,
-              padding: '2px 7px',
+              padding: '2px 8px',
               borderRadius: 4,
               border: `1px solid ${engineColor}`,
               color: engineColor,
@@ -2651,54 +2717,43 @@ function NoveltyCardItem({ novelty, isDark, isAdded, isAdding, copied, onAddToGr
         </div>
 
         {novelty.confidence_score && (
-          <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>
-            Confidence: {Math.round(novelty.confidence_score * 100)}%
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              color: 'var(--text-muted)',
+              fontFamily: 'var(--font-code, monospace)',
+            }}
+          >
+            {Math.round(novelty.confidence_score * 100)}% Confidence
           </span>
         )}
       </div>
 
-      <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.35 }}>
+      {/* Proposal Title */}
+      <div style={{ fontSize: 15.5, fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.35, letterSpacing: '-0.01em' }}>
         {novelty.title}
       </div>
 
+      {/* Elevator Pitch */}
       {novelty.pitch && (
-        <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: 0, lineHeight: 1.4 }}>
+        <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', margin: 0, lineHeight: 1.5 }}>
           {novelty.pitch}
         </p>
       )}
 
-      {/* Testable Hypothesis Quote */}
-      <div
-        style={{
-          fontSize: 11.5,
-          fontStyle: 'italic',
-          color: 'var(--text-primary)',
-          lineHeight: 1.45,
-          borderLeft: '3px solid var(--accent-primary)',
-          paddingLeft: 10,
-          background: 'var(--bg-secondary)',
-          padding: '8px 10px',
-          borderRadius: '0 4px 4px 0',
-        }}
-      >
+      {/* Testable Hypothesis Callout */}
+      <div className="novelty-hypothesis-box">
+        <span style={{ fontWeight: 700, fontStyle: 'normal', display: 'block', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.04em', color: '#10b981', marginBottom: 3 }}>
+          Scientific Hypothesis
+        </span>
         "{novelty.testable_hypothesis}"
       </div>
 
       {/* Mathematical / Technical Formulation */}
       {novelty.mathematical_formulation && (
-        <div
-          style={{
-            padding: '8px 10px',
-            background: isDark ? '#09090b' : '#f1f5f9',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: 4,
-            overflowX: 'auto',
-            fontSize: 11.5,
-            lineHeight: 1.55,
-            color: 'var(--text-secondary)',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 3 }}>
+        <div className="novelty-formula-card">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
             <span style={{ fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', fontWeight: 700 }}>
               Formulation
             </span>
@@ -2709,14 +2764,10 @@ function NoveltyCardItem({ novelty, isDark, isAdded, isAdding, copied, onAddToGr
 
       {/* Grounded Foundation Papers */}
       {novelty.grounded_paper_titles && novelty.grounded_paper_titles.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
-          <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600 }}>Grounding:</span>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
+          <span style={{ fontSize: 10.5, color: 'var(--text-muted)', fontWeight: 600 }}>Grounding:</span>
           {novelty.grounded_paper_titles.map((fp, i) => (
-            <span
-              key={i}
-              className="badge badge-neutral"
-              style={{ fontSize: 9.5, maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-            >
+            <span key={i} className="novelty-grounding-chip" title={fp}>
               {fp}
             </span>
           ))}
@@ -2725,7 +2776,7 @@ function NoveltyCardItem({ novelty, isDark, isAdded, isAdding, copied, onAddToGr
 
       {/* Target Datasets & Baselines */}
       {(novelty.target_datasets?.length > 0 || novelty.baselines_to_beat?.length > 0) && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, fontSize: 10 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, fontSize: 11 }}>
           {novelty.target_datasets?.length > 0 && (
             <div>
               <span style={{ color: 'var(--text-muted)', marginRight: 4 }}>Datasets:</span>
@@ -2742,14 +2793,14 @@ function NoveltyCardItem({ novelty, isDark, isAdded, isAdding, copied, onAddToGr
       )}
 
       {/* Action Buttons Strip */}
-      <div style={{ display: 'flex', gap: 8, marginTop: 6, paddingTop: 10, borderTop: '1px dashed var(--border-subtle)' }}>
+      <div style={{ display: 'flex', gap: 8, marginTop: 4, paddingTop: 12, borderTop: '1px solid var(--border-subtle)' }}>
         {isAdded ? (
           <button
             className="btn btn-secondary btn-sm"
             disabled
-            style={{ flex: 1, fontSize: 11, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 5, color: '#10b981' }}
+            style={{ flex: 1, fontSize: 11.5, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 5, color: '#10b981' }}
           >
-            <CheckCircle2 size={12} />
+            <CheckCircle2 size={13} />
             <span>In Canvas</span>
           </button>
         ) : (
@@ -2759,7 +2810,7 @@ function NoveltyCardItem({ novelty, isDark, isAdded, isAdding, copied, onAddToGr
             disabled={isAdding}
             style={{
               flex: 1,
-              fontSize: 11,
+              fontSize: 11.5,
               display: 'flex',
               justifyContent: 'center',
               alignItems: 'center',
@@ -2769,7 +2820,7 @@ function NoveltyCardItem({ novelty, isDark, isAdded, isAdding, copied, onAddToGr
               color: '#fff',
             }}
           >
-            {isAdding ? <RotateCw size={12} className="animate-spin" /> : <Plus size={12} />}
+            {isAdding ? <RotateCw size={13} className="animate-spin" /> : <Plus size={13} />}
             <span>Add to Graph</span>
           </button>
         )}
@@ -2777,19 +2828,19 @@ function NoveltyCardItem({ novelty, isDark, isAdded, isAdding, copied, onAddToGr
         <button
           className="btn btn-secondary btn-sm"
           onClick={() => onDiscussInChat(novelty)}
-          style={{ flex: 1, fontSize: 11, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 5 }}
+          style={{ flex: 1, fontSize: 11.5, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 5 }}
         >
-          <MessageSquare size={12} />
+          <MessageSquare size={13} />
           <span>Discuss in Chat</span>
         </button>
 
         <button
           className="btn btn-secondary btn-sm"
           onClick={() => onCopy(novelty)}
-          style={{ fontSize: 11, padding: '4px 8px', display: 'flex', alignItems: 'center' }}
+          style={{ fontSize: 11.5, padding: '4px 10px', display: 'flex', alignItems: 'center' }}
           title="Copy Markdown Summary"
         >
-          {copied ? <Check size={12} style={{ color: '#10b981' }} /> : <Copy size={12} />}
+          {copied ? <Check size={13} style={{ color: '#10b981' }} /> : <Copy size={13} />}
         </button>
 
         {onDelete && (
@@ -2797,10 +2848,10 @@ function NoveltyCardItem({ novelty, isDark, isAdded, isAdding, copied, onAddToGr
             type="button"
             className="btn btn-secondary btn-sm"
             onClick={(e) => onDelete(novelty.id, e)}
-            style={{ fontSize: 11, padding: '4px 8px', display: 'flex', alignItems: 'center', color: '#ef4444' }}
+            style={{ fontSize: 11.5, padding: '4px 10px', display: 'flex', alignItems: 'center', color: '#ef4444' }}
             title="Delete this proposal from deck"
           >
-            <Trash2 size={12} />
+            <Trash2 size={13} />
           </button>
         )}
       </div>

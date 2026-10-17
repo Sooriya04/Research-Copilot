@@ -2425,3 +2425,14 @@ bundle compilation (`npm run build`).
 * Upgraded sidebar with responsive tab pills, 1-click width toggling (390px/560px), and non-intrusive floating progress.
 * Verified with clean production frontend build and 22/22 backend regression tests passing.
 
+<br />
+
+## Research Novelty Studio UI/UX Overhaul & Workspace Gap Isolation
+
+* Redesigned proposal cards with generous min-width, clean typography, dedicated hypothesis callouts, and formatted math containers.
+* Added collapsible setup and grounding console with compact active-state summary bar to eliminate visual clutter.
+* Integrated 1-click mechanism filter pills, responsive column controls, and human-readable entity titles (`method_name`, `dataset_name`) avoiding raw slug IDs.
+* Scoped combinatorial gap detection in `GapDetectionEngine` and `/api/v1/graph/gaps` by `workspace_id` to prevent cross-workspace node leakage.
+* Cleaned up dummy test fixtures from SQLite database with automated teardown in `test_workspace_graph_isolation.py`.
+* Verified with clean production frontend build (Vite in 6.99s) and 23/23 backend regression tests passing.
+
