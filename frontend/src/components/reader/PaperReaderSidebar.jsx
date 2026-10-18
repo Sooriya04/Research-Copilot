@@ -14,6 +14,7 @@ import {
   Star,
   Database,
   Cpu,
+  ChevronLeft,
   ChevronRight,
   ChevronDown,
   ChevronUp,

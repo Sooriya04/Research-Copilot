@@ -254,10 +254,27 @@ async def ingest_paper_into_graph(req: IngestPaperRequest, db: AsyncSession = De
     if req.workspace_id and req.workspace_id.strip():
         ws_clean = req.workspace_id.strip()
         ws_id = ws_clean if ws_clean.startswith("ws-") else f"ws-{ws_clean}"
+        display_name = req.topic.strip() if req.topic and req.topic.strip() and not req.topic.strip().startswith("ws-") else None
+        if not display_name:
+            try:
+                import aiosqlite
+                async with aiosqlite.connect(graph_store.db_path) as db:
+                    async with db.execute("SELECT title FROM workspaces WHERE id = ?", (ws_clean,)) as cur:
+                        row = await cur.fetchone()
+                        if row and row[0]:
+                            display_name = row[0]
+            except Exception:
+                pass
+        if not display_name:
+            display_name = "Research Workspace"
+
         ws_node = await graph_store.get_node(ws_id)
         if not ws_node:
-            ws_topic_node = TopicNode(id=ws_id, name=f"Workspace {ws_clean}", query=ws_clean)
+            ws_topic_node = TopicNode(id=ws_id, name=display_name, query=display_name)
             await graph_store.add_node(ws_topic_node)
+        elif getattr(ws_node, "name", "").startswith("Workspace ws-"):
+            ws_node.name = display_name
+            await graph_store.add_node(ws_node)
         ws_edge = ResearchEdge(
             source_id=ws_id,
             target_id=paper_node_id or paper_id,

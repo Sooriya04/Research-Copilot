@@ -2436,3 +2436,13 @@ bundle compilation (`npm run build`).
 * Cleaned up dummy test fixtures from SQLite database with automated teardown in `test_workspace_graph_isolation.py`.
 * Verified with clean production frontend build (Vite in 6.99s) and 23/23 backend regression tests passing.
 
+<br />
+
+## Workspace Proposal Isolation, Human-Readable Topic Resolution, and Paper Reader Icon Fix
+
+* Fixed missing ChevronLeft import in PaperReaderSidebar eliminating unhandled ReferenceError.
+* Isolated Novelty Studio proposal caching and retrieval to active workspace key without global localStorage contamination or cross-workspace proposal bleed.
+* Replaced raw workspace IDs (e.g. Workspace ws-4d02fa8d) with human-readable workspace titles and topics across graph nodes, knowledge canvas, and novelty synthesis.
+* Verified with clean Vite production build (8.34s) and 128/128 pytest tests passing.
+
+

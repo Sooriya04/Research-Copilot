@@ -1174,7 +1174,9 @@ export default function KnowledgeGraphView() {
         ? `topic-${activeTopicStr.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-')}`
         : 'topic-main'
     );
-    const topicLabel = existingTopicNode?.label || existingTopicNode?.data?.name || activeTopicStr || 'Research Topic';
+    const rawCandidate = existingTopicNode?.label || existingTopicNode?.data?.name || '';
+    const isRawWsString = /^workspace\s+ws-[a-z0-9]+/i.test(rawCandidate) || /^ws-[a-z0-9]+/i.test(rawCandidate);
+    const topicLabel = (!isRawWsString && rawCandidate) ? rawCandidate : (activeTopicStr || 'Research Topic');
 
     // 2. Separate papers from other entities and deduplicate by canonical keys (DOI, arXiv, OpenAlex, Title)
     const rawPaperNodes = rawNodes.filter(n => (n.node_type || '').toLowerCase() === 'paper');

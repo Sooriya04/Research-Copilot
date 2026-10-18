@@ -189,3 +189,38 @@ def test_saved_proposals_persistence_and_custom_creation(client):
     list_resp2 = client.get("/api/v1/novelty/proposals")
     assert not any(p["id"] == p_id for p in list_resp2.json()["proposals"])
 
+
+def test_workspace_novelty_strict_isolation(client):
+    """Verify novelty proposals are strictly scoped and never bleed across workspaces."""
+    ws_a = "ws-isolation-test-alpha"
+    ws_b = "ws-isolation-test-beta"
+
+    # 1. Create a proposal for Workspace Alpha
+    body_a = {
+        "workspace_id": ws_a,
+        "topic": "Sparse Autoencoders",
+        "title": "Alpha Exclusive SAE Proposal",
+        "mechanism": "recombination",
+        "pitch": "Unique to Workspace Alpha",
+        "novelty_statement": "Novelty for Alpha only",
+        "testable_hypothesis": "Improves Alpha performance",
+    }
+    resp_a = client.post("/api/v1/novelty/custom", json=body_a)
+    assert resp_a.status_code == 200
+    p_a = resp_a.json()
+
+    # 2. Query proposals for Workspace Alpha -> Should contain p_a
+    list_a = client.get(f"/api/v1/novelty/proposals?workspace_id={ws_a}")
+    assert list_a.status_code == 200
+    props_a = list_a.json()["proposals"]
+    assert any(p["id"] == p_a["id"] for p in props_a)
+
+    # 3. Query proposals for Workspace Beta -> Must NOT contain p_a
+    list_b = client.get(f"/api/v1/novelty/proposals?workspace_id={ws_b}")
+    assert list_b.status_code == 200
+    props_b = list_b.json()["proposals"]
+    assert not any(p["id"] == p_a["id"] for p in props_b)
+
+    # 4. Clean up
+    client.delete(f"/api/v1/novelty/proposals/{p_a['id']}")
+

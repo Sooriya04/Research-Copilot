@@ -323,8 +323,10 @@ class GraphNoveltyEngine:
                 query = "SELECT * FROM novelty_proposals WHERE 1=1"
                 params: List[Any] = []
                 if workspace_id and workspace_id != "global":
-                    query += " AND (workspace_id = ? OR workspace_id = 'global')"
+                    query += " AND workspace_id = ?"
                     params.append(workspace_id)
+                elif workspace_id == "global":
+                    query += " AND (workspace_id = 'global' OR workspace_id IS NULL)"
                 query += " ORDER BY created_at DESC LIMIT ?"
                 params.append(limit)
 

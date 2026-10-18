@@ -47,20 +47,30 @@ export default function NoveltyStudioView() {
   const location = useLocation();
   const { searchQuery, activeWorkspace, theme, addedToGraphPaperIds, searchResults } = useApp();
 
+  // Topic resolver helper: prevent raw workspace IDs like "Workspace ws-4d02fa8d" from showing
+  const resolveCleanTopic = (ws, query) => {
+    const raw = ws?.title || query || '';
+    if (!raw) return 'Scientific Literature Synthesis';
+    if (/^workspace\s+ws-[a-z0-9]+/i.test(raw) || /^ws-[a-z0-9]+/i.test(raw)) {
+      if (ws?.description && ws.description.trim()) return ws.description.trim();
+      if (query && !/^workspace\s+ws-[a-z0-9]+/i.test(query) && !/^ws-[a-z0-9]+/i.test(query)) {
+        return query;
+      }
+      return 'Scientific Literature Synthesis';
+    }
+    return raw;
+  };
+
   // Topic and Papers state
-  const [topic, setTopic] = useState(() => activeWorkspace?.title || searchQuery || 'Time Series Forecasting');
+  const [topic, setTopic] = useState(() => resolveCleanTopic(activeWorkspace, searchQuery));
   const [availablePapers, setAvailablePapers] = useState([]);
   const [selectedPaperIds, setSelectedPaperIds] = useState([]);
   const [loadingPapers, setLoadingPapers] = useState(false);
 
   // Sync topic with active workspace
   useEffect(() => {
-    if (activeWorkspace?.title) {
-      setTopic(activeWorkspace.title);
-    } else if (searchQuery) {
-      setTopic(searchQuery);
-    }
-  }, [activeWorkspace?.id, activeWorkspace?.title]);
+    setTopic(resolveCleanTopic(activeWorkspace, searchQuery));
+  }, [activeWorkspace?.id, activeWorkspace?.title, searchQuery]);
 
   // Providers & Models state
   const [providersStatus, setProvidersStatus] = useState(null);
@@ -112,8 +122,11 @@ export default function NoveltyStudioView() {
   const [forceRefresh, setForceRefresh] = useState(false);
   const [noveltyResults, setNoveltyResults] = useState(() => {
     try {
-      const wsKey = activeWorkspace?.id ? `rc_ws_${activeWorkspace.id}_novelty_results` : 'rc_novelty_results';
-      const saved = localStorage.getItem(wsKey) || localStorage.getItem('rc_novelty_results');
+      if (activeWorkspace?.id) {
+        const saved = localStorage.getItem(`rc_ws_${activeWorkspace.id}_novelty_results`);
+        return saved ? JSON.parse(saved) : [];
+      }
+      const saved = localStorage.getItem('rc_novelty_results');
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
@@ -224,10 +237,10 @@ export default function NoveltyStudioView() {
   // Persist noveltyResults to localStorage whenever they change
   useEffect(() => {
     try {
-      if (noveltyResults && noveltyResults.length > 0) {
-        const wsKey = activeWorkspace?.id ? `rc_ws_${activeWorkspace.id}_novelty_results` : 'rc_novelty_results';
-        localStorage.setItem(wsKey, JSON.stringify(noveltyResults));
-        localStorage.setItem('rc_novelty_results', JSON.stringify(noveltyResults));
+      if (activeWorkspace?.id) {
+        localStorage.setItem(`rc_ws_${activeWorkspace.id}_novelty_results`, JSON.stringify(noveltyResults || []));
+      } else {
+        localStorage.setItem('rc_novelty_results', JSON.stringify(noveltyResults || []));
       }
     } catch (e) {
       console.warn('Failed saving novelty results to localStorage:', e);
@@ -236,16 +249,18 @@ export default function NoveltyStudioView() {
 
   // 1. Fetch Providers Status, Workspace Papers, and Saved Proposals on mount or workspace switch
   useEffect(() => {
+    // Immediate clean workspace switch: never bleed proposals across workspaces
     try {
-      const wsKey = activeWorkspace?.id ? `rc_ws_${activeWorkspace.id}_novelty_results` : 'rc_novelty_results';
-      const saved = localStorage.getItem(wsKey) || localStorage.getItem('rc_novelty_results');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setNoveltyResults(parsed);
-        }
+      if (activeWorkspace?.id) {
+        const saved = localStorage.getItem(`rc_ws_${activeWorkspace.id}_novelty_results`);
+        setNoveltyResults(saved ? JSON.parse(saved) : []);
+      } else {
+        const saved = localStorage.getItem('rc_novelty_results');
+        setNoveltyResults(saved ? JSON.parse(saved) : []);
       }
-    } catch {}
+    } catch {
+      setNoveltyResults([]);
+    }
     fetchProvidersStatus();
     fetchWorkspacePapers();
     fetchSavedProposals();
@@ -392,31 +407,38 @@ export default function NoveltyStudioView() {
 
   const fetchSavedProposals = async () => {
     try {
-      const wsKey = activeWorkspace?.id || 'global';
-      const res = await fetch(`/api/v1/novelty/proposals?workspace_id=${encodeURIComponent(wsKey)}`);
+      const currentWsId = activeWorkspace?.id || 'global';
+      const res = await fetch(`/api/v1/novelty/proposals?workspace_id=${encodeURIComponent(currentWsId)}`);
       if (res.ok) {
         const data = await res.json();
-        if (data.proposals && Array.isArray(data.proposals) && data.proposals.length > 0) {
-          setNoveltyResults((prev) => {
-            const idMap = new Map();
-            for (const p of data.proposals) {
+        const serverProposals = Array.isArray(data.proposals) ? data.proposals : [];
+        const wsKey = activeWorkspace?.id ? `rc_ws_${activeWorkspace.id}_novelty_results` : 'rc_novelty_results';
+
+        let localSaved = [];
+        try {
+          const s = localStorage.getItem(wsKey);
+          if (s) localSaved = JSON.parse(s);
+        } catch {}
+
+        const idMap = new Map();
+        // Server proposals for this active workspace take precedence
+        for (const p of serverProposals) {
+          idMap.set(p.id, p);
+        }
+        // Only merge locally saved proposals if they belong to this workspace
+        for (const p of localSaved) {
+          if (!idMap.has(p.id)) {
+            if (!p.workspace_id || p.workspace_id === currentWsId) {
               idMap.set(p.id, p);
             }
-            for (const p of prev || []) {
-              if (!idMap.has(p.id)) {
-                idMap.set(p.id, p);
-              }
-            }
-            const merged = Array.from(idMap.values());
-            try {
-              const wsKey = activeWorkspace?.id ? `rc_ws_${activeWorkspace.id}_novelty_results` : 'rc_novelty_results';
-              localStorage.setItem(wsKey, JSON.stringify(merged));
-              localStorage.setItem('rc_novelty_results', JSON.stringify(merged));
-            } catch {}
-            return merged;
-          });
-          addTelemetryLog(`Loaded ${data.proposals.length} saved novelty proposals from SQLite.`);
+          }
         }
+        const merged = Array.from(idMap.values());
+        setNoveltyResults(merged);
+        try {
+          localStorage.setItem(wsKey, JSON.stringify(merged));
+        } catch {}
+        addTelemetryLog(`Loaded ${serverProposals.length} saved novelty proposals for active workspace.`);
       }
     } catch (err) {
       console.warn('Could not fetch saved proposals:', err);
