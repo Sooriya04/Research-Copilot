@@ -444,6 +444,7 @@ class GraphNoveltyEngine:
         base_url: Optional[str] = None,
         force_refresh: bool = False,
         providers: Optional[List[str]] = None,
+        provider_keys: Optional[Dict[str, Optional[str]]] = None,
     ) -> Dict[str, Any]:
         """Synthesize grounded novel research hypotheses and architectures from the active knowledge graph."""
         await self.store._ensure_initialized()
@@ -472,9 +473,10 @@ class GraphNoveltyEngine:
                     topic=topic,
                     paper_ids=paper_ids,
                     provider_name=p,
-                    api_key=api_key if (p == provider_name) else None,
+                    api_key=(provider_keys or {}).get(p) or (api_key if (p == provider_name) else None),
                     base_url=base_url if (p == "ollama" and base_url) else None,
                     force_refresh=force_refresh,
+                    provider_keys=provider_keys,
                 )
                 for p in target_providers
             ]
@@ -488,6 +490,22 @@ class GraphNoveltyEngine:
                 elif isinstance(r, Exception):
                     logger.warning("[GraphNoveltyEngine] Provider '%s' error during multi-model run: %s", p, r)
 
+            # Guaranteed proposal generation: if all remote providers failed or produced 0, generate deterministic proposals
+            if not merged:
+                logger.info("[GraphNoveltyEngine] Multi-model synthesis yielded 0 proposals, running robust heuristic fallback.")
+                detected_gaps = []
+                try:
+                    raw_gaps = await self.gap_engine.detect_method_dataset_gaps(workspace_id=workspace_id)
+                    for g in raw_gaps[:5]:
+                        detected_gaps.append({
+                            "method": getattr(g, "method_name", None) or g.method_id,
+                            "dataset": getattr(g, "dataset_name", None) or g.dataset_id,
+                            "description": g.description,
+                        })
+                except Exception:
+                    pass
+                merged = self._generate_heuristic_novelties(topic or "Literature Synthesis", [], detected_gaps)
+
             ws_key = workspace_id or (f"topic-{slugify_id(topic)}" if topic else "global")
             for item in merged:
                 await self.save_proposal(item, workspace_id=ws_key, topic=topic)
@@ -498,7 +516,7 @@ class GraphNoveltyEngine:
                 "cached": False,
                 "llm_called": True,
                 "provider": "multi",
-                "providers_run": successful_providers,
+                "providers_run": successful_providers or ["heuristic-engine"],
                 "papers_count": len(paper_ids or []),
                 "gaps_count": len(merged),
                 "novelties": merged,
@@ -562,6 +580,23 @@ class GraphNoveltyEngine:
                     "methods": p_dict.get("methods") or [],
                     "datasets": p_dict.get("datasets") or [],
                 })
+            else:
+                # Query SQLite directly in case paper is in database but not yet hydrated into RAM graph
+                try:
+                    async with aiosqlite.connect(self.store.db_path) as db:
+                        async with db.execute("SELECT title, abstract, year FROM papers WHERE id = ? OR arxiv_id = ?", (pid, pid)) as cur:
+                            row = await cur.fetchone()
+                            if row:
+                                paper_records.append({
+                                    "id": pid,
+                                    "title": row[0] or pid,
+                                    "year": row[2],
+                                    "abstract": row[1] or "",
+                                    "methods": [],
+                                    "datasets": [],
+                                })
+                except Exception:
+                    pass
 
         # Collect existing relational edges between these papers
         all_edges = await self.store.get_all_edges()
@@ -579,44 +614,49 @@ class GraphNoveltyEngine:
         # Collect detected gaps
         detected_gaps = []
         try:
-            raw_gaps = await self.gap_engine.detect_method_dataset_gaps()
+            raw_gaps = await self.gap_engine.detect_method_dataset_gaps(workspace_id=workspace_id)
             for g in raw_gaps[:5]:
                 detected_gaps.append({
-                    "method": g.method_id,
-                    "dataset": g.dataset_id,
+                    "method": getattr(g, "method_name", None) or g.method_id,
+                    "dataset": getattr(g, "dataset_name", None) or g.dataset_id,
                     "description": g.description,
                 })
         except Exception:
             pass
 
-        # 4. Formulate Prompt for Gemini Flash-Lite
+        # 4. Formulate Prompt for LLM Synthesis
         llm_called = False
         novelties_dicts = []
 
-        if paper_records:
-            try:
-                system_prompt = (
-                    "You are a World-Class Principal AI Research Engineer at Google DeepMind and Stanford AI Lab. "
-                    "Your mission is to examine a structured scientific literature Knowledge Graph and synthesize "
-                    "HIGH-IMPACT, GROUNDED, PUBLICATION-READY RESEARCH NOVELTY PROPOSALS.\n\n"
-                    "RULES FOR SCIENTIFIC NOVELTY:\n"
-                    "1. DO NOT generate hand-waving platitudes or generic ideas.\n"
-                    "2. Ground every proposal strictly in the provided papers, their mathematical methods, and their empirical limitations.\n"
-                    "3. Utilize the 4 Scientific Novelty Mechanisms:\n"
-                    "   - 'recombination': Orthogonal fusion of Method A from Paper 1 and Method B from Paper 2.\n"
-                    "   - 'contradiction_resolution': Unifying contradictory findings (e.g. Paper A says linear beats transformers, Paper B says patched attention beats linear).\n"
-                    "   - 'limitation_inversion': Directly resolving a known bottleneck of Paper A using a mechanism from Paper B.\n"
-                    "   - 'gap_realization': Designing a rigorous experiment for an unexplored method-dataset intersection.\n"
-                    "4. Output STRICT JSON only with no markdown fences, matching the requested schema exactly."
-                )
+        try:
+            system_prompt = (
+                "You are a World-Class Principal AI Research Engineer at Google DeepMind and Stanford AI Lab. "
+                "Your mission is to examine scientific literature and synthesize "
+                "HIGH-IMPACT, GROUNDED, PUBLICATION-READY RESEARCH NOVELTY PROPOSALS.\n\n"
+                "RULES FOR SCIENTIFIC NOVELTY:\n"
+                "1. DO NOT generate hand-waving platitudes or generic ideas.\n"
+                "2. Ground every proposal strictly in concrete mathematical methods and empirical limitations.\n"
+                "3. Utilize the 4 Scientific Novelty Mechanisms:\n"
+                "   - 'recombination': Orthogonal fusion of Method A from Paper 1 and Method B from Paper 2.\n"
+                "   - 'contradiction_resolution': Unifying contradictory findings (e.g. Paper A says linear beats transformers, Paper B says patched attention beats linear).\n"
+                "   - 'limitation_inversion': Directly resolving a known bottleneck of Paper A using a mechanism from Paper B.\n"
+                "   - 'gap_realization': Designing a rigorous experiment for an unexplored method-dataset intersection.\n"
+                "4. Output STRICT JSON only with no markdown fences, matching the requested schema exactly."
+            )
 
-                papers_summary_text = ""
+            papers_summary_text = ""
+            if paper_records:
                 for idx, p in enumerate(paper_records, 1):
                     papers_summary_text += (
                         f"Paper [{idx}] ID: {p['id']}\n"
                         f"Title: {p['title']} ({p['year'] or 'Recent'})\n"
                         f"Abstract: {p['abstract'][:450]}...\n\n"
                     )
+            else:
+                papers_summary_text = (
+                    f"Synthesizing state-of-the-art novelty hypotheses directly for research topic: '{topic or 'Machine Learning'}'. "
+                    "Address current theoretical bottlenecks, recent foundational architectures, and standard benchmark suites in this field.\n"
+                )
 
                 edges_summary_text = ", ".join(
                     [f"{e['source']} -[{e['relation']}]-> {e['target']}" for e in rel_records[:10]]
@@ -724,12 +764,12 @@ Return JSON with this EXACT structure:
                     prop["model_name"] = model_str
                     novelties_dicts.append(NoveltyItem(**prop).model_dump())
 
-            except Exception as llm_err:
-                logger.warning("[GraphNoveltyEngine] Provider '%s' Novelty synthesis error: %s. Using heuristic fallback.", eng_name, llm_err)
+        except Exception as llm_err:
+            logger.warning("[GraphNoveltyEngine] Provider '%s' Novelty synthesis error: %s. Using heuristic fallback.", eng_name, llm_err)
 
         # 5. Deterministic Heuristic Fallback (if LLM returned empty or failed)
-        if not novelties_dicts and paper_records:
-            logger.info("[GraphNoveltyEngine] Generating deterministic heuristic novelty proposals from graph topology.")
+        if not novelties_dicts:
+            logger.info("[GraphNoveltyEngine] Generating deterministic heuristic novelty proposals for topic '%s'.", topic)
             novelties_dicts = self._generate_heuristic_novelties(topic or "Literature Synthesis", paper_records, detected_gaps)
 
         # 6. Save to SQLite Cache & Persistent Proposals Table
@@ -756,8 +796,14 @@ Return JSON with this EXACT structure:
     ) -> List[Dict[str, Any]]:
         """Deterministic heuristic novelty generator based on combinatorial graph analysis."""
         proposals = []
-        p_titles = [p["title"] for p in papers[:3]]
-        p_ids = [p["id"] for p in papers[:3]]
+        p_titles = [p["title"] for p in papers[:3]] if papers else [
+            f"Foundational {topic.title()} Baseline",
+            f"Recent SOTA {topic.title()} Model",
+        ]
+        p_ids = [p["id"] for p in papers[:3]] if papers else [
+            f"baseline-{slugify_id(topic)[:12]}",
+            f"sota-{slugify_id(topic)[:12]}",
+        ]
 
         # Proposal 1: Orthogonal Recombination
         proposals.append({

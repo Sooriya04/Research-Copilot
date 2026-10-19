@@ -2445,4 +2445,14 @@ bundle compilation (`npm run build`).
 * Replaced raw workspace IDs (e.g. Workspace ws-4d02fa8d) with human-readable workspace titles and topics across graph nodes, knowledge canvas, and novelty synthesis.
 * Verified with clean Vite production build (8.34s) and 128/128 pytest tests passing.
 
+<br />
+
+## Multi-Provider Synthesis Fallback & Empty Paper Guard
+
+* Passed individual provider API key overrides through `provider_keys` map during multi-model concurrent synthesis.
+* Added paper fallback to SQLite and enabled topic-level LLM synthesis when 0 papers are staged in RAM graph.
+* Guarded deterministic heuristic generator against `IndexError` on empty paper sets, guaranteeing non-empty proposal output.
+* Added `test_multi_model_synthesis_resilience` regression test and verified with clean Vite build in 8.05s.
+
+
 

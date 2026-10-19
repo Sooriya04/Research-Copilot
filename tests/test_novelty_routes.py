@@ -224,3 +224,21 @@ def test_workspace_novelty_strict_isolation(client):
     # 4. Clean up
     client.delete(f"/api/v1/novelty/proposals/{p_a['id']}")
 
+
+def test_multi_model_synthesis_resilience(client):
+    """Verify multi-model synthesis produces guaranteed proposals even if no papers are staged."""
+    body = {
+        "workspace_id": "ws-multi-test-resilience",
+        "topic": "Diffusion State Spaces",
+        "paper_ids": [],
+        "providers": ["gemini", "groq", "nvidia"],
+        "force_refresh": True,
+    }
+    resp = client.post("/api/v1/novelty/synthesize", json=body)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "multi_synthesized"
+    assert len(data["novelties"]) > 0
+    assert any("title" in n for n in data["novelties"])
+
+

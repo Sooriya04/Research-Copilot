@@ -37,6 +37,7 @@ class NoveltyStudioRequest(BaseModel):
     providers: Optional[List[str]] = Field(default=None, description="List of providers for multi-model synthesis")
     model: Optional[str] = None
     api_key: Optional[str] = None
+    provider_keys: Optional[Dict[str, Optional[str]]] = None
     base_url: Optional[str] = None
     force_refresh: bool = False
 
@@ -396,6 +397,7 @@ async def synthesize_novelties_endpoint(req: NoveltyStudioRequest):
             api_key=req.api_key,
             base_url=req.base_url,
             force_refresh=req.force_refresh,
+            provider_keys=req.provider_keys,
         )
         elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
 

@@ -393,6 +393,15 @@ export default function NoveltyStudioView() {
           authors: p.authors || [],
           year: p.year,
         }));
+      } else if (apiPapers.length > 0) {
+        scoped = apiPapers;
+      } else if (searchResults && searchResults.length > 0) {
+        scoped = searchResults.slice(0, 5).map((p) => ({
+          id: p.id || p.arxiv_id,
+          title: p.title || p.id,
+          authors: p.authors || [],
+          year: p.year,
+        }));
       }
 
       setAvailablePapers(scoped);
@@ -639,7 +648,14 @@ export default function NoveltyStudioView() {
                 : selectedProviders[0] === 'deepseek'
                 ? deepseekKeyOverride || undefined
                 : undefined)
-            : undefined,
+            : (geminiKeyOverride || undefined),
+        provider_keys: {
+          gemini: geminiKeyOverride || undefined,
+          groq: groqKeyOverride || undefined,
+          openrouter: openrouterKeyOverride || undefined,
+          nvidia: nvidiaKeyOverride || undefined,
+          deepseek: deepseekKeyOverride || undefined,
+        },
         base_url: selectedProviders.includes('ollama') ? ollamaUrlOverride || undefined : undefined,
         force_refresh: forceRefresh,
       };
