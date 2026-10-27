@@ -139,6 +139,55 @@ class EvidenceAuditResult(BaseModel):
     thin_sections: List[str] = Field(default_factory=list)
     unlocated_items: List[Dict[str, Any]] = Field(default_factory=list)
 
+
+class CodeAvailability(BaseModel):
+    """Details regarding open-source code availability, dependencies, and environment."""
+    has_repo: bool = False
+    repo_url: Optional[str] = None
+    framework: Optional[str] = None
+    has_checkpoints: bool = False
+    dependencies: List[str] = Field(default_factory=list)
+    license: Optional[str] = None
+
+
+class ComputeBudget(BaseModel):
+    """Hardware requirements, accelerator models, and compute duration."""
+    hardware_mentioned: bool = False
+    gpu_type: Optional[str] = None
+    gpu_count: Optional[int] = None
+    estimated_hours: Optional[float] = None
+    notes: Optional[str] = None
+
+
+class DatasetChecklist(BaseModel):
+    """Accessibility, download links, and preparation requirements for target datasets."""
+    name: str
+    access_type: str = "public"  # public | gated | private
+    download_url: Optional[str] = None
+    preprocessing_notes: Optional[str] = None
+
+
+class ReproductionStep(BaseModel):
+    """Actionable reproduction workflow step across setup, data prep, training, and evaluation."""
+    step_number: int
+    phase: str  # setup | data_prep | training | eval
+    action: str
+    suggested_command: Optional[str] = None
+    verification_criteria: str
+
+
+class ReproductionMap(BaseModel):
+    """Complete research paper reproduction map, friction assessment, and actionable roadmap."""
+    paper_id: str
+    reproducibility_score: float = Field(..., ge=0.0, le=100.0)
+    code_availability: CodeAvailability
+    compute_budget: ComputeBudget
+    dataset_checklist: List[DatasetChecklist] = Field(default_factory=list)
+    steps: List[ReproductionStep] = Field(default_factory=list)
+    missing_critical_elements: List[str] = Field(default_factory=list)
+    friction_summary: str
+
+
 class PaperEvidencePackage(BaseModel):
     """Complete grounded evidence substrate for a scientific paper."""
     paper_id: str
@@ -155,3 +204,4 @@ class PaperEvidencePackage(BaseModel):
     figures: List[FigureAsset] = Field(default_factory=list)
     timeline: List[TimelineStage] = Field(default_factory=list)
     audit: Optional[EvidenceAuditResult] = None
+    reproduction_map: Optional[ReproductionMap] = None

@@ -29,12 +29,18 @@ from src.core.evidence_schemas import (
     TimelineStage,
     EvidenceAuditResult,
     PaperEvidencePackage,
+    ReproductionMap,
+    CodeAvailability,
+    ComputeBudget,
+    DatasetChecklist,
+    ReproductionStep,
 )
 from src.core.paper_repository import PaperRepository
 from src.engines.pdf_coordinate_engine import PDFCoordinateEngine
 from src.engines.excerpt_verifier import DeterministicExcerptVerifier
 from src.engines.multi_pass_extractor import MultiPassEvidenceExtractor
 from src.engines.pdf_extractor import PDFExtractor
+from src.engines.reproduction_mapper import ReproductionMapper
 from src.rag.active_cache import ActivePaperCache
 import json
 
@@ -44,6 +50,7 @@ coord_engine = PDFCoordinateEngine()
 excerpt_verifier = DeterministicExcerptVerifier()
 multi_pass_extractor = MultiPassEvidenceExtractor()
 pdf_extractor_service = PDFExtractor()
+reproduction_mapper = ReproductionMapper()
 active_cache = ActivePaperCache()
 
 
@@ -158,7 +165,8 @@ async def ingest_paper_evidence(req: EvidenceIngestRequest, db: AsyncSession = D
                 limitations=[LimitationItem(**l) for l in (cached_model.limitations_json or [])],
                 figures=figures,
                 timeline=[TimelineStage(**t) for t in (cached_model.timeline_json or [])],
-                audit=audit_obj
+                audit=audit_obj,
+                reproduction_map=ReproductionMap(**cached_model.reproduction_map_json) if cached_model.reproduction_map_json else None
             )
             await active_cache.set_evidence(paper_id, pkg.model_dump())
             return pkg
@@ -449,3 +457,100 @@ async def review_evidence_claim(paper_id: str, sub: ClaimReviewSubmission, db: A
         await active_cache.invalidate_evidence(clean_id)
 
     return {"status": "success", "claim_id": sub.claim_id, "review_status": sub.reviewer_status}
+
+
+@router.get("/{paper_id}/reproduction-map", response_model=ReproductionMap)
+async def get_paper_reproduction_map(
+    paper_id: str,
+    force_refresh: bool = False,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Retrieve or generate the research paper reproduction map, compute budget,
+    dataset accessibility checklist, actionable reproduction steps, and friction assessment.
+    """
+    clean_id = paper_id.strip()
+    if not clean_id:
+        raise HTTPException(status_code=400, detail="paper_id is required.")
+
+    # 1. Check Redis cache if not forcing refresh
+    if not force_refresh:
+        cached_map = await active_cache.get_reproduction_map(clean_id)
+        if cached_map:
+            try:
+                return ReproductionMap(**cached_map)
+            except Exception as e:
+                logger.debug("[Evidence] Redis cached reproduction map parse failed: %s", e)
+
+        # 2. Check SQLite PaperEvidenceModel
+        stmt = select(PaperEvidenceModel).where(PaperEvidenceModel.paper_id == clean_id)
+        res = await db.execute(stmt)
+        ev_model = res.scalars().first()
+        if ev_model and ev_model.reproduction_map_json:
+            try:
+                rep_map = ReproductionMap(**ev_model.reproduction_map_json)
+                await active_cache.set_reproduction_map(clean_id, rep_map.model_dump())
+                return rep_map
+            except Exception as e:
+                logger.debug("[Evidence] DB reproduction map parse note: %s", e)
+
+    # 3. Locate existing evidence model or ingest paper evidence
+    stmt = select(PaperEvidenceModel).where(PaperEvidenceModel.paper_id == clean_id)
+    res = await db.execute(stmt)
+    ev_model = res.scalars().first()
+
+    pkg: Optional[PaperEvidencePackage] = None
+    if not ev_model:
+        # Ingest paper to create evidence package
+        pkg = await ingest_paper_evidence(
+            EvidenceIngestRequest(paper_id=clean_id, force_refresh=force_refresh),
+            db=db,
+        )
+        # Re-fetch ev_model
+        res = await db.execute(select(PaperEvidenceModel).where(PaperEvidenceModel.paper_id == clean_id))
+        ev_model = res.scalars().first()
+    else:
+        pkg = PaperEvidencePackage(
+            paper_id=ev_model.paper_id,
+            title=ev_model.title,
+            thesis=ev_model.thesis,
+            plain_summary=ev_model.plain_summary,
+            research_question=ev_model.research_question,
+            methods=ev_model.methods_json or [],
+            findings=ev_model.findings_json or [],
+            claims=[ClaimItem(**c) for c in (ev_model.claims_json or [])],
+            metrics=[MetricItem(**m) for m in (ev_model.metrics_json or [])],
+            glossary=[GlossaryItem(**g) for g in (ev_model.glossary_json or [])],
+            limitations=[LimitationItem(**l) for l in (ev_model.limitations_json or [])],
+            timeline=[TimelineStage(**t) for t in (ev_model.timeline_json or [])],
+        )
+
+    # Also check canonical paper in repository or cache for checklist / extra metadata
+    canonical_paper = await PaperRepository.get_by_canonical_id(db, clean_id)
+    checklist = getattr(canonical_paper, "checklist", None) if canonical_paper else None
+    abstract = (canonical_paper.abstract if canonical_paper else "") or (pkg.plain_summary if pkg else "")
+    title = (canonical_paper.title if canonical_paper else "") or (pkg.title if pkg else clean_id)
+
+    # Generate reproduction map via multi-tier engine
+    rep_map = await reproduction_mapper.generate_map(
+        paper_id=clean_id,
+        evidence_pkg=pkg,
+        title=title,
+        abstract=abstract,
+        checklist=checklist,
+        force_refresh=force_refresh,
+    )
+
+    # Persist into SQLite PaperEvidenceModel
+    if ev_model:
+        ev_model.reproduction_map_json = rep_map.model_dump()
+        try:
+            await db.commit()
+        except Exception as ce:
+            await db.rollback()
+            logger.warning("[Evidence] Reproduction map commit race handled for %s: %s", clean_id, ce)
+
+    # Cache into Redis
+    await active_cache.set_reproduction_map(clean_id, rep_map.model_dump())
+    return rep_map
+

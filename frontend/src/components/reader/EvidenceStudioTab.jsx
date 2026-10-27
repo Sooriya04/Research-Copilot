@@ -7,12 +7,15 @@ import MetricsSummary from './evidence/MetricsSummary';
 import GlossaryList from './evidence/GlossaryList';
 import LimitationsList from './evidence/LimitationsList';
 import NarrativeTimeline from './evidence/NarrativeTimeline';
+import ReproductionMapCard from './evidence/ReproductionMapCard';
 
 export default function EvidenceStudioTab({ paper, onHighlightEvidence, onJumpToPage }) {
   const [loading, setLoading] = useState(false);
   const [evidencePkg, setEvidencePkg] = useState(null);
+  const [reproductionMap, setReproductionMap] = useState(null);
+  const [reproLoading, setReproLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [activeSubTab, setActiveSubTab] = useState('claims'); // 'claims' | 'figures' | 'metrics' | 'glossary' | 'limitations' | 'timeline'
+  const [activeSubTab, setActiveSubTab] = useState('claims'); // 'claims' | 'figures' | 'metrics' | 'glossary' | 'limitations' | 'timeline' | 'reproduction'
   const [reviewingClaimId, setReviewingClaimId] = useState(null);
 
   const paperId = paper?.arxiv_id || paper?.id || (paper?.canonical_id ? String(paper.canonical_id) : '');
@@ -46,8 +49,26 @@ export default function EvidenceStudioTab({ paper, onHighlightEvidence, onJumpTo
     }
   };
 
+  const fetchReproductionMap = async (force = false) => {
+    if (!paperId) return;
+    setReproLoading(true);
+    try {
+      const url = `/api/v1/evidence/${encodeURIComponent(paperId)}/reproduction-map${force ? '?force_refresh=true' : ''}`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        setReproductionMap(data);
+      }
+    } catch (err) {
+      console.debug('Failed to fetch reproduction map:', err);
+    } finally {
+      setReproLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchEvidence(false);
+    fetchReproductionMap(false);
   }, [paperId]);
 
   const handleClaimReview = async (claimId, nextStatus) => {
@@ -134,6 +155,7 @@ export default function EvidenceStudioTab({ paper, onHighlightEvidence, onJumpTo
       >
         {[
           { key: 'claims', label: 'Claims', count: claims.length },
+          { key: 'reproduction', label: 'Reproduction Map', count: (reproductionMap?.steps?.length || (evidencePkg?.reproduction_map?.steps?.length) || 0) },
           { key: 'figures', label: 'Figures & Tables', count: figures.length },
           { key: 'metrics', label: 'Metrics', count: metrics.length },
           { key: 'glossary', label: 'Glossary', count: glossary.length },
@@ -195,6 +217,14 @@ export default function EvidenceStudioTab({ paper, onHighlightEvidence, onJumpTo
       )}
 
       {/* ── 3. Decoupled Subcomponent Views ── */}
+      {activeSubTab === 'reproduction' && (
+        <ReproductionMapCard
+          reproductionMap={reproductionMap || evidencePkg?.reproduction_map}
+          loading={reproLoading}
+          onRefresh={() => fetchReproductionMap(true)}
+        />
+      )}
+
       {activeSubTab === 'claims' && (
         <ClaimsLedger
           claims={claims}

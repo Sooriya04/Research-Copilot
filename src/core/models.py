@@ -245,6 +245,7 @@ class PaperEvidenceModel(Base):
     timeline_json = Column(JSON, default=list)
     page_count = Column(Integer, default=1)
     page_data_json = Column(JSON, default=dict)  # per-page text and dimensions
+    reproduction_map_json = Column(JSON, default=dict, nullable=True)
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
 

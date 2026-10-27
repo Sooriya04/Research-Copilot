@@ -33,6 +33,10 @@ async def init_db() -> None:
                     cursor.execute("ALTER TABLE benchmarks ADD COLUMN methodology TEXT")
                 if cols and "methods_json" not in cols:
                     cursor.execute("ALTER TABLE benchmarks ADD COLUMN methods_json JSON")
+                cursor.execute("PRAGMA table_info(paper_evidence)")
+                pe_cols = {row[1] for row in cursor.fetchall()}
+                if pe_cols and "reproduction_map_json" not in pe_cols:
+                    cursor.execute("ALTER TABLE paper_evidence ADD COLUMN reproduction_map_json JSON")
             except Exception as e:
                 logger.debug("Column migration note: %s", e)
         await conn.run_sync(_migrate_columns)

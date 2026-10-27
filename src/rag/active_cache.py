@@ -75,6 +75,9 @@ class ActivePaperCache:
     def _evidence_key(self, paper_id: str) -> str:
         return f"paper:{paper_id}:evidence"
 
+    def _reproduction_map_key(self, paper_id: str) -> str:
+        return f"paper:{paper_id}:reproduction_map"
+
     def _html_cache_key(self, paper_id: str) -> str:
         match = re.search(r"(\d{4}\.\d{4,5})(?:v\d+)?|([a-z\-]+(?:\.[a-z]{2})?/\d{7})", paper_id)
         if match:
@@ -186,6 +189,46 @@ class ActivePaperCache:
             return True
         except Exception as e:
             logger.warning("[ActivePaperCache] Error invalidating evidence for '%s': %s", paper_id, e)
+            return False
+
+    async def get_reproduction_map(self, paper_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve cached reproduction map from Redis."""
+        client = await self.get_client()
+        if not client:
+            return None
+        try:
+            raw = await client.get(self._reproduction_map_key(paper_id))
+            if raw:
+                return json.loads(raw)
+        except Exception as e:
+            logger.warning("[ActivePaperCache] Error getting reproduction map for '%s': %s", paper_id, e)
+        return None
+
+    async def set_reproduction_map(
+        self, paper_id: str, map_data: Dict[str, Any], ttl: Optional[int] = None
+    ) -> bool:
+        """Store reproduction map into Redis cache."""
+        client = await self.get_client()
+        if not client:
+            return False
+        try:
+            ex_ttl = ttl or self.ttl
+            await client.set(self._reproduction_map_key(paper_id), json.dumps(map_data), ex=ex_ttl)
+            return True
+        except Exception as e:
+            logger.warning("[ActivePaperCache] Error caching reproduction map for '%s': %s", paper_id, e)
+            return False
+
+    async def invalidate_reproduction_map(self, paper_id: str) -> bool:
+        """Evict reproduction map from Redis cache."""
+        client = await self.get_client()
+        if not client:
+            return False
+        try:
+            await client.delete(self._reproduction_map_key(paper_id))
+            return True
+        except Exception as e:
+            logger.warning("[ActivePaperCache] Error invalidating reproduction map for '%s': %s", paper_id, e)
             return False
 
     async def get_html_pages(self, paper_id: str) -> Optional[Dict[str, Any]]:
@@ -396,6 +439,7 @@ class ActivePaperCache:
                 self._chunks_key(paper_id),
                 self._context_key(paper_id),
                 self._evidence_key(paper_id),
+                self._reproduction_map_key(paper_id),
             ]
             await client.delete(*keys)
 

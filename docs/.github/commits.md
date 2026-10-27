@@ -2481,6 +2481,48 @@ bundle compilation (`npm run build`).
   * Hardened `AccessResolver.resolve_identifier()` against upstream OpenAlex connection timeouts with automatic preprint buffer fallback.
   * Verified 24/24 target regression tests passing in 8.06s with zero regressions across the codebase.
 
+<br />
+
+## Implement Research Paper Reproduction Map Engine & Grounded Studio Endpoint
+
+* **Reproduction Map Pydantic Schemas (`src/core/evidence_schemas.py`)**:
+  * Added `CodeAvailability` (`has_repo`, `repo_url`, `framework`, `has_checkpoints`, `dependencies`, `license`).
+  * Added `ComputeBudget` (`hardware_mentioned`, `gpu_type`, `gpu_count`, `estimated_hours`, `notes`).
+  * Added `DatasetChecklist` (`name`, `access_type: public|gated|private`, `download_url`, `preprocessing_notes`).
+  * Added `ReproductionStep` (`step_number`, `phase: setup|data_prep|training|eval`, `action`, `suggested_command`, `verification_criteria`).
+  * Added `ReproductionMap` (`paper_id`, `reproducibility_score: 0.0-100.0`, `code_availability`, `compute_budget`, `dataset_checklist`, `steps`, `missing_critical_elements`, `friction_summary`).
+  * Linked optional `reproduction_map` property to `PaperEvidencePackage`.
+* **Multi-Tier Reproduction Mapper Engine (`src/engines/reproduction_mapper.py`)**:
+  * Implemented `ReproductionMapper` with multi-tier resilience: Frontier LLMs (Gemini, DeepSeek, OpenRouter, Groq) -> Local Ollama (`phi4-mini`) -> Deterministic Heuristic rules. Guaranteed to never crash when offline or when LLMs are unavailable.
+  * Built offline deterministic heuristics:
+    * Regex detection for GitHub, GitLab, and HuggingFace repositories with URL sanitization.
+    * Framework and dependency identification across PyTorch, JAX, TensorFlow, Transformers, and scientific libraries.
+    * Compute budget heuristics extracting accelerator models (A100, H100, V100, P100, T4, RTX, TPU), cluster GPU counts, and training durations/GPU hours.
+    * Benchmark catalog matching (ImageNet, CIFAR, GLUE, SuperGLUE, SQuAD, WMT, HumanEval, GSM8K, MATH, MMLU, Pile) with access type categorization (`public`, `gated`, `private`).
+    * Calibrated reproducibility scoring algorithm (0.0 to 100.0) auditing code availability, compute disclosure, and dataset accessibility.
+    * 4-phase structured reproduction roadmap (`setup`, `data_prep`, `training`, `eval`) with suggested shell commands and verification criteria.
+* **Database & Active Cache Multi-Level Persistence**:
+  * Added `reproduction_map_json` column to `PaperEvidenceModel` in `src/core/models.py`.
+  * Added PRAGMA SQLite column migration in `src/core/database.py` ensuring backward compatibility for existing databases.
+  * Added `get_reproduction_map`, `set_reproduction_map`, and `invalidate_reproduction_map` methods to `ActivePaperCache` in `src/rag/active_cache.py`.
+* **FastAPI Grounded Studio API Endpoint (`src/api/routes_evidence.py`)**:
+  * Added `GET /api/v1/evidence/{paper_id}/reproduction-map` supporting optional `force_refresh: bool = False`.
+  * Integrated multi-level retrieval: Redis cache -> SQLite `PaperEvidenceModel.reproduction_map_json` -> dynamic synthesis via `ReproductionMapper`.
+* **Frontend Evidence Studio UI Integration (`frontend/src/components/reader/`)**:
+  * Created dedicated `ReproductionMapCard.jsx` visual component rendering:
+    * Reproducibility Friction Score banner with color-coded severity badges (Green: Low Friction, Amber: Moderate, Red: High Friction).
+    * Missing critical information alerts for undisclosed repositories, compute hardware, or checkpoints.
+    * Code & Framework disclosure section with external repository links, detected frameworks, and dependencies.
+    * Compute budget breakdown (accelerator type, cluster count, estimated training hours).
+    * Dataset accessibility checklist with access status pills (`public`, `gated`, `private`).
+    * Interactive 4-phase reproduction roadmap with 1-click shell command copy-to-clipboard.
+  * Added "Reproduction Map" tab to `EvidenceStudioTab.jsx` with automatic caching and force-refresh capabilities.
+  * Verified production build via Vite (`npm run build`) in 7.99s with 0 syntax or bundling errors.
+* **Automated Testing & Verification (`tests/test_reproduction_map.py`)**:
+  * Added test suite covering heuristic extraction (detecting GitHub URLs, PyTorch, A100 GPUs, benchmark datasets), Pydantic schema validation and bounds checks, offline resilience, and full FastAPI endpoint lifecycle.
+  * Verified all 5 new reproduction map tests and 34/34 total regression tests passing with zero regressions.
+
+
 
 
 
