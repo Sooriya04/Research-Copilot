@@ -2454,5 +2454,33 @@ bundle compilation (`npm run build`).
 * Guarded deterministic heuristic generator against `IndexError` on empty paper sets, guaranteeing non-empty proposal output.
 * Added `test_multi_model_synthesis_resilience` regression test and verified with clean Vite build in 8.05s.
 
+<br />
+
+## Implement Research Critique, Multi-Hop Citation Expansion, and Europe PMC Full-Text Evidence Pipeline
+
+* **Critique & Synthesis Engine (`src/engines/critique_synthesizer.py`)**:
+  * Implemented modular critique and synthesis engine supporting `--critique-top` (generating evidence-backed algorithmic strengths, limitations/concerns, and technical follow-up questions) and `--synthesize` (generating cross-paper executive overview, consensus foundations, contradictions/debates, and recommended reading order).
+  * Built multi-tier LLM resilience: Tier 1 (Frontier providers: Gemini Flash-Lite, DeepSeek, OpenRouter, Groq), Tier 2 (Local Ollama `phi4-mini` via `http://localhost:11434` with structured JSON mode), and Tier 3 (Deterministic rule-based heuristic fallback clearly marked with an offline disclaimer).
+  * Deployed persistent SQLite cache table `critique_synthesis_cache` with stable SHA-256 keys derived from operation type, prompt version, model info, and evidence hashes, achieving sub-10ms retrieval with zero model calls on cache hits and automatic invalidation on content changes.
+* **Multi-Hop Citation Graph Expansion (`src/engines/citation_graph.py`)**:
+  * Implemented bounded recursive citation crawler querying OpenAlex (`filter=cites:{openalex_id}` and `referenced_works`) when `req.expand_citations > 0`.
+  * Built directed NetworkX citation graph adhering to `citing -> cited` edge direction, allowing PageRank probability mass to accumulate onto foundational works.
+  * Calculated damping-factored PageRank ($\alpha=0.85$) and exposed `graph_prestige` score in `paper.score_breakdown` separately from topical relevance, preserving 100% backward-compatible behavior when citation expansion is disabled.
+  * Deduplicated discovered prior art using canonical IDs and seamlessly integrated high-prestige discovered works into the candidate scoring pool.
+* **Europe PMC Full-Text JATS XML Parsing (`src/engines/access_resolver.py`)**:
+  * Implemented `fetch_europepmc_xml(pmcid)` targeting `https://www.ebi.ac.uk/europepmc/webservices/rest/{PMCID}/fullTextXML` with automatic `PMC` prefix normalization.
+  * Developed native JATS XML parser extracting structured `PaperSection` entities (`abstract`, `intro`, `methods`, `experiments`, `results`, `discussion`, `limitations`, `conclusion`).
+  * Enforced strict heuristic differentiation ensuring Discussion sections are never misclassified as Limitations, while explicitly isolating dedicated Limitations subsections.
+  * Hardened against XML namespaces, nested subsections, malformed XML, and network connection timeouts.
+* **PaperRank Pipeline Integration (`src/engines/paper_rank.py`)**:
+  * Integrated citation graph expansion, Europe PMC XML full-text extraction, critique generation, and cross-paper synthesis directly into `PaperRankEngine.rank()` and `score_paper_list()`.
+  * Added `CritiqueSynthesisCacheModel` ORM mapping in `src/core/models.py`.
+* **Automated Testing & Network Resilience**:
+  * Added 3 new comprehensive test suites: `tests/test_critique_synthesizer.py` (7 tests), `tests/test_citation_expansion.py` (3 tests), and `tests/test_europepmc_xml.py` (4 tests).
+  * Updated `tests/test_paper_rank.py` with end-to-end integration test verifying critique and synthesis fields in `RankResponse`.
+  * Hardened `AccessResolver.resolve_identifier()` against upstream OpenAlex connection timeouts with automatic preprint buffer fallback.
+  * Verified 24/24 target regression tests passing in 8.06s with zero regressions across the codebase.
+
+
 
 

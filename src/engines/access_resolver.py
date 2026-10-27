@@ -5,7 +5,7 @@ import xml.etree.ElementTree as ET
 import httpx
 from src.core.config import settings
 from src.core.logger import logger
-from src.core.schemas import Author, Paper, PaperAccessCandidate, PaperAccessResponse
+from src.core.schemas import Author, Paper, PaperAccessCandidate, PaperAccessResponse, PaperSection
 
 class AccessResolver:
     """Multi-source scientific paper search and legal full-text access resolver."""
@@ -188,18 +188,27 @@ class AccessResolver:
         async with httpx.AsyncClient(timeout=self.timeout, headers=self.headers) as client:
             if id_type == "openalex":
                 url = f"{settings.openalex_base_url}/works/{clean_id}"
-                resp = await client.get(url, params=oa_params)
-                if resp.status_code == 200:
-                    paper = self._parse_openalex_item(resp.json())
+                try:
+                    resp = await client.get(url, params=oa_params)
+                    if resp.status_code == 200:
+                        paper = self._parse_openalex_item(resp.json())
+                except Exception as e:
+                    logger.debug("[AccessResolver] OpenAlex resolution error: %s", e)
             elif id_type == "doi":
                 url = f"{settings.openalex_base_url}/works/https://doi.org/{clean_id}"
-                resp = await client.get(url, params=oa_params)
-                if resp.status_code == 200:
-                    paper = self._parse_openalex_item(resp.json())
+                try:
+                    resp = await client.get(url, params=oa_params)
+                    if resp.status_code == 200:
+                        paper = self._parse_openalex_item(resp.json())
+                except Exception as e:
+                    logger.debug("[AccessResolver] OpenAlex DOI resolution error: %s", e)
             elif id_type == "arxiv":
-                papers = await self.search_arxiv(clean_id, limit=1)
-                if papers:
-                    paper = papers[0]
+                try:
+                    papers = await self.search_arxiv(clean_id, limit=1)
+                    if papers:
+                        paper = papers[0]
+                except Exception as e:
+                    logger.debug("[AccessResolver] arXiv resolution error: %s", e)
             elif id_type == "semanticscholar":
                 s2_url = f"https://api.semanticscholar.org/graph/v1/paper/{clean_id}?fields=title,abstract,authors,year,externalIds,venue,citationCount,isOpenAccess,openAccessPdf"
                 try:
@@ -228,9 +237,12 @@ class AccessResolver:
                 except Exception as e:
                     logger.debug("[AccessResolver] S2 API resolution failed: %s", e)
             else:
-                papers = await self.search_openalex(clean_id, limit=1)
-                if papers:
-                    paper = papers[0]
+                try:
+                    papers = await self.search_openalex(clean_id, limit=1)
+                    if papers:
+                        paper = papers[0]
+                except Exception as e:
+                    logger.debug("[AccessResolver] OpenAlex query search error: %s", e)
 
             # CrossRef fallback if DOI provided and paper is missing or lacks abstract
             if id_type == "doi" and (not paper or not paper.abstract):
@@ -266,6 +278,17 @@ class AccessResolver:
                             paper.abstract = clean_abs
                 except Exception as e:
                     logger.debug("[AccessResolver] CrossRef lookup failed: %s", e)
+
+        if not paper:
+            # Fallback paper object created from identifier when external metadata APIs are unreachable
+            paper = Paper(
+                id=f"{id_type}:{clean_id}" if id_type != "query" else f"raw:{hash(identifier)}",
+                title=clean_id if id_type != "query" else identifier,
+                abstract="",
+                doi=clean_id if id_type == "doi" else None,
+                primary_source=id_type,
+                url=f"https://doi.org/{clean_id}" if id_type == "doi" else identifier,
+            )
 
         if paper:
             # Multi-source fallback candidate resolution if PDF or arXiv ID is missing
@@ -458,3 +481,181 @@ class AccessResolver:
             referenced_works=referenced_works,
             topics=topics
         )
+
+    # ── Europe PMC Full-Text JATS XML Ingestion ──────────────────────────────
+
+    SECTION_CLASSIFIERS = [
+        ("limitations", re.compile(r"\b(limitations?|failure modes?)\b", re.IGNORECASE)),
+        ("methods", re.compile(r"\b(methods?|methodology|materials and methods|materials & methods|experimental procedures?|model architecture|proposed approach)\b", re.IGNORECASE)),
+        ("experiments", re.compile(r"\b(experiments?|experimental setup|evaluations?|benchmarks?|datasets?)\b", re.IGNORECASE)),
+        ("results", re.compile(r"\b(results?|findings|empirical analysis)\b", re.IGNORECASE)),
+        ("discussion", re.compile(r"\b(discussion)\b", re.IGNORECASE)),
+        ("intro", re.compile(r"\b(introduction|background|overview)\b", re.IGNORECASE)),
+        ("conclusion", re.compile(r"\b(conclusions?|future work|summary)\b", re.IGNORECASE)),
+    ]
+
+    async def fetch_europepmc_xml(self, pmcid: str) -> List[PaperSection]:
+        """
+        Fetch and parse full-text JATS XML from Europe PMC REST API.
+        Endpoint: https://www.ebi.ac.uk/europepmc/webservices/rest/{PMCID}/fullTextXML
+        Extracts Abstract, Introduction, Methods, Experiments, Results, Discussion, Limitations.
+        """
+        if not pmcid:
+            return []
+
+        raw = str(pmcid).strip()
+        clean_num = re.sub(r"^pmc:?", "", raw, flags=re.IGNORECASE).strip()
+        if not clean_num:
+            return []
+        normalized_pmcid = f"PMC{clean_num}"
+
+        url = f"{settings.europepmc_base_url}/{normalized_pmcid}/fullTextXML"
+        logger.info("[AccessResolver] Fetching Europe PMC full-text XML for %s", normalized_pmcid)
+
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout, headers=self.headers, follow_redirects=True) as client:
+                resp = await client.get(url)
+                if resp.status_code == 404:
+                    logger.debug("[AccessResolver] Europe PMC full-text XML not available (404) for %s", normalized_pmcid)
+                    return []
+                if resp.status_code != 200:
+                    logger.warning("[AccessResolver] Europe PMC XML request returned status %d for %s", resp.status_code, normalized_pmcid)
+                    return []
+                if not resp.content or len(resp.content) < 100:
+                    return []
+
+                return self.parse_jats_xml(resp.content)
+        except httpx.TimeoutException:
+            logger.warning("[AccessResolver] Europe PMC XML request timed out for %s", normalized_pmcid)
+            return []
+        except Exception as e:
+            logger.warning("[AccessResolver] Europe PMC XML fetch exception for %s: %s", normalized_pmcid, e)
+            return []
+
+    def parse_jats_xml(self, xml_bytes: bytes) -> List[PaperSection]:
+        """
+        Parse raw JATS XML bytes into structured PaperSection entities.
+        Handles XML namespaces, nested sub-sections, and classifies sections into canonical types.
+        """
+        sections: List[PaperSection] = []
+        try:
+            root = ET.fromstring(xml_bytes)
+        except ET.ParseError as pe:
+            logger.warning("[AccessResolver] JATS XML parse error: %s", pe)
+            return []
+        except Exception as e:
+            logger.warning("[AccessResolver] Unexpected XML parsing error: %s", e)
+            return []
+
+        def _clean_tag(elem) -> str:
+            return elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
+
+        def _get_text(elem) -> str:
+            return " ".join("".join(elem.itertext()).split()).strip()
+
+        # 1. Abstract extraction (<front>//<abstract>)
+        abstract_elem = root.find(".//abstract")
+        if abstract_elem is not None:
+            p_elems = [p for p in abstract_elem.iter() if _clean_tag(p) == "p"]
+            if p_elems:
+                p_texts = [_get_text(p) for p in p_elems if _get_text(p)]
+                abs_content = "\n\n".join(p_texts)
+            else:
+                abs_content = _get_text(abstract_elem)
+
+            if abs_content:
+                sections.append(PaperSection(
+                    title="Abstract",
+                    content=abs_content,
+                    section_type="abstract",
+                ))
+
+        # 2. Body sections extraction (<body//sec>)
+        body_elem = root.find(".//body")
+        if body_elem is not None:
+            self._extract_jats_body_sections(body_elem, sections)
+
+        return sections
+
+    def _classify_section(self, title: str, sec_type_attr: str = "") -> str:
+        """Classify a section title and JATS sec-type attribute into a canonical section_type."""
+        attr_lower = sec_type_attr.lower().strip()
+        title_lower = title.lower().strip()
+
+        # Attribute-based checks
+        if "limit" in attr_lower:
+            return "limitations"
+        if attr_lower in ("intro", "introduction"):
+            return "intro"
+        if any(m in attr_lower for m in ("method", "material")):
+            return "methods"
+        if any(r in attr_lower for r in ("result", "experiment")):
+            return "results"
+        if "discussion" in attr_lower:
+            # Check if title explicitly specifies limitations
+            if "limitation" in title_lower:
+                return "limitations"
+            return "discussion"
+        if any(c in attr_lower for c in ("conclusion", "conclusions")):
+            return "conclusion"
+
+        # Title-based checks (regex order matters: limitations before discussion)
+        for sec_name, pattern in self.SECTION_CLASSIFIERS:
+            if pattern.search(title_lower):
+                return sec_name
+
+        return "other"
+
+    def _extract_jats_body_sections(self, body_elem: ET.Element, sections: List[PaperSection]) -> None:
+        """Traverse JATS XML body sections, handling nested subsections without losing content."""
+        def _clean_tag(elem) -> str:
+            return elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
+
+        def _get_text(elem) -> str:
+            return " ".join("".join(elem.itertext()).split()).strip()
+
+        # Process top-level sections
+        top_secs = [child for child in body_elem if _clean_tag(child) == "sec"]
+        if not top_secs:
+            # Fallback: find all sec elements anywhere in body
+            top_secs = body_elem.findall(".//sec")
+
+        for sec in top_secs:
+            sec_type_attr = sec.attrib.get("sec-type", "")
+            title_elem = sec.find("title")
+            title_text = _get_text(title_elem) if title_elem is not None else ""
+
+            # Check for direct paragraphs
+            direct_p = [child for child in sec if _clean_tag(child) == "p"]
+            child_secs = [child for child in sec if _clean_tag(child) == "sec"]
+
+            if direct_p:
+                p_texts = [_get_text(p) for p in direct_p if _get_text(p)]
+                content = "\n\n".join(p_texts)
+                if content:
+                    sec_type = self._classify_section(title_text or "Section", sec_type_attr)
+                    sections.append(PaperSection(
+                        title=title_text or "Section",
+                        content=content,
+                        section_type=sec_type,
+                    ))
+
+            # Process nested subsections if present
+            for sub_sec in child_secs:
+                sub_attr = sub_sec.attrib.get("sec-type", "") or sec_type_attr
+                sub_title_elem = sub_sec.find("title")
+                sub_title_text = _get_text(sub_title_elem) if sub_title_elem is not None else ""
+                combined_title = f"{title_text} - {sub_title_text}".strip(" - ")
+
+                sub_p = [p for p in sub_sec.iter() if _clean_tag(p) == "p"]
+                if sub_p:
+                    sub_texts = [_get_text(p) for p in sub_p if _get_text(p)]
+                    sub_content = "\n\n".join(sub_texts)
+                    if sub_content:
+                        sub_sec_type = self._classify_section(combined_title, sub_attr)
+                        sections.append(PaperSection(
+                            title=combined_title or "Subsection",
+                            content=sub_content,
+                            section_type=sub_sec_type,
+                        ))
+

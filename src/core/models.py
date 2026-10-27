@@ -287,3 +287,17 @@ class PaperEvidenceAuditModel(Base):
     created_at = Column(DateTime, default=utcnow)
 
 
+class CritiqueSynthesisCacheModel(Base):
+    """Persistent SQLite cache for research critique and topic synthesis results."""
+    __tablename__ = "critique_synthesis_cache"
+
+    cache_key = Column(String, primary_key=True, index=True)
+    operation_type = Column(String, nullable=False, index=True)  # "critique" or "synthesis"
+    input_hash = Column(String, nullable=False, index=True)
+    result_json = Column(Text, nullable=False)
+    model_info = Column(String, default="")
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+

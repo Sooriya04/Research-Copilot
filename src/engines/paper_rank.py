@@ -8,6 +8,7 @@ from src.core.logger import logger
 from src.core.schemas import ChecklistRubric, Paper, RankRequest, RankResponse, ScoreBreakdown
 from src.engines.access_resolver import AccessResolver
 from src.engines.citation_graph import CitationGraphEngine
+from src.engines.critique_synthesizer import CritiqueSynthesizer
 from src.engines.pdf_parser import PDFSectionExtractor
 from src.engines.rubric_evaluator import RubricEvaluator
 
@@ -35,11 +36,13 @@ class PaperRankEngine:
         self.graph_engine = CitationGraphEngine()
         self.rubric_evaluator = RubricEvaluator()
         self.pdf_extractor = PDFSectionExtractor()
+        self.critique_synthesizer = CritiqueSynthesizer()
 
     async def rank(self, req: RankRequest) -> RankResponse:
         """Execute the multi-stage PaperRank pipeline."""
         start_time = time.time()
-        logger.info("Executing PaperRank for query: '%s' (limit=%d)", req.query, req.limit)
+        logger.info("Executing PaperRank for query: '%s' (limit=%d, expand_citations=%d, critique_top=%d, synthesize=%s)",
+                    req.query, req.limit, req.expand_citations, req.critique_top, req.synthesize)
 
         # 1. Harvest candidates across OpenAlex and arXiv
         openalex_papers = await self.resolver.search_openalex(req.query, limit=req.limit)
@@ -65,22 +68,61 @@ class PaperRankEngine:
                 execution_time_ms=(time.time() - start_time) * 1000.0,
             )
 
-        # 2. Construct Citation Graph & Calculate PageRank Prestige
-        citation_graph = self.graph_engine.build_graph(papers)
-        prestige_scores = self.graph_engine.calculate_prestige(citation_graph)
+        # 2. Construct Citation Graph & Calculate PageRank Prestige (with optional multi-hop expansion)
+        if req.expand_citations > 0:
+            citation_graph, prestige_scores, discovered_papers = await self.graph_engine.expand_graph(
+                papers,
+                depth=req.expand_citations,
+            )
+            # Incorporate discovered papers into paper pool
+            for dp in discovered_papers:
+                key = dp.doi or dp.arxiv_id or dp.openalex_id or re.sub(r"[^\w]", "", dp.title.lower())
+                if key not in paper_pool:
+                    paper_pool[key] = dp
+            papers = list(paper_pool.values())
+        else:
+            citation_graph = self.graph_engine.build_graph(papers)
+            prestige_scores = self.graph_engine.calculate_prestige(citation_graph)
+
         nodes_count, edges_count = self.graph_engine.get_graph_stats(citation_graph)
 
         # 3. Optional Section-Aware Full-Text extraction for Top N
         if req.full_text_top > 0:
             for p in papers[:min(req.full_text_top, len(papers))]:
-                if p.pdf_url:
-                    sections = await self.pdf_extractor.fetch_and_parse_pdf(p.pdf_url)
-                    if sections:
-                        p.sections = sections
+                if not p.sections:
+                    # Prioritize Europe PMC JATS XML if PMCID is present
+                    if p.pmcid:
+                        try:
+                            xml_sections = await self.resolver.fetch_europepmc_xml(p.pmcid)
+                            if xml_sections:
+                                p.sections = xml_sections
+                        except Exception as e:
+                            logger.debug("[PaperRank] Europe PMC XML fallback to PDF: %s", e)
+
+                    # Fallback to PDF parser if still no sections
+                    if not p.sections and p.pdf_url:
+                        try:
+                            sections = await self.pdf_extractor.fetch_and_parse_pdf(p.pdf_url)
+                            if sections:
+                                p.sections = sections
+                        except Exception as e:
+                            logger.debug("[PaperRank] PDF extraction error: %s", e)
 
         # 4. Score each paper across 6 components using score_paper_list
-        papers = self.score_paper_list(papers, req.query, req.weights)
+        papers = self.score_paper_list(papers, req.query, req.weights, prestige_scores=prestige_scores)
         ranked = papers[:min(req.limit, len(papers))]
+
+        # 5. Optional Per-Paper Critique for Top N
+        if req.critique_top > 0 and ranked:
+            ranked = await self.critique_synthesizer.critique_papers(ranked, top_n=req.critique_top)
+
+        # 6. Optional Cross-Paper Synthesis
+        synthesis_md: Optional[str] = None
+        if req.synthesize and ranked:
+            synthesis_md = await self.critique_synthesizer.synthesize_papers(
+                req.query,
+                ranked[:min(len(ranked), 10)],
+            )
 
         exec_ms = (time.time() - start_time) * 1000.0
         return RankResponse(
@@ -88,24 +130,31 @@ class PaperRankEngine:
             run_id=f"run-{int(time.time())}",
             total_found=len(papers),
             papers=ranked,
-            synthesis=None,
+            synthesis=synthesis_md,
             execution_time_ms=round(exec_ms, 2),
             graph_nodes=nodes_count,
             graph_edges=edges_count,
         )
 
-    def score_paper_list(self, papers: List[Paper], query: str, weights: Optional[Dict[str, float]] = None) -> List[Paper]:
+    def score_paper_list(
+        self,
+        papers: List[Paper],
+        query: str,
+        weights: Optional[Dict[str, float]] = None,
+        prestige_scores: Optional[Dict[str, float]] = None,
+    ) -> List[Paper]:
         """Score any list of papers (e.g. from unified search) using the 6-factor PaperRank algorithm."""
         if not papers:
             return []
 
-        # 1. Construct citation graph & calculate PageRank prestige across candidates
-        try:
-            citation_graph = self.graph_engine.build_graph(papers)
-            prestige_scores = self.graph_engine.calculate_prestige(citation_graph)
-        except Exception as e:
-            logger.debug("[PaperRank] Graph prestige calculation notice: %s", e)
-            prestige_scores = {}
+        # 1. Use provided prestige scores or calculate PageRank prestige across candidates
+        if prestige_scores is None:
+            try:
+                citation_graph = self.graph_engine.build_graph(papers)
+                prestige_scores = self.graph_engine.calculate_prestige(citation_graph)
+            except Exception as e:
+                logger.debug("[PaperRank] Graph prestige calculation notice: %s", e)
+                prestige_scores = {}
 
         current_year = datetime.now(timezone.utc).year
         query_tokens = self._tokenize(query)
@@ -121,8 +170,9 @@ class PaperRankEngine:
             citation_impact = min(100.0, (math.log1p(cites) / math.log1p(10000)) * 100.0)
 
             # Component 3: Graph Prestige (PageRank)
-            clean_id = p.id.split("/")[-1] if "/" in p.id else p.id
-            graph_prestige = prestige_scores.get(clean_id, 10.0)
+            clean_id = CitationGraphEngine.normalize_node_id(p.id)
+            clean_oa = CitationGraphEngine.normalize_node_id(p.openalex_id or "")
+            graph_prestige = prestige_scores.get(clean_id) or prestige_scores.get(clean_oa) or 10.0
 
             # Component 4: Citation Velocity (Citations / Years since pub)
             pub_year = p.year or current_year
