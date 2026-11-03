@@ -32,6 +32,7 @@ class PDFExtractor:
         if not pdf_bytes or len(pdf_bytes) < 100:
             return pages_text
 
+        doc = None
         try:
             doc = fitz.open(stream=pdf_bytes, filetype="pdf")
             for page_num in range(len(doc)):
@@ -41,5 +42,11 @@ class PDFExtractor:
                     pages_text.append(text)
         except Exception as e:
             logger.error("[PDFExtractor] PyMuPDF extraction error (malformed PDF?): %s", e)
+        finally:
+            if doc is not None:
+                try:
+                    doc.close()
+                except Exception:
+                    pass
 
         return pages_text

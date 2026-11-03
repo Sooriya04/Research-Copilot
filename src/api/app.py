@@ -1,4 +1,5 @@
 import os
+import secrets
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -53,9 +54,20 @@ def create_app() -> FastAPI:
     )
 
     # FastAPI / Starlette Session Middleware for server-side & cookie session tracking
+    env = os.environ.get("ENVIRONMENT", "development").lower()
+    is_prod = env in ("production", "prod") or os.environ.get("PRODUCTION", "").lower() in ("true", "1", "yes")
+    
+    session_secret = os.environ.get("SESSION_SECRET_KEY")
+    if not session_secret:
+        if is_prod:
+            raise RuntimeError("CRITICAL: SESSION_SECRET_KEY environment variable is mandatory in production mode.")
+        else:
+            session_secret = secrets.token_hex(32)
+            logger.warning("[App] SESSION_SECRET_KEY not set. Generated secure ephemeral secret for development.")
+
     app.add_middleware(
         SessionMiddleware,
-        secret_key=os.environ.get("SESSION_SECRET_KEY", "research-copilot-secure-session-key-2026-prod"),
+        secret_key=session_secret,
         session_cookie="rc_session",
         max_age=86400 * 14,
         same_site="lax",

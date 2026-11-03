@@ -111,17 +111,19 @@ class CitationGraphEngine:
         seed_papers: List[Paper],
         depth: int = 1,
         max_expansion_per_node: int = 10,
-        max_total_nodes: int = 80,
+        max_total_nodes: int = 500,
         timeout: Optional[float] = None,
     ) -> Tuple[nx.DiGraph, Dict[str, float], List[Paper]]:
         """
-        Perform bounded multi-hop citation graph expansion:
-        1. Queries OpenAlex for works citing the seeds (`filter=cites:{openalex_id}`).
-        2. Queries OpenAlex for works referenced by the seeds (`referenced_works`).
-        3. Constructs the directed NetworkX graph (citing -> cited).
-        4. Calculates damping-factored PageRank (alpha = 0.85).
-        5. Returns (graph, prestige_scores, discovered_papers).
+        Perform bounded multi-hop citation graph expansion with strict safety upper bounds:
+        - Max depth capped at 3.
+        - Max total nodes capped at 500 (prevents OOM / DoS).
+        - Cycle detection & node count guards.
         """
+        depth = max(0, min(depth, 3))
+        max_total_nodes = max(10, min(max_total_nodes, 500))
+        max_expansion_per_node = max(1, min(max_expansion_per_node, 25))
+
         if depth <= 0 or not seed_papers:
             base_graph = self.build_graph(seed_papers)
             prestige = self.calculate_prestige(base_graph)
@@ -135,16 +137,17 @@ class CitationGraphEngine:
         # 1. Initialize graph with seed papers
         for p in seed_papers:
             clean_id = self.normalize_node_id(p.id)
-            known_nodes.add(clean_id)
-            graph.add_node(
-                clean_id,
-                title=p.title,
-                year=p.year,
-                citations=p.citation_count,
-                is_seed=True,
-            )
+            if clean_id not in known_nodes:
+                known_nodes.add(clean_id)
+                graph.add_node(
+                    clean_id,
+                    title=p.title,
+                    year=p.year,
+                    citations=p.citation_count,
+                    is_seed=True,
+                )
 
-        # 2. Identify candidate OpenAlex seeds to expand (limit to top 6 to respect rate limits)
+        # 2. Identify candidate OpenAlex seeds to expand (limit to top 8)
         seeds_to_expand: List[Tuple[str, Paper]] = []
         for p in seed_papers[:8]:
             oa_id = self._extract_openalex_id(p)
@@ -154,7 +157,7 @@ class CitationGraphEngine:
         # 3. Traversal Loop
         async with httpx.AsyncClient(timeout=req_timeout, headers=self.headers) as client:
             current_layer_seeds = seeds_to_expand
-            for hop in range(min(depth, 2)):
+            for hop in range(depth):
                 if len(graph) >= max_total_nodes or not current_layer_seeds:
                     break
 
@@ -163,13 +166,20 @@ class CitationGraphEngine:
                 # Expand citing works and referenced works in parallel
                 tasks = []
                 for oa_id, p in current_layer_seeds:
+                    if len(graph) >= max_total_nodes:
+                        break
                     tasks.append(self._fetch_citing_works(client, oa_id, max_expansion_per_node))
                     tasks.append(self._fetch_referenced_works(client, p.referenced_works[:max_expansion_per_node]))
+
+                if not tasks:
+                    break
 
                 results = await asyncio.gather(*tasks, return_exceptions=True)
 
                 # Process results in pairs (citing, referenced)
                 for idx in range(0, len(results), 2):
+                    if len(graph) >= max_total_nodes:
+                        break
                     citing_res = results[idx]
                     ref_res = results[idx + 1] if idx + 1 < len(results) else []
                     seed_idx = idx // 2
@@ -185,14 +195,15 @@ class CitationGraphEngine:
                                 paper_obj = self._parse_openalex_work(work)
                                 if paper_obj:
                                     c_id = self.normalize_node_id(paper_obj.id)
-                                    if c_id not in known_nodes:
+                                    if c_id and c_id not in known_nodes:
                                         known_nodes.add(c_id)
                                         discovered_papers[c_id] = paper_obj
                                         graph.add_node(c_id, title=paper_obj.title, year=paper_obj.year, citations=paper_obj.citation_count, is_seed=False)
                                         c_oa = self._extract_openalex_id(paper_obj)
-                                        if c_oa and hop < depth - 1:
+                                        if c_oa and hop < depth - 1 and len(graph) < max_total_nodes:
                                             next_layer_seeds.append((c_oa, paper_obj))
-                                    graph.add_edge(c_id, seed_node_id)
+                                    if c_id and seed_node_id:
+                                        graph.add_edge(c_id, seed_node_id)
 
                         # Process Referenced Works: Seed -> Referenced
                         if isinstance(ref_res, list):
@@ -202,16 +213,17 @@ class CitationGraphEngine:
                                 paper_obj = self._parse_openalex_work(work)
                                 if paper_obj:
                                     r_id = self.normalize_node_id(paper_obj.id)
-                                    if r_id not in known_nodes:
+                                    if r_id and r_id not in known_nodes:
                                         known_nodes.add(r_id)
                                         discovered_papers[r_id] = paper_obj
                                         graph.add_node(r_id, title=paper_obj.title, year=paper_obj.year, citations=paper_obj.citation_count, is_seed=False)
                                         r_oa = self._extract_openalex_id(paper_obj)
-                                        if r_oa and hop < depth - 1:
+                                        if r_oa and hop < depth - 1 and len(graph) < max_total_nodes:
                                             next_layer_seeds.append((r_oa, paper_obj))
-                                    graph.add_edge(seed_node_id, r_id)
+                                    if seed_node_id and r_id:
+                                        graph.add_edge(seed_node_id, r_id)
 
-                current_layer_seeds = next_layer_seeds[:4]
+                current_layer_seeds = next_layer_seeds[:10]
 
         # 4. Calculate PageRank prestige over expanded graph
         prestige_scores = self.calculate_prestige(graph)

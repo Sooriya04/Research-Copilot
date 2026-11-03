@@ -72,7 +72,8 @@ class PaperRankEngine:
         if req.expand_citations > 0:
             citation_graph, prestige_scores, discovered_papers = await self.graph_engine.expand_graph(
                 papers,
-                depth=req.expand_citations,
+                depth=min(req.expand_citations, 3),
+                max_total_nodes=500,
             )
             # Incorporate discovered papers into paper pool
             for dp in discovered_papers:

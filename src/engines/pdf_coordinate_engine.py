@@ -45,6 +45,7 @@ class PDFCoordinateEngine:
             return PageIndexedDocument(paper_id=paper_id, title=title or paper_id, page_count=0, pages=[])
 
         pages_data: List[PageData] = []
+        doc = None
         try:
             doc = fitz.open(stream=pdf_bytes, filetype="pdf")
             page_count = len(doc)
@@ -89,10 +90,14 @@ class PDFCoordinateEngine:
                     words=words,
                     blocks=blocks
                 ))
-
-            doc.close()
         except Exception as e:
             logger.error("PDFCoordinateEngine failed to parse PDF for %s: %s", paper_id, e)
+        finally:
+            if doc is not None:
+                try:
+                    doc.close()
+                except Exception:
+                    pass
 
         return PageIndexedDocument(
             paper_id=paper_id,

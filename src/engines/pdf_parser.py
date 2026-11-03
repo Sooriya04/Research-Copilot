@@ -37,6 +37,7 @@ class PDFSectionExtractor:
     def parse_pdf_bytes(self, pdf_bytes: bytes) -> List[PaperSection]:
         """Parse raw PDF bytes into section chunks."""
         sections: List[PaperSection] = []
+        doc = None
         try:
             doc = fitz.open(stream=pdf_bytes, filetype="pdf")
             full_text_lines = []
@@ -80,6 +81,12 @@ class PDFSectionExtractor:
                 ))
         except Exception as e:
             logger.error("PyMuPDF parsing error: %s", e)
+        finally:
+            if doc is not None:
+                try:
+                    doc.close()
+                except Exception:
+                    pass
         return sections
 
     def parse_html_body(self, html_text: str) -> List[PaperSection]:

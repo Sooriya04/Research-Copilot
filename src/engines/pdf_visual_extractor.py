@@ -41,6 +41,7 @@ class PDFVisualExtractor:
 
         assets: List[FigureAsset] = []
         seen_labels: set = set()
+        doc = None
 
         try:
             doc = fitz.open(stream=pdf_bytes, filetype="pdf")
@@ -181,5 +182,11 @@ class PDFVisualExtractor:
             doc.close()
         except Exception as e:
             logger.error("PDFVisualExtractor failed to extract visual assets for %s: %s", paper_id, e)
+        finally:
+            if doc is not None:
+                try:
+                    doc.close()
+                except Exception:
+                    pass
 
         return assets
