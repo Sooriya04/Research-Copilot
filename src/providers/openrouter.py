@@ -9,7 +9,14 @@ import httpx
 
 from src.core.config import settings
 from src.core.logger import logger
-from src.providers.base import BaseLLMProvider, ChatMessage
+from src.providers.base import (
+    BaseLLMProvider,
+    ChatMessage,
+    ProviderError,
+    ProviderUnavailableException,
+    ProviderAuthenticationError,
+    RateLimitError,
+)
 
 
 class OpenRouterProvider(BaseLLMProvider):
@@ -55,17 +62,30 @@ class OpenRouterProvider(BaseLLMProvider):
         if response_format:
             payload["response_format"] = response_format
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(
-                f"{self.base_url}/chat/completions",
-                headers=self._get_headers(),
-                json=payload,
-            )
-            if resp.status_code != 200:
-                logger.error("OpenRouter request failed (%d): %s", resp.status_code, resp.text)
-                return f"LLM error: {resp.text}"
-            data = resp.json()
-            return data["choices"][0]["message"]["content"]
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.post(
+                    f"{self.base_url}/chat/completions",
+                    headers=self._get_headers(),
+                    json=payload,
+                )
+                if resp.status_code != 200:
+                    logger.error("OpenRouter request failed (%d): %s", resp.status_code, resp.text)
+                    if resp.status_code == 401:
+                        raise ProviderAuthenticationError(f"OpenRouter Authentication failed (HTTP 401): {resp.text}")
+                    elif resp.status_code == 429:
+                        raise RateLimitError(f"OpenRouter rate limit exceeded (HTTP 429): {resp.text}")
+                    raise ProviderError(f"OpenRouter error (HTTP {resp.status_code}): {resp.text}")
+                data = resp.json()
+                return data["choices"][0]["message"]["content"]
+        except httpx.HTTPError as e:
+            logger.error("[OpenRouterProvider] HTTP error: %s", e)
+            raise ProviderUnavailableException(f"OpenRouter unreachable at {self.base_url}: {e}") from e
+        except Exception as e:
+            if isinstance(e, ProviderError):
+                raise
+            logger.error("[OpenRouterProvider] Unexpected error: %s", e)
+            raise ProviderError(f"OpenRouter completion failed: {e}") from e
 
     async def stream_chat(
         self,

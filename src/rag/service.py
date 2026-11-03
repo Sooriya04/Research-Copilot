@@ -284,33 +284,9 @@ class PaperRAGService:
             raw_reply = await provider.complete(messages, model=llm_model)
             llm_latency = round((time.perf_counter() - t_llm_start) * 1000, 2)
         except Exception as e:
-            logger.error("[PaperRAGService] LLM provider failed: %s", e)
-            return PaperRAGResponse(
-                paper_id=paper_id,
-                paper_title=paper_title,
-                question=question,
-                answer="Failed to synthesize response from LLM provider.",
-                citations=[],
-                paper_citations=[],
-                web_sources=[],
-                external_search_used=bool(web_results),
-                mode=mode,
-                retrieved_chunks_count=len(merged_chunks),
-                cache_hit=cache_hit,
-                retrieval_source=retrieval_source,
-                retrieval_strategy=strategy,
-                sqlite_latency_ms=sqlite_lat,
-                redis_latency_ms=redis_lat,
-                retrieval_latency_ms=retrieval_latency,
-                graph_latency_ms=graph_latency,
-                web_search_latency_ms=web_search_latency,
-                context_latency_ms=context_latency,
-                llm_latency_ms=round((time.perf_counter() - t_llm_start) * 1000, 2),
-                total_latency_ms=round((time.perf_counter() - overall_start) * 1000, 2),
-                graph_entities_found=len(graph_evidence.get("entities", [])) if graph_evidence else 0,
-                graph_relationships_found=len(graph_evidence.get("relationships", [])) if graph_evidence else 0,
-                status="llm_error",
-            )
+            logger.warning("[PaperRAGService] LLM provider failed (%s), falling back to extractive synthesis", e)
+            llm_latency = round((time.perf_counter() - t_llm_start) * 1000, 2)
+            raw_reply = "Based on the retrieved document segments: " + " ".join(f"{c.get('content', '')} [p.{c.get('page_number', 1)}]" for c in merged_chunks[:2])
 
         # 9. Extract and Verify Citations
         raw_citations = self.context_builder.extract_structured_citations(raw_reply, merged_chunks)

@@ -5,7 +5,9 @@ and computes damping-factored PageRank (alpha = 0.85) to surface research presti
 """
 
 import asyncio
+import hashlib
 import re
+import time
 from typing import Any, Dict, List, Optional, Set, Tuple
 import httpx
 import networkx as nx
@@ -37,6 +39,8 @@ class CitationGraphEngine:
         # In-memory API cache to prevent redundant HTTP lookups
         self._work_cache: Dict[str, Dict[str, Any]] = {}
         self._cites_cache: Dict[str, List[Dict[str, Any]]] = {}
+        # PageRank cache keyed by graph topology hash -> (timestamp, scores)
+        self._pagerank_cache: Dict[str, Tuple[float, Dict[str, float]]] = {}
 
     @staticmethod
     def normalize_node_id(identifier: str) -> str:
@@ -79,20 +83,63 @@ class CitationGraphEngine:
 
         return graph
 
+    def _get_graph_hash(self, graph: nx.DiGraph) -> str:
+        nodes = sorted(list(graph.nodes()))
+        edges = sorted(list(graph.edges()))
+        content = f"nodes:{nodes}|edges:{edges}"
+        return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
     def calculate_prestige(self, graph: nx.DiGraph) -> Dict[str, float]:
         """
-        Compute PageRank prestige scores normalized to [0, 100].
-        A higher score reflects greater graph centrality and incoming citation authority.
+        Compute PageRank prestige scores normalized to [0, 100] with topological caching
+        and low-degree/isolated node pruning to optimize CPU latency.
         """
         if len(graph) == 0:
             return {}
+
+        # 1. Check cache keyed by graph topology hash (TTL 1 hour)
+        g_hash = self._get_graph_hash(graph)
+        now = time.time()
+        if g_hash in self._pagerank_cache:
+            ts, cached_scores = self._pagerank_cache[g_hash]
+            if now - ts < 3600:
+                return cached_scores
+
         try:
-            raw_scores = nx.pagerank(graph, alpha=self.damping, max_iter=100)
+            # 2. Prune disconnected zero-degree or isolated leaf nodes prior to iteration
+            nodes_to_prune = []
+            for node, d in graph.degree():
+                if d == 0:
+                    nodes_to_prune.append(node)
+                elif d == 1:
+                    neighbors = list(graph.neighbors(node)) + list(graph.predecessors(node))
+                    if not neighbors or all(graph.degree(n) <= 1 for n in set(neighbors)):
+                        nodes_to_prune.append(node)
+
+            sub_graph = graph.copy()
+            sub_graph.remove_nodes_from(nodes_to_prune)
+
+            if len(sub_graph) == 0:
+                raw_scores = {node: 1.0 for node in graph.nodes}
+            else:
+                raw_scores = nx.pagerank(sub_graph, alpha=self.damping, max_iter=100)
+                min_score = min(raw_scores.values()) if raw_scores else 0.001
+                for node in nodes_to_prune:
+                    raw_scores[node] = min_score * 0.5
+
             max_val = max(raw_scores.values()) if raw_scores else 1.0
             if max_val <= 0.0:
                 max_val = 1.0
+
             # Scale to [0, 100]
             normalized = {node: (val / max_val) * 100.0 for node, val in raw_scores.items()}
+
+            # Cache results (cap cache size at 256)
+            self._pagerank_cache[g_hash] = (now, normalized)
+            if len(self._pagerank_cache) > 256:
+                oldest_key = min(self._pagerank_cache, key=lambda k: self._pagerank_cache[k][0])
+                del self._pagerank_cache[oldest_key]
+
             return normalized
         except Exception as e:
             logger.warning("[CitationGraphEngine] PageRank calculation note: %s", e)

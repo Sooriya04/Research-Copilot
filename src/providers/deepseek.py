@@ -10,7 +10,14 @@ import httpx
 
 from src.core.config import settings
 from src.core.logger import logger
-from src.providers.base import BaseLLMProvider, ChatMessage
+from src.providers.base import (
+    BaseLLMProvider,
+    ChatMessage,
+    ProviderError,
+    ProviderUnavailableException,
+    ProviderAuthenticationError,
+    RateLimitError,
+)
 
 
 class DeepSeekProvider(BaseLLMProvider):
@@ -202,10 +209,19 @@ class DeepSeekProvider(BaseLLMProvider):
                         return data["choices"][0]["message"].get("content") or ""
 
                 logger.error("[DeepSeekProvider] Request failed (%d): %s", resp.status_code, resp.text)
-                return json.dumps({"error": f"DeepSeek API error ({resp.status_code}): {resp.text}"})
+                if resp.status_code == 401:
+                    raise ProviderAuthenticationError(f"DeepSeek Authentication failed (HTTP 401): {resp.text}")
+                elif resp.status_code == 429:
+                    raise RateLimitError(f"DeepSeek rate limit exceeded (HTTP 429): {resp.text}")
+                raise ProviderError(f"DeepSeek API error ({resp.status_code}): {resp.text}")
+        except httpx.HTTPError as e:
+            logger.error("[DeepSeekProvider] HTTP error: %s", e)
+            raise ProviderUnavailableException(f"DeepSeek unreachable at {self.base_url}: {e}") from e
         except Exception as e:
+            if isinstance(e, ProviderError):
+                raise
             logger.error("[DeepSeekProvider] Execution exception: %s", e)
-            return json.dumps({"error": f"DeepSeek API exception: {str(e)}"})
+            raise ProviderError(f"DeepSeek API exception: {str(e)}") from e
 
     async def stream_chat(
         self,
@@ -237,8 +253,10 @@ class DeepSeekProvider(BaseLLMProvider):
                 ) as response:
                     if response.status_code != 200:
                         err_text = await response.aread()
-                        yield f"DeepSeek error ({response.status_code}): {err_text.decode('utf-8', errors='ignore')}"
-                        return
+                        err_str = err_text.decode('utf-8', errors='ignore')
+                        if response.status_code == 401:
+                            raise ProviderAuthenticationError(f"DeepSeek streaming Auth failed (HTTP 401): {err_str}")
+                        raise ProviderError(f"DeepSeek streaming error ({response.status_code}): {err_str}")
 
                     async for line in response.aiter_lines():
                         line = line.strip()
@@ -255,6 +273,11 @@ class DeepSeekProvider(BaseLLMProvider):
                                 yield content
                         except json.JSONDecodeError:
                             continue
+        except httpx.HTTPError as e:
+            logger.error("[DeepSeekProvider] Streaming HTTP error: %s", e)
+            raise ProviderUnavailableException(f"DeepSeek streaming unreachable at {self.base_url}: {e}") from e
         except Exception as e:
+            if isinstance(e, ProviderError):
+                raise
             logger.error("[DeepSeekProvider] Streaming exception: %s", e)
-            yield f"DeepSeek streaming error: {str(e)}"
+            raise ProviderError(f"DeepSeek streaming error: {str(e)}") from e

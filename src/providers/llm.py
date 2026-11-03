@@ -3,7 +3,7 @@ from typing import AsyncGenerator, List, Optional
 import httpx
 from src.core.config import settings
 from src.core.logger import logger
-from src.providers.base import BaseLLMProvider, ChatMessage
+from src.providers.base import BaseLLMProvider, ChatMessage, ProviderError, ProviderUnavailableException
 
 from src.providers.openrouter import OpenRouterProvider
 
@@ -114,9 +114,15 @@ class LocalOllamaProvider(BaseLLMProvider):
                 resp = await client.post(f"{self.base_url}/api/chat", json=payload)
                 if resp.status_code == 200:
                     return resp.json().get("message", {}).get("content", "")
-                return f"Ollama error: {resp.text}"
+                raise ProviderError(f"Ollama error (HTTP {resp.status_code}): {resp.text}")
+        except httpx.HTTPError as e:
+            logger.error("[LocalOllamaProvider] HTTP error connecting to Ollama at %s: %s", self.base_url, e)
+            raise ProviderUnavailableException(f"Ollama unreachable at {self.base_url}: {e}") from e
         except Exception as e:
-            return f"Ollama unreachable: {e}"
+            if isinstance(e, ProviderError):
+                raise
+            logger.error("[LocalOllamaProvider] Unexpected error during complete(): %s", e)
+            raise ProviderError(f"Ollama completion failed: {e}") from e
 
     async def stream_chat(
         self, messages: List[ChatMessage], model: Optional[str] = None, temperature: float = 0.7
@@ -131,6 +137,10 @@ class LocalOllamaProvider(BaseLLMProvider):
         try:
             async with httpx.AsyncClient(timeout=90.0) as client:
                 async with client.stream("POST", f"{self.base_url}/api/chat", json=payload) as resp:
+                    if resp.status_code != 200:
+                        body_bytes = await resp.aread()
+                        body_text = body_bytes.decode('utf-8', errors='ignore')
+                        raise ProviderError(f"Ollama streaming HTTP error {resp.status_code}: {body_text}")
                     async for line in resp.aiter_lines():
                         if line:
                             try:
@@ -140,5 +150,11 @@ class LocalOllamaProvider(BaseLLMProvider):
                                     yield delta
                             except Exception:
                                 continue
+        except httpx.HTTPError as e:
+            logger.error("[LocalOllamaProvider] HTTP error streaming from Ollama at %s: %s", self.base_url, e)
+            raise ProviderUnavailableException(f"Ollama streaming unreachable at {self.base_url}: {e}") from e
         except Exception as e:
-            yield f"Ollama streaming failed: {e}"
+            if isinstance(e, ProviderError):
+                raise
+            logger.error("[LocalOllamaProvider] Unexpected error during stream_chat(): %s", e)
+            raise ProviderError(f"Ollama streaming failed: {e}") from e

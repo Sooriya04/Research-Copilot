@@ -10,7 +10,14 @@ import httpx
 
 from src.core.config import settings
 from src.core.logger import logger
-from src.providers.base import BaseLLMProvider, ChatMessage
+from src.providers.base import (
+    BaseLLMProvider,
+    ChatMessage,
+    ProviderError,
+    ProviderUnavailableException,
+    ProviderAuthenticationError,
+    RateLimitError,
+)
 
 
 class NvidiaProvider(BaseLLMProvider):
@@ -201,10 +208,19 @@ class NvidiaProvider(BaseLLMProvider):
                         return data["choices"][0]["message"]["content"]
 
                 logger.error("[NvidiaProvider] Request failed (%d): %s", resp.status_code, resp.text)
-                return json.dumps({"error": f"NVIDIA NIM error ({resp.status_code}): {resp.text}"})
+                if resp.status_code == 401:
+                    raise ProviderAuthenticationError(f"NVIDIA Authentication failed (HTTP 401): {resp.text}")
+                elif resp.status_code == 429:
+                    raise RateLimitError(f"NVIDIA rate limit exceeded (HTTP 429): {resp.text}")
+                raise ProviderError(f"NVIDIA NIM error ({resp.status_code}): {resp.text}")
+        except httpx.HTTPError as e:
+            logger.error("[NvidiaProvider] HTTP error: %s", e)
+            raise ProviderUnavailableException(f"NVIDIA unreachable at {self.base_url}: {e}") from e
         except Exception as e:
+            if isinstance(e, ProviderError):
+                raise
             logger.error("[NvidiaProvider] Execution exception: %s", e)
-            return json.dumps({"error": f"NVIDIA NIM exception: {str(e)}"})
+            raise ProviderError(f"NVIDIA NIM exception: {str(e)}") from e
 
     async def stream_chat(
         self,
@@ -230,6 +246,13 @@ class NvidiaProvider(BaseLLMProvider):
                 async with client.stream(
                     "POST", f"{self.base_url}/chat/completions", headers=self._get_headers(), json=payload
                 ) as resp:
+                    if resp.status_code != 200:
+                        err_text = await resp.aread()
+                        err_str = err_text.decode('utf-8', errors='ignore')
+                        if resp.status_code == 401:
+                            raise ProviderAuthenticationError(f"NVIDIA streaming Auth failed (HTTP 401): {err_str}")
+                        raise ProviderError(f"NVIDIA streaming error ({resp.status_code}): {err_str}")
+
                     async for line in resp.aiter_lines():
                         if line.startswith("data: "):
                             raw = line.replace("data: ", "").strip()
@@ -242,5 +265,11 @@ class NvidiaProvider(BaseLLMProvider):
                                     yield delta
                             except Exception:
                                 continue
+        except httpx.HTTPError as e:
+            logger.error("[NvidiaProvider] Streaming HTTP error: %s", e)
+            raise ProviderUnavailableException(f"NVIDIA streaming unreachable at {self.base_url}: {e}") from e
         except Exception as e:
-            yield f"NVIDIA NIM streaming error: {str(e)}"
+            if isinstance(e, ProviderError):
+                raise
+            logger.error("[NvidiaProvider] Streaming exception: %s", e)
+            raise ProviderError(f"NVIDIA streaming error: {str(e)}") from e

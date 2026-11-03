@@ -159,6 +159,34 @@ def test_cached_only_mode_api_endpoint():
     assert len(data_miss["nodes"]) == 0
     assert len(data_miss["edges"]) == 0
 
+    # Ensure ws-api-test is populated first
+    payload_pop = {
+        "workspace_id": "ws-api-test",
+        "topic": "Foundation Models",
+        "paper_ids": ["arxiv:1706.03762", "arxiv:2106.09685"],
+        "papers": [
+            {
+                "id": "arxiv:1706.03762",
+                "title": "Attention Is All You Need",
+                "year": 2017,
+                "abstract": "Transformer model based solely on attention mechanisms.",
+                "methods": ["Transformer"],
+                "datasets": ["WMT"],
+            },
+            {
+                "id": "arxiv:2106.09685",
+                "title": "LoRA",
+                "year": 2021,
+                "abstract": "Parameter-efficient adaptation method.",
+                "methods": ["LoRA", "Transformer"],
+                "datasets": ["GLUE"],
+            }
+        ],
+        "force_refresh": False,
+    }
+    with patch("src.providers.llm.LocalOllamaProvider.complete", new_callable=AsyncMock, return_value='{"cross_paper_relations": [{"source_id": "arxiv:2106.09685", "target_id": "arxiv:1706.03762", "relation": "extends"}], "shared_methods": ["Transformer"], "research_gaps": [{"title": "Gap 1", "description": "Test gap"}]}'):
+        client.post("/api/v1/graph/build-workspace-graph", json=payload_pop)
+
     # 2. Existing workspace with cached_only=True: returns cached graph immediately
     payload_hit = {
         "workspace_id": "ws-api-test",

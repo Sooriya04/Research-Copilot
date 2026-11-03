@@ -5,7 +5,14 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 import httpx
 from src.core.config import settings
 from src.core.logger import logger
-from src.providers.base import BaseLLMProvider, ChatMessage
+from src.providers.base import (
+    BaseLLMProvider,
+    ChatMessage,
+    ProviderError,
+    ProviderUnavailableException,
+    ProviderAuthenticationError,
+    RateLimitError,
+)
 
 
 class GroqProvider(BaseLLMProvider):
@@ -152,10 +159,19 @@ class GroqProvider(BaseLLMProvider):
                     data = resp.json()
                     return data["choices"][0]["message"]["content"]
                 logger.error("[GroqProvider] Request failed (%d): %s", resp.status_code, resp.text)
-                return json.dumps({"error": f"Groq API error ({resp.status_code}): {resp.text}"})
+                if resp.status_code == 401:
+                    raise ProviderAuthenticationError(f"Groq Authentication failed (HTTP 401): {resp.text}")
+                elif resp.status_code == 429:
+                    raise RateLimitError(f"Groq rate limit exceeded (HTTP 429): {resp.text}")
+                raise ProviderError(f"Groq API error ({resp.status_code}): {resp.text}")
+        except httpx.HTTPError as e:
+            logger.error("[GroqProvider] HTTP error: %s", e)
+            raise ProviderUnavailableException(f"Groq unreachable at {self.base_url}: {e}") from e
         except Exception as e:
+            if isinstance(e, ProviderError):
+                raise
             logger.error("[GroqProvider] Execution exception: %s", e)
-            return json.dumps({"error": f"Groq request exception: {str(e)}"})
+            raise ProviderError(f"Groq request exception: {str(e)}") from e
 
     async def stream_chat(
         self,
@@ -184,6 +200,13 @@ class GroqProvider(BaseLLMProvider):
                 async with client.stream(
                     "POST", f"{self.base_url}/chat/completions", headers=headers, json=payload
                 ) as resp:
+                    if resp.status_code != 200:
+                        err_text = await resp.aread()
+                        err_str = err_text.decode('utf-8', errors='ignore')
+                        if resp.status_code == 401:
+                            raise ProviderAuthenticationError(f"Groq streaming Auth failed (HTTP 401): {err_str}")
+                        raise ProviderError(f"Groq streaming error ({resp.status_code}): {err_str}")
+
                     async for line in resp.aiter_lines():
                         if line.startswith("data: "):
                             raw = line.replace("data: ", "").strip()
@@ -196,5 +219,11 @@ class GroqProvider(BaseLLMProvider):
                                     yield delta
                             except Exception:
                                 continue
+        except httpx.HTTPError as e:
+            logger.error("[GroqProvider] Streaming HTTP error: %s", e)
+            raise ProviderUnavailableException(f"Groq streaming unreachable at {self.base_url}: {e}") from e
         except Exception as e:
-            yield f"Groq streaming error: {str(e)}"
+            if isinstance(e, ProviderError):
+                raise
+            logger.error("[GroqProvider] Streaming exception: %s", e)
+            raise ProviderError(f"Groq streaming error: {str(e)}") from e

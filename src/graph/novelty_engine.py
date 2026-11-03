@@ -401,6 +401,10 @@ class GraphNoveltyEngine:
         base_url: Optional[str] = None,
     ) -> tuple[BaseLLMProvider, str, str]:
         """Resolves (provider_instance, normalized_name, model_name) using SQLite user_settings credentials."""
+        print("DEBUG RESOLVE PROVIDER:", self.provider, provider_name, api_key, model, base_url)
+        if self.provider and not api_key and not model and not base_url:
+            p_n = (provider_name or "gemini").lower().strip()
+            return self.provider, p_n, getattr(self.provider, "model", "gemini-3.5-flash-lite")
         p_name = (provider_name or "gemini").lower().strip()
         creds = await resolve_provider_credentials(
             provider_id=p_name,
@@ -658,15 +662,15 @@ class GraphNoveltyEngine:
                     "Address current theoretical bottlenecks, recent foundational architectures, and standard benchmark suites in this field.\n"
                 )
 
-                edges_summary_text = ", ".join(
-                    [f"{e['source']} -[{e['relation']}]-> {e['target']}" for e in rel_records[:10]]
-                ) or "No direct cross-paper edges logged yet."
+            edges_summary_text = ", ".join(
+                [f"{e['source']} -[{e['relation']}]-> {e['target']}" for e in rel_records[:10]]
+            ) or "No direct cross-paper edges logged yet."
 
-                gaps_summary_text = ", ".join(
-                    [f"{g['method']} on {g['dataset']}" for g in detected_gaps[:4]]
-                ) or "Combinatorial exploration open."
+            gaps_summary_text = ", ".join(
+                [f"{g['method']} on {g['dataset']}" for g in detected_gaps[:4]]
+            ) or "Combinatorial exploration open."
 
-                user_prompt = f"""Target Research Topic: {topic or 'Literature Synthesis'}
+            user_prompt = f"""Target Research Topic: {topic or 'Literature Synthesis'}
 Active Workspace Graph:
 - Number of Papers: {len(paper_records)}
 - Known Inter-Paper Relationships: {edges_summary_text}
@@ -698,74 +702,80 @@ Return JSON with this EXACT structure:
   ]
 }}
 """
-                logger.info("[GraphNoveltyEngine] Calling provider '%s' (%s) to synthesize novelty across %d papers...", eng_name, model_str, len(paper_records))
-                messages = [
-                    ChatMessage(role="system", content=system_prompt),
-                    ChatMessage(role="user", content=user_prompt),
-                ]
+            logger.info("[GraphNoveltyEngine] Calling provider '%s' (%s) to synthesize novelty across %d papers...", eng_name, model_str, len(paper_records))
+            messages = [
+                ChatMessage(role="system", content=system_prompt),
+                ChatMessage(role="user", content=user_prompt),
+            ]
+            try:
                 raw_reply = await active_provider.complete(messages, model=model_str, temperature=0.35)
                 llm_called = True
+            except Exception as call_err:
+                logger.error("EXC during active_provider.complete: %s", call_err, exc_info=True)
+                raise
 
-                cleaned = raw_reply.strip()
-                if cleaned.startswith("```json"):
-                    cleaned = cleaned[7:]
-                if cleaned.startswith("```"):
-                    cleaned = cleaned[3:]
-                if cleaned.endswith("```"):
-                    cleaned = cleaned[:-3]
+            cleaned = raw_reply.strip()
+            if cleaned.startswith("```json"):
+                cleaned = cleaned[7:]
+            if cleaned.startswith("```"):
+                cleaned = cleaned[3:]
+            if cleaned.endswith("```"):
+                cleaned = cleaned[:-3]
 
-                parsed_json = json.loads(cleaned.strip())
-                if isinstance(parsed_json, list):
-                    proposals = parsed_json
-                elif isinstance(parsed_json, dict):
-                    proposals = (
-                        parsed_json.get("proposals")
-                        or parsed_json.get("novelties")
-                        or parsed_json.get("novelty_ideas")
-                        or parsed_json.get("novelities")
-                        or parsed_json.get("ideas")
-                        or parsed_json.get("items")
-                        or []
-                    )
-                else:
-                    proposals = []
+            parsed_json = json.loads(cleaned.strip())
+            print("PARSED JSON:", parsed_json)
+            if isinstance(parsed_json, list):
+                proposals = parsed_json
+            elif isinstance(parsed_json, dict):
+                proposals = (
+                    parsed_json.get("proposals")
+                    or parsed_json.get("novelties")
+                    or parsed_json.get("novelty_ideas")
+                    or parsed_json.get("novelities")
+                    or parsed_json.get("ideas")
+                    or parsed_json.get("items")
+                    or []
+                )
+            else:
+                proposals = []
 
-                for prop in proposals:
-                    if not isinstance(prop, dict):
-                        continue
-                    # Normalize fields for robustness with local models like phi4-mini
-                    if "title" not in prop and "concept_name" in prop:
-                        prop["title"] = prop["concept_name"]
-                    if not prop.get("title"):
-                        prop["title"] = f"Novel Method for {topic or 'Literature'}"
-                    if "id" not in prop or not prop["id"]:
-                        prop["id"] = f"novelty-{slugify_id(prop['title'])[:32]}"
-                    if "pitch" not in prop and "description" in prop:
-                        prop["pitch"] = prop["description"]
-                    if not prop.get("pitch"):
-                        prop["pitch"] = "Novel mechanism synthesized from graph nodes."
-                    if "mechanism" not in prop or not prop["mechanism"]:
-                        prop["mechanism"] = "recombination"
-                    if "novelty_statement" not in prop or not prop["novelty_statement"]:
-                        prop["novelty_statement"] = prop.get("key_innovation") or prop.get("pitch", "Grounded synthesis from literature.")
-                    if "mathematical_formulation" not in prop or not prop["mathematical_formulation"]:
-                        prop["mathematical_formulation"] = "Adaptive gating formulation across scale regimes: H_out = sigma(W_g * X) * F_a(X) + (1 - sigma(W_g * X)) * F_b(X)"
-                    if "testable_hypothesis" not in prop or not prop["testable_hypothesis"]:
-                        prop["testable_hypothesis"] = "Empirical reduction of forecasting MSE by >= 10% on benchmark datasets."
-                    if "target_datasets" not in prop or not prop["target_datasets"]:
-                        prop["target_datasets"] = ["Standard Benchmark Suite"]
-                    if "baselines_to_beat" not in prop or not prop["baselines_to_beat"]:
-                        prop["baselines_to_beat"] = [p["title"] for p in paper_records[:2]]
-                    if "expected_metrics" not in prop or not prop["expected_metrics"]:
-                        prop["expected_metrics"] = ["MSE", "MAE"]
-                    if "confidence_score" not in prop:
-                        prop["confidence_score"] = 0.85
-                    prop["engine"] = eng_name
-                    prop["model_name"] = model_str
-                    novelties_dicts.append(NoveltyItem(**prop).model_dump())
+            for prop in proposals:
+                if not isinstance(prop, dict):
+                    continue
+                # Normalize fields for robustness with local models like phi4-mini
+                if "title" not in prop and "concept_name" in prop:
+                    prop["title"] = prop["concept_name"]
+                if not prop.get("title"):
+                    prop["title"] = f"Novel Method for {topic or 'Literature'}"
+                if "id" not in prop or not prop["id"]:
+                    prop["id"] = f"novelty-{slugify_id(prop['title'])[:32]}"
+                if "pitch" not in prop and "description" in prop:
+                    prop["pitch"] = prop["description"]
+                if not prop.get("pitch"):
+                    prop["pitch"] = "Novel mechanism synthesized from graph nodes."
+                if "mechanism" not in prop or not prop["mechanism"]:
+                    prop["mechanism"] = "recombination"
+                if "novelty_statement" not in prop or not prop["novelty_statement"]:
+                    prop["novelty_statement"] = prop.get("key_innovation") or prop.get("pitch", "Grounded synthesis from literature.")
+                if "mathematical_formulation" not in prop or not prop["mathematical_formulation"]:
+                    prop["mathematical_formulation"] = "Adaptive gating formulation across scale regimes: H_out = sigma(W_g * X) * F_a(X) + (1 - sigma(W_g * X)) * F_b(X)"
+                if "testable_hypothesis" not in prop or not prop["testable_hypothesis"]:
+                    prop["testable_hypothesis"] = "Empirical reduction of forecasting MSE by >= 10% on benchmark datasets."
+                if "target_datasets" not in prop or not prop["target_datasets"]:
+                    prop["target_datasets"] = ["Standard Benchmark Suite"]
+                if "baselines_to_beat" not in prop or not prop["baselines_to_beat"]:
+                    prop["baselines_to_beat"] = [p["title"] for p in paper_records[:2]]
+                if "expected_metrics" not in prop or not prop["expected_metrics"]:
+                    prop["expected_metrics"] = ["MSE", "MAE"]
+                if "confidence_score" not in prop:
+                    prop["confidence_score"] = 0.85
+                prop["engine"] = eng_name
+                prop["model_name"] = model_str
+                novelties_dicts.append(NoveltyItem(**prop).model_dump())
 
         except Exception as llm_err:
-            logger.warning("[GraphNoveltyEngine] Provider '%s' Novelty synthesis error: %s. Using heuristic fallback.", eng_name, llm_err)
+            print("LLM SYNTHESIS ERROR EXCEPTION:", repr(llm_err))
+            raise
 
         # 5. Deterministic Heuristic Fallback (if LLM returned empty or failed)
         if not novelties_dicts:
