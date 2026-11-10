@@ -18,35 +18,18 @@ export default function EvidenceStudioTab({ paper, onHighlightEvidence, onJumpTo
   const [error, setError] = useState(null);
   const [activeSubTab, setActiveSubTab] = useState('claims'); // 'claims' | 'figures' | 'metrics' | 'glossary' | 'limitations' | 'timeline' | 'reproduction'
   const [reviewingClaimId, setReviewingClaimId] = useState(null);
-  const [exportingFormat, setExportingFormat] = useState(null);
 
   const paperId = paper?.arxiv_id || paper?.id || (paper?.canonical_id ? String(paper.canonical_id) : '');
 
-  const handleExportDossier = async (format) => {
+  const handleExportDossier = (format) => {
     if (!paperId) return;
-    setExportingFormat(format);
-    try {
-      const url = `/api/v1/evidence/${encodeURIComponent(paperId)}/export?format=${format}`;
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`Export failed with status ${res.status}`);
-      const blob = await res.blob();
-      const ext = format === 'latex' ? 'tex' : format === 'json' ? 'json' : 'md';
-      const cleanSafeId = paperId.replace(/[^a-zA-Z0-9_-]/g, '_');
-      const filename = `${cleanSafeId}_evidence_dossier.${ext}`;
-      
-      const downloadUrl = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = downloadUrl;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.URL.revokeObjectURL(downloadUrl);
-    } catch (err) {
-      console.error('Failed to export dossier:', err);
-    } finally {
-      setExportingFormat(null);
-    }
+    const url = `/api/v1/evidence/${encodeURIComponent(paperId)}/export?format=${format}`;
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = '';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
   };
 
   const fetchEvidence = async (force = false) => {
@@ -170,7 +153,6 @@ export default function EvidenceStudioTab({ paper, onHighlightEvidence, onJumpTo
         loading={loading}
         onRefresh={() => fetchEvidence(true)}
         onExport={handleExportDossier}
-        exportingFormat={exportingFormat}
       />
 
       {/* ── 2. Segment Navigation Tabs ── */}

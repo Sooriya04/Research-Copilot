@@ -6,19 +6,8 @@ Generates standalone, publication-grade research dossiers across multiple format
 3. Standalone academic LaTeX (.tex) with booktabs, tcolorbox, and structured tables.
 """
 
-import json
-import re
-from typing import Any, Dict, List, Optional
-from src.core.evidence_schemas import (
-    PaperEvidencePackage,
-    ClaimItem,
-    MetricItem,
-    GlossaryItem,
-    LimitationItem,
-    TimelineStage,
-    EvidenceAuditResult,
-    ReproductionMap,
-)
+from typing import Any, Dict
+from src.core.evidence_schemas import PaperEvidencePackage
 
 
 class EvidenceDossierExporter:

@@ -34,6 +34,8 @@ from src.core.evidence_schemas import (
     ComputeBudget,
     DatasetChecklist,
     ReproductionStep,
+    GroundedQARequest,
+    GroundedQAResponse,
 )
 from src.core.paper_repository import PaperRepository
 from src.engines.pdf_coordinate_engine import PDFCoordinateEngine
@@ -44,29 +46,8 @@ from src.engines.reproduction_mapper import ReproductionMapper
 from src.engines.dossier_exporter import EvidenceDossierExporter
 from src.engines.grounded_qa import GroundedQAEngine
 from src.rag.active_cache import ActivePaperCache
-from src.core.evidence_schemas import (
-    HighlightRect,
-    SourceReference,
-    ClaimItem,
-    MetricItem,
-    GlossaryItem,
-    LimitationItem,
-    FigureAsset,
-    TimelineStage,
-    EvidenceAuditResult,
-    PaperEvidencePackage,
-    ReproductionMap,
-    CodeAvailability,
-    ComputeBudget,
-    DatasetChecklist,
-    ReproductionStep,
-    GroundedQARequest,
-    GroundedQAResponse,
-    CitationItem,
-)
 from fastapi.responses import PlainTextResponse, JSONResponse, Response
 from fastapi import Query
-import json
 
 router = APIRouter(prefix="/api/v1/evidence", tags=["Evidence Studio & Grounded Audit"])
 

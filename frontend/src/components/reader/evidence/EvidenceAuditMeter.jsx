@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ShieldCheck, RefreshCw, AlertTriangle, Download, ChevronDown } from 'lucide-react';
 
-export default function EvidenceAuditMeter({ audit, claims = [], figures = [], loading, onRefresh, onExport, exportingFormat }) {
+export default function EvidenceAuditMeter({ audit, claims = [], figures = [], loading, onRefresh, onExport }) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const verifiedCount = audit
     ? audit.verified_claims
@@ -35,7 +35,6 @@ export default function EvidenceAuditMeter({ audit, claims = [], figures = [], l
               <button
                 type="button"
                 onClick={() => setDropdownOpen(!dropdownOpen)}
-                disabled={Boolean(exportingFormat)}
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -47,12 +46,12 @@ export default function EvidenceAuditMeter({ audit, claims = [], figures = [], l
                   color: 'var(--text-secondary, #475569)',
                   fontSize: '11px',
                   fontWeight: 500,
-                  cursor: exportingFormat ? 'not-allowed' : 'pointer',
+                  cursor: 'pointer',
                 }}
                 title="Export complete evidence dossier"
               >
                 <Download size={11} />
-                <span>{exportingFormat ? `Exporting ${exportingFormat}…` : 'Export'}</span>
+                <span>Export</span>
                 <ChevronDown size={10} />
               </button>
               {dropdownOpen && (

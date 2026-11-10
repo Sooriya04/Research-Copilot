@@ -21,55 +21,26 @@ from src.core.evidence_schemas import (
     SourceReference,
 )
 from src.engines.excerpt_verifier import DeterministicExcerptVerifier
+from src.engines.reproduction_mapper import extract_json_from_llm_text
 from src.providers.base import BaseLLMProvider, ChatMessage
 from src.providers.factory import get_llm_provider
 from src.providers.llm import LocalOllamaProvider
 
 STOPWORDS: Set[str] = {
     "a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are",
-    "aren't", "as", "at", "be", "because", "been", "before", "being", "below", "between", "both",
-    "but", "by", "can", "cannot", "could", "did", "didn't", "do", "does", "doesn't", "doing",
-    "don't", "down", "during", "each", "few", "for", "from", "further", "had", "hadn't", "has",
-    "hasn't", "have", "haven't", "having", "he", "her", "here", "hers", "herself", "him", "himself",
-    "his", "how", "i", "if", "in", "into", "is", "isn't", "it", "its", "itself", "let's", "me",
-    "more", "most", "mustn't", "my", "myself", "no", "nor", "not", "of", "off", "on", "once",
-    "only", "or", "other", "ought", "our", "ours", "ourselves", "out", "over", "own", "same",
-    "she", "should", "shouldn't", "so", "some", "such", "than", "that", "the", "their", "theirs",
-    "them", "themselves", "then", "there", "these", "they", "this", "those", "through", "to",
-    "too", "under", "until", "up", "very", "was", "wasn't", "we", "were", "weren't", "what",
-    "when", "where", "which", "while", "who", "whom", "why", "with", "won't", "would", "wouldn't",
-    "you", "your", "yours", "yourself", "yourselves", "paper", "author", "authors", "study",
-    "tell", "show", "give", "describe", "explain", "detail", "work", "propose"
+    "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but",
+    "by", "can", "could", "did", "do", "does", "doing", "down", "during", "each", "few", "for",
+    "from", "further", "had", "has", "have", "having", "he", "her", "here", "him", "his", "how",
+    "i", "if", "in", "into", "is", "it", "its", "me", "more", "most", "my", "no", "nor", "not",
+    "of", "off", "on", "once", "only", "or", "other", "our", "out", "over", "own", "same", "she",
+    "should", "so", "some", "such", "than", "that", "the", "their", "them", "then", "there",
+    "these", "they", "this", "those", "through", "to", "too", "under", "until", "up", "very",
+    "was", "we", "were", "what", "when", "where", "which", "while", "who", "whom", "why", "with",
+    "would", "you", "your", "paper", "author", "authors", "study", "tell", "show", "give", "describe",
+    "explain", "detail", "work", "propose"
 }
 
 DISCLAIMER_UNANSWERABLE = "The available evidence in this paper does not contain information to answer this question."
-
-
-def extract_json_from_llm_text(text: str) -> Optional[Dict[str, Any]]:
-    """Extract a JSON dictionary from raw LLM output with markdown stripping."""
-    if not text:
-        return None
-    cleaned = text.strip()
-    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"\s*```$", "", cleaned)
-    cleaned = cleaned.strip()
-
-    try:
-        data = json.loads(cleaned)
-        if isinstance(data, dict):
-            return data
-    except Exception:
-        pass
-
-    match = re.search(r"\{[\s\S]*\}", cleaned)
-    if match:
-        try:
-            data = json.loads(match.group(0))
-            if isinstance(data, dict):
-                return data
-        except Exception:
-            pass
-    return None
 
 
 class GroundedQAEngine:
