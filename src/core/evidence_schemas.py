@@ -205,3 +205,30 @@ class PaperEvidencePackage(BaseModel):
     timeline: List[TimelineStage] = Field(default_factory=list)
     audit: Optional[EvidenceAuditResult] = None
     reproduction_map: Optional[ReproductionMap] = None
+
+
+class CitationItem(BaseModel):
+    """Specific page-indexed quote and bounding rects grounding an answer."""
+    page: int = 1
+    excerpt: str
+    exact_match: bool = False
+    highlight_rects: List[HighlightRect] = Field(default_factory=list)
+
+
+class GroundedQARequest(BaseModel):
+    """Request query against paper evidence package."""
+    paper_id: str
+    question: str
+    provider: Optional[str] = ""
+    model: Optional[str] = ""
+
+
+class GroundedQAResponse(BaseModel):
+    """Strictly grounded scientific answer paired with visual page coordinates."""
+    paper_id: str
+    question: str
+    answer: str
+    citations: List[CitationItem] = Field(default_factory=list)
+    confidence: str = "verified"  # "verified" | "inferred" | "insufficient_evidence"
+    insufficient_evidence: bool = False
+

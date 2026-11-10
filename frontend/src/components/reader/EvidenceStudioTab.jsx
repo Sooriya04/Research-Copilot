@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, Download } from 'lucide-react';
 import EvidenceAuditMeter from './evidence/EvidenceAuditMeter';
 import ClaimsLedger from './evidence/ClaimsLedger';
 import FiguresGallery from './evidence/FiguresGallery';
@@ -8,6 +8,7 @@ import GlossaryList from './evidence/GlossaryList';
 import LimitationsList from './evidence/LimitationsList';
 import NarrativeTimeline from './evidence/NarrativeTimeline';
 import ReproductionMapCard from './evidence/ReproductionMapCard';
+import GroundedQAPanel from './evidence/GroundedQAPanel';
 
 export default function EvidenceStudioTab({ paper, onHighlightEvidence, onJumpToPage }) {
   const [loading, setLoading] = useState(false);
@@ -17,8 +18,36 @@ export default function EvidenceStudioTab({ paper, onHighlightEvidence, onJumpTo
   const [error, setError] = useState(null);
   const [activeSubTab, setActiveSubTab] = useState('claims'); // 'claims' | 'figures' | 'metrics' | 'glossary' | 'limitations' | 'timeline' | 'reproduction'
   const [reviewingClaimId, setReviewingClaimId] = useState(null);
+  const [exportingFormat, setExportingFormat] = useState(null);
 
   const paperId = paper?.arxiv_id || paper?.id || (paper?.canonical_id ? String(paper.canonical_id) : '');
+
+  const handleExportDossier = async (format) => {
+    if (!paperId) return;
+    setExportingFormat(format);
+    try {
+      const url = `/api/v1/evidence/${encodeURIComponent(paperId)}/export?format=${format}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`Export failed with status ${res.status}`);
+      const blob = await res.blob();
+      const ext = format === 'latex' ? 'tex' : format === 'json' ? 'json' : 'md';
+      const cleanSafeId = paperId.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const filename = `${cleanSafeId}_evidence_dossier.${ext}`;
+      
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+    } catch (err) {
+      console.error('Failed to export dossier:', err);
+    } finally {
+      setExportingFormat(null);
+    }
+  };
 
   const fetchEvidence = async (force = false) => {
     if (!paperId) return;
@@ -140,6 +169,8 @@ export default function EvidenceStudioTab({ paper, onHighlightEvidence, onJumpTo
         figures={figures}
         loading={loading}
         onRefresh={() => fetchEvidence(true)}
+        onExport={handleExportDossier}
+        exportingFormat={exportingFormat}
       />
 
       {/* ── 2. Segment Navigation Tabs ── */}
@@ -155,6 +186,7 @@ export default function EvidenceStudioTab({ paper, onHighlightEvidence, onJumpTo
       >
         {[
           { key: 'claims', label: 'Claims', count: claims.length },
+          { key: 'qa', label: 'Grounded Q&A', count: 'Ask' },
           { key: 'reproduction', label: 'Reproduction Map', count: (reproductionMap?.steps?.length || (evidencePkg?.reproduction_map?.steps?.length) || 0) },
           { key: 'figures', label: 'Figures & Tables', count: figures.length },
           { key: 'metrics', label: 'Metrics', count: metrics.length },
@@ -217,6 +249,14 @@ export default function EvidenceStudioTab({ paper, onHighlightEvidence, onJumpTo
       )}
 
       {/* ── 3. Decoupled Subcomponent Views ── */}
+      {activeSubTab === 'qa' && (
+        <GroundedQAPanel
+          paperId={paperId}
+          onHighlightEvidence={onHighlightEvidence}
+          onJumpToPage={onJumpToPage}
+        />
+      )}
+
       {activeSubTab === 'reproduction' && (
         <ReproductionMapCard
           reproductionMap={reproductionMap || evidencePkg?.reproduction_map}

@@ -1,7 +1,8 @@
-import React from 'react';
-import { ShieldCheck, RefreshCw, AlertTriangle } from 'lucide-react';
+import React, { useState } from 'react';
+import { ShieldCheck, RefreshCw, AlertTriangle, Download, ChevronDown } from 'lucide-react';
 
-export default function EvidenceAuditMeter({ audit, claims = [], figures = [], loading, onRefresh }) {
+export default function EvidenceAuditMeter({ audit, claims = [], figures = [], loading, onRefresh, onExport, exportingFormat }) {
+  const [dropdownOpen, setDropdownOpen] = useState(false);
   const verifiedCount = audit
     ? audit.verified_claims
     : claims.filter((c) => c.confidence === 'verified').length;
@@ -28,28 +29,105 @@ export default function EvidenceAuditMeter({ audit, claims = [], figures = [], l
             Deterministic Evidence Audit
           </span>
         </div>
-        <button
-          type="button"
-          onClick={onRefresh}
-          disabled={loading}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '4px',
-            padding: '3px 8px',
-            borderRadius: '6px',
-            border: '1px solid var(--border-subtle, #cbd5e1)',
-            background: 'var(--bg-subtle, #f8fafc)',
-            color: 'var(--text-secondary, #475569)',
-            fontSize: '11px',
-            fontWeight: 500,
-            cursor: loading ? 'not-allowed' : 'pointer',
-          }}
-          title="Force refresh deterministic verification"
-        >
-          <RefreshCw size={11} className={loading ? 'animate-spin' : ''} />
-          <span>{loading ? 'Auditing…' : 'Re-verify'}</span>
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          {onExport && (
+            <div style={{ position: 'relative' }}>
+              <button
+                type="button"
+                onClick={() => setDropdownOpen(!dropdownOpen)}
+                disabled={Boolean(exportingFormat)}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '3px 8px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--border-subtle, #cbd5e1)',
+                  background: 'var(--bg-subtle, #f8fafc)',
+                  color: 'var(--text-secondary, #475569)',
+                  fontSize: '11px',
+                  fontWeight: 500,
+                  cursor: exportingFormat ? 'not-allowed' : 'pointer',
+                }}
+                title="Export complete evidence dossier"
+              >
+                <Download size={11} />
+                <span>{exportingFormat ? `Exporting ${exportingFormat}…` : 'Export'}</span>
+                <ChevronDown size={10} />
+              </button>
+              {dropdownOpen && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    right: 0,
+                    top: '100%',
+                    marginTop: '4px',
+                    background: 'var(--bg-card, #ffffff)',
+                    border: '1px solid var(--border-subtle, #cbd5e1)',
+                    borderRadius: '6px',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                    zIndex: 20,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    minWidth: '130px',
+                    padding: '4px 0',
+                  }}
+                >
+                  {[
+                    { format: 'markdown', label: 'Markdown (.md)' },
+                    { format: 'latex', label: 'LaTeX (.tex)' },
+                    { format: 'json', label: 'JSON (.json)' },
+                  ].map((item) => (
+                    <button
+                      key={item.format}
+                      type="button"
+                      onClick={() => {
+                        setDropdownOpen(false);
+                        onExport(item.format);
+                      }}
+                      style={{
+                        padding: '6px 12px',
+                        textAlign: 'left',
+                        background: 'transparent',
+                        border: 'none',
+                        fontSize: '11px',
+                        color: 'var(--text-primary, #1e293b)',
+                        cursor: 'pointer',
+                        transition: 'background 0.15s ease',
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-subtle, #f1f5f9)')}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={loading}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px',
+              padding: '3px 8px',
+              borderRadius: '6px',
+              border: '1px solid var(--border-subtle, #cbd5e1)',
+              background: 'var(--bg-subtle, #f8fafc)',
+              color: 'var(--text-secondary, #475569)',
+              fontSize: '11px',
+              fontWeight: 500,
+              cursor: loading ? 'not-allowed' : 'pointer',
+            }}
+            title="Force refresh deterministic verification"
+          >
+            <RefreshCw size={11} className={loading ? 'animate-spin' : ''} />
+            <span>{loading ? 'Auditing…' : 'Re-verify'}</span>
+          </button>
+        </div>
       </div>
 
       {/* 4 Health Metric Tiles */}

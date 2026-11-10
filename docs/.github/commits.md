@@ -2522,7 +2522,34 @@ bundle compilation (`npm run build`).
   * Added test suite covering heuristic extraction (detecting GitHub URLs, PyTorch, A100 GPUs, benchmark datasets), Pydantic schema validation and bounds checks, offline resilience, and full FastAPI endpoint lifecycle.
   * Verified all 5 new reproduction map tests and 34/34 total regression tests passing with zero regressions.
 
+<br />
 
+## Implement Evidence-Backed Paper Dossier Exporter & Evidence-Grounded Research Q&A Engine
 
-
+* **Evidence Dossier Exporter (`src/engines/dossier_exporter.py`)**:
+  * Implemented `EvidenceDossierExporter` with full multi-format serialization:
+    * `export_markdown(pkg)`: Generates high-grade GitHub Flavored Markdown with YAML frontmatter, core thesis, plain summary, structured Markdown tables for reported metrics & benchmarks, verified claims ledger with confidence and verbatim excerpts, reproducibility friction scorecard, 4-phase reproduction roadmap, limitations/assumptions, and mechanical evidence audit scores.
+    * `export_json(pkg)`: Generates clean, serialized JSON representation adhering strictly to `PaperEvidencePackage.model_dump()`.
+    * `export_latex(pkg)`: Generates publication-ready standalone compilable LaTeX document (`\documentclass{article}`) utilizing `booktabs`, `tcolorbox`, `hyperref`, and `geometry`, with character escaping (`%`, `_`, `&`, `$`, `#`, `\`) and tabular environments for metrics, claims, and reproduction roadmaps.
+  * Exposed `GET /api/v1/evidence/{paper_id}/export?format={markdown|json|latex}` in `src/api/routes_evidence.py` returning formatted attachments with appropriate MIME types (`text/markdown`, `application/json`, `application/x-latex`) and `Content-Disposition` download headers.
+* **Evidence-Grounded Research Q&A Engine (`src/engines/grounded_qa.py`)**:
+  * Implemented `GroundedQAEngine` with multi-tier resilience: Frontier LLMs (Gemini, DeepSeek, OpenRouter, Groq) -> Local Ollama (`phi4-mini`) -> Deterministic keyword/substring overlap search over verified claims, metrics, and document pages.
+  * Added strict anti-hallucination guarantees:
+    * Off-topic or ungrounded queries automatically set `insufficient_evidence=True`, `confidence="insufficient_evidence"`, and explicit scientific disclaimer: *"The available evidence in this paper does not contain information to answer this question."* with empty citations.
+    * Integrated with `DeterministicExcerptVerifier` to verify citations against document coordinate slices, attaching normalized bounding box rects (`highlight_rects`) for instant visual overlay in the PDF viewer.
+  * Added Pydantic schemas in `src/core/evidence_schemas.py`: `CitationItem`, `GroundedQARequest`, and `GroundedQAResponse`.
+  * Exposed `POST /api/v1/evidence/{paper_id}/qa` in `src/api/routes_evidence.py`.
+* **Frontend Evidence Studio UI Integration (`frontend/src/components/reader/`)**:
+  * Integrated **Export Dossier** dropdown in `EvidenceAuditMeter.jsx` with 1-click downloads for Markdown (.md), JSON (.json), and LaTeX (.tex) formats.
+  * Created `GroundedQAPanel.jsx` featuring:
+    * Interactive query bar with suggested scientific prompts (method, benchmarks, compute, limitations).
+    * Anti-hallucination status badges (*Strictly Grounded*, *Inferred*, *Insufficient Evidence*).
+    * Supporting citation cards with exact match indicators and 1-click jump-to-page and visual highlighting in the split-pane PDF viewer.
+  * Added "Grounded Q&A" tab in `EvidenceStudioTab.jsx`.
+  * Verified production build via Vite (`npm run build`) in 7.04s.
+* **Automated Testing & Verification**:
+  * Created `tests/test_dossier_exporter.py` validating Markdown, JSON, and LaTeX formatting, table generation, and LaTeX compilation character escaping.
+  * Created `tests/test_evidence_export_api.py` validating FastAPI export downloads across all three formats.
+  * Created `tests/test_grounded_qa.py` and `tests/test_grounded_qa_api.py` testing grounded question answering with metrics, off-topic rejection, mock LLM structured prompts, and FastAPI `/qa` endpoint execution.
+  * Verified all 14 tests across dossier exporter, grounded Q&A, and reproduction map passing cleanly.
 

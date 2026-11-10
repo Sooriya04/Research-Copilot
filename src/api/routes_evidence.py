@@ -41,7 +41,31 @@ from src.engines.excerpt_verifier import DeterministicExcerptVerifier
 from src.engines.multi_pass_extractor import MultiPassEvidenceExtractor
 from src.engines.pdf_extractor import PDFExtractor
 from src.engines.reproduction_mapper import ReproductionMapper
+from src.engines.dossier_exporter import EvidenceDossierExporter
+from src.engines.grounded_qa import GroundedQAEngine
 from src.rag.active_cache import ActivePaperCache
+from src.core.evidence_schemas import (
+    HighlightRect,
+    SourceReference,
+    ClaimItem,
+    MetricItem,
+    GlossaryItem,
+    LimitationItem,
+    FigureAsset,
+    TimelineStage,
+    EvidenceAuditResult,
+    PaperEvidencePackage,
+    ReproductionMap,
+    CodeAvailability,
+    ComputeBudget,
+    DatasetChecklist,
+    ReproductionStep,
+    GroundedQARequest,
+    GroundedQAResponse,
+    CitationItem,
+)
+from fastapi.responses import PlainTextResponse, JSONResponse, Response
+from fastapi import Query
 import json
 
 router = APIRouter(prefix="/api/v1/evidence", tags=["Evidence Studio & Grounded Audit"])
@@ -51,6 +75,8 @@ excerpt_verifier = DeterministicExcerptVerifier()
 multi_pass_extractor = MultiPassEvidenceExtractor()
 pdf_extractor_service = PDFExtractor()
 reproduction_mapper = ReproductionMapper()
+dossier_exporter = EvidenceDossierExporter()
+grounded_qa_engine = GroundedQAEngine()
 active_cache = ActivePaperCache()
 
 
@@ -553,4 +579,99 @@ async def get_paper_reproduction_map(
     # Cache into Redis
     await active_cache.set_reproduction_map(clean_id, rep_map.model_dump())
     return rep_map
+
+
+@router.get("/{paper_id}/export")
+async def export_paper_dossier(
+    paper_id: str,
+    format: str = Query("markdown", pattern="^(markdown|json|latex)$"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Export the full evidence package as a standalone research dossier.
+    Supported formats: markdown (.md), json (.json), and latex (.tex).
+    """
+    clean_id = paper_id.strip()
+    if not clean_id:
+        raise HTTPException(status_code=400, detail="paper_id is required.")
+
+    # Fetch evidence package (lazily ingesting if necessary)
+    pkg = await get_paper_evidence(clean_id, db=db)
+
+    # Attach reproduction map if available or generate it
+    if not pkg.reproduction_map:
+        try:
+            rep_map = await get_paper_reproduction_map(clean_id, force_refresh=False, db=db)
+            pkg.reproduction_map = rep_map
+        except Exception as e:
+            logger.debug("[Evidence] Export reproduction map attachment note: %s", e)
+
+    safe_id = re.sub(r"[^a-zA-Z0-9_\-]", "_", clean_id)
+
+    if format == "json":
+        json_data = dossier_exporter.export_json(pkg)
+        return JSONResponse(
+            content=json_data,
+            headers={
+                "Content-Disposition": f'attachment; filename="{safe_id}_evidence_dossier.json"',
+            },
+        )
+    elif format == "latex":
+        latex_str = dossier_exporter.export_latex(pkg)
+        return Response(
+            content=latex_str,
+            media_type="application/x-latex",
+            headers={
+                "Content-Disposition": f'attachment; filename="{safe_id}_evidence_dossier.tex"',
+            },
+        )
+    else:  # markdown
+        md_str = dossier_exporter.export_markdown(pkg)
+        return PlainTextResponse(
+            content=md_str,
+            media_type="text/markdown; charset=utf-8",
+            headers={
+                "Content-Disposition": f'attachment; filename="{safe_id}_evidence_dossier.md"',
+            },
+        )
+
+
+@router.post("/{paper_id}/qa", response_model=GroundedQAResponse)
+async def ask_grounded_question(
+    paper_id: str,
+    req: GroundedQARequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Answer a question with strict citation grounding, anti-hallucination verification,
+    and visual page coordinates.
+    """
+    clean_id = paper_id.strip()
+    if not clean_id:
+        raise HTTPException(status_code=400, detail="paper_id is required.")
+
+    pkg = await get_paper_evidence(clean_id, db=db)
+    
+    # Try getting coordinate doc for bounding-box highlight generation
+    doc = None
+    clean_aid = clean_id.lower().replace("arxiv:", "").strip()
+    pdf_url = f"https://arxiv.org/pdf/{clean_aid}.pdf" if re.match(r"^\d{4}\.\d{4,5}(v\d+)?$", clean_aid) else None
+    if pdf_url:
+        try:
+            pdf_bytes = await pdf_extractor_service.fetch_pdf_bytes(pdf_url)
+            if pdf_bytes:
+                doc = coord_engine.parse_pdf(pdf_bytes, paper_id=clean_id)
+        except Exception as e:
+            logger.debug("[Evidence] PDF fetch for QA coordinate mapping note: %s", e)
+
+    return await grounded_qa_engine.answer_question(
+        paper_id=clean_id,
+        question=req.question,
+        evidence_pkg=pkg,
+        doc=doc,
+        provider_override=req.provider or None,
+        model_override=req.model or None,
+    )
+
+
 
