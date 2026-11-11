@@ -36,7 +36,9 @@ class ResearchGraphStore:
     async def _init_db(self) -> None:
         """Create graph_nodes and graph_edges tables if they don't exist."""
         os.makedirs(os.path.dirname(os.path.abspath(self.db_path)), exist_ok=True)
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=10.0) as db:
+            await db.execute("PRAGMA journal_mode=WAL;")
+            await db.execute("PRAGMA busy_timeout=5000;")
             await db.execute(
                 """
                 CREATE TABLE IF NOT EXISTS graph_nodes (
@@ -85,7 +87,7 @@ class ResearchGraphStore:
             # Caller manages the connection / commit
             await _db.execute(stmt, params)
         else:
-            async with aiosqlite.connect(self.db_path) as db:
+            async with aiosqlite.connect(self.db_path, timeout=10.0) as db:
                 await db.execute(stmt, params)
                 await db.commit()
 
@@ -117,7 +119,7 @@ class ResearchGraphStore:
         if _db is not None:
             await _db.execute(stmt, params)
         else:
-            async with aiosqlite.connect(self.db_path) as db:
+            async with aiosqlite.connect(self.db_path, timeout=10.0) as db:
                 await db.execute(stmt, params)
                 await db.commit()
 
@@ -137,7 +139,7 @@ class ResearchGraphStore:
                 return node_obj
 
         # Fallback to SQLite
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=10.0) as db:
             async with db.execute("SELECT node_type, data_json FROM graph_nodes WHERE id = ?", (node_id,)) as cursor:
                 row = await cursor.fetchone()
                 if row:
@@ -279,7 +281,7 @@ class ResearchGraphStore:
 
     async def load_from_db(self) -> None:
         """On startup, load all nodes and edges from SQLite into NetworkX graph."""
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=10.0) as db:
             # Load nodes
             async with db.execute("SELECT id, node_type, data_json FROM graph_nodes") as cursor:
                 async for row in cursor:
@@ -399,7 +401,7 @@ class ResearchGraphStore:
                 await store.add_edge(edge, _db=db)
             # commit happens automatically on __aexit__
         """
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=10.0) as db:
             try:
                 yield db
             finally:
@@ -458,7 +460,7 @@ class ResearchGraphStore:
         await self._ensure_initialized()
         if node_id in self.graph:
             self.graph.remove_node(node_id)
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=10.0) as db:
             await db.execute("DELETE FROM graph_edges WHERE source_id = ? OR target_id = ?", (node_id, node_id))
             await db.execute("DELETE FROM graph_nodes WHERE id = ?", (node_id,))
             await db.commit()
@@ -469,7 +471,7 @@ class ResearchGraphStore:
         """Clear all in-memory graph nodes/edges and truncate persistent SQLite tables."""
         await self._ensure_initialized()
         self.graph.clear()
-        async with aiosqlite.connect(self.db_path) as db:
+        async with aiosqlite.connect(self.db_path, timeout=10.0) as db:
             await db.execute("DELETE FROM graph_edges")
             await db.execute("DELETE FROM graph_nodes")
             await db.commit()

@@ -711,19 +711,37 @@ Return JSON with this EXACT structure:
                 raw_reply = await active_provider.complete(messages, model=model_str, temperature=0.35)
                 llm_called = True
             except Exception as call_err:
-                logger.error("EXC during active_provider.complete: %s", call_err, exc_info=True)
-                raise
+                logger.warning("[GraphNoveltyEngine] LLM completion failed: %s; falling back to heuristic generation.", call_err)
+                raw_reply = ""
 
-            cleaned = raw_reply.strip()
+            cleaned = (raw_reply or "").strip()
             if cleaned.startswith("```json"):
                 cleaned = cleaned[7:]
             if cleaned.startswith("```"):
                 cleaned = cleaned[3:]
             if cleaned.endswith("```"):
                 cleaned = cleaned[:-3]
+            cleaned = cleaned.strip()
 
-            parsed_json = json.loads(cleaned.strip())
-            print("PARSED JSON:", parsed_json)
+            parsed_json = None
+            if cleaned:
+                # Attempt 1: Direct JSON parse
+                try:
+                    parsed_json = json.loads(cleaned)
+                except json.JSONDecodeError:
+                    # Attempt 2: Sanitize unescaped LaTeX backslashes (\alpha, \sum, \mathbb, etc.)
+                    try:
+                        sanitized = re.sub(r'\\(?![/\"\\bfnrt]|u[0-9a-fA-F]{4})', r'\\\\', cleaned)
+                        parsed_json = json.loads(sanitized)
+                    except json.JSONDecodeError:
+                        # Attempt 3: Strip trailing commas inside objects/arrays
+                        try:
+                            sanitized_commas = re.sub(r',\s*([\]}])', r'\1', sanitized)
+                            parsed_json = json.loads(sanitized_commas)
+                        except Exception as parse_err:
+                            logger.warning("[GraphNoveltyEngine] Failed to parse LLM JSON reply: %s", parse_err)
+                            parsed_json = None
+
             if isinstance(parsed_json, list):
                 proposals = parsed_json
             elif isinstance(parsed_json, dict):
@@ -774,8 +792,7 @@ Return JSON with this EXACT structure:
                 novelties_dicts.append(NoveltyItem(**prop).model_dump())
 
         except Exception as llm_err:
-            print("LLM SYNTHESIS ERROR EXCEPTION:", repr(llm_err))
-            raise
+            logger.warning("[GraphNoveltyEngine] LLM synthesis caught exception: %s; falling back to heuristic generation.", llm_err)
 
         # 5. Deterministic Heuristic Fallback (if LLM returned empty or failed)
         if not novelties_dicts:
