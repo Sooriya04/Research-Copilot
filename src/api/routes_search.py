@@ -1,8 +1,11 @@
 import asyncio
+import ipaddress
 import re
+import socket
 import time
 import uuid
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
@@ -163,12 +166,85 @@ async def resolve_paper_endpoint(identifier: str, fetch_full_text: bool = Query(
     return await resolver.resolve_identifier(identifier)
 
 
+def _is_ssrf_forbidden_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Check if an IP belongs to private, loopback, link-local, multicast, or reserved ranges."""
+    if ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_unspecified or ip.is_multicast:
+        return True
+    if isinstance(ip, ipaddress.IPv4Address):
+        if ip.is_reserved:
+            return True
+    elif isinstance(ip, ipaddress.IPv6Address):
+        # Handle RFC 6052 NAT64 Well-Known Prefix (64:ff9b::/96) by validating embedded IPv4
+        if ip in ipaddress.IPv6Network("64:ff9b::/96"):
+            embedded_v4 = ipaddress.IPv4Address(ip.packed[12:])
+            return _is_ssrf_forbidden_ip(embedded_v4)
+        if ip.is_reserved:
+            return True
+    return False
+
+
+def validate_pdf_proxy_url(target_url: str) -> None:
+    """Validates URL against SSRF attacks by resolving target hostname and rejecting forbidden IPs."""
+    parsed = urlparse(target_url)
+    if parsed.scheme.lower() not in ("http", "https"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid PDF URL protocol.")
+
+    hostname = parsed.hostname
+    if not hostname:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing or invalid hostname in PDF URL.")
+
+    # Strip enclosing square brackets for IPv6 literals
+    raw_host = hostname.strip("[]")
+
+    # If hostname is a direct IP address literal
+    try:
+        direct_ip = ipaddress.ip_address(raw_host)
+        if _is_ssrf_forbidden_ip(direct_ip):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access to internal, private, or metadata IP addresses is forbidden.",
+            )
+        return
+    except ValueError:
+        pass
+
+    # Resolve hostname to all associated IP addresses
+    try:
+        addr_info = socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unable to resolve hostname: {hostname}",
+        )
+
+    if not addr_info:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"No address records found for hostname: {hostname}",
+        )
+
+    for entry in addr_info:
+        sockaddr = entry[4]
+        resolved_ip_str = sockaddr[0]
+        try:
+            resolved_ip = ipaddress.ip_address(resolved_ip_str)
+            if _is_ssrf_forbidden_ip(resolved_ip):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access to internal, private, or metadata IP addresses is forbidden.",
+                )
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid resolved IP address: {resolved_ip_str}",
+            )
+
+
 @router.api_route("/pdf/proxy", methods=["GET", "HEAD"])
 async def proxy_pdf_stream(request: Request, url: str = Query(..., description="Target PDF URL to stream inline")):
     """Streams a remote scientific PDF inline to bypass browser X-Frame-Options and CORS restrictions."""
     clean_url = url.strip()
-    if not (clean_url.startswith("http://") or clean_url.startswith("https://")):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid PDF URL protocol.")
+    validate_pdf_proxy_url(clean_url)
 
     # Normalize arXiv URLs: convert /abs/ to /pdf/ and ensure .pdf extension
     if "arxiv.org/" in clean_url:

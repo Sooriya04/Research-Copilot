@@ -34,6 +34,24 @@ async def test_pdf_proxy_invalid_url():
         assert resp.status_code == 400
 
 @pytest.mark.asyncio
+async def test_pdf_proxy_ssrf_blocked():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        forbidden_targets = [
+            "http://127.0.0.1:8000/paper.pdf",
+            "http://localhost:8000/paper.pdf",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://10.0.0.1/internal.pdf",
+            "http://172.16.0.1/internal.pdf",
+            "http://192.168.1.1/secret.pdf",
+            "http://0.0.0.0/paper.pdf",
+            "http://[::1]/paper.pdf",
+        ]
+        for target in forbidden_targets:
+            resp = await client.get("/api/v1/pdf/proxy", params={"url": target})
+            assert resp.status_code == 403, f"Expected 403 for {target}, got {resp.status_code}"
+
+@pytest.mark.asyncio
 async def test_workbench_workspaces_crud():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:

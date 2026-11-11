@@ -145,22 +145,6 @@ async def delete_provider(provider_id: str, db: AsyncSession = Depends(get_db)):
     return {"ok": True}
 
 
-@router.get("/providers/{provider_id}/key")
-async def get_provider_key(provider_id: str, db: AsyncSession = Depends(get_db)):
-    """Raw key for server-side LLM calls only."""
-    p_id = provider_id.lower().strip()
-    result = await db.execute(
-        select(UserSettingsModel).where(
-            UserSettingsModel.id == "default",
-            UserSettingsModel.provider_id == p_id,
-        )
-    )
-    row = result.scalar_one_or_none()
-    if not row:
-        raise HTTPException(status_code=404, detail=f"No config for provider: {p_id}")
-    return {"provider_id": p_id, "api_key": row.api_key, "base_url": row.base_url, "model": row.model}
-
-
 # ---------------------------------------------------------------------------
 # Provider Connection Testing
 # ---------------------------------------------------------------------------

@@ -93,12 +93,6 @@ def test_settings_save_and_delete_provider(client):
     assert save_resp.status_code == 200
     assert save_resp.json()["ok"] is True
 
-    # Check key endpoint
-    key_resp = client.get("/api/v1/settings/providers/test_mock_provider/key")
-    assert key_resp.status_code == 200
-    assert key_resp.json()["api_key"] == "sk-test-unit-test-key-xyz"
-    assert key_resp.json()["model"] == "deepseek/deepseek-r1"
-
     # Cleanup
     del_resp = client.delete("/api/v1/settings/providers/test_mock_provider")
     assert del_resp.status_code == 200
