@@ -86,3 +86,53 @@ async def test_paper_rank_pipeline_with_critique_and_synthesis():
         assert res.synthesis is not None
         assert "# Topic Synthesis: Selective State Spaces" in res.synthesis
 
+
+@pytest.mark.asyncio
+async def test_paper_rank_evaluates_full_text_on_preliminary_top_candidates_only():
+    """Verify that full_text_top parses PDFs for true top candidates after preliminary ranking, not raw pool index."""
+    from unittest.mock import AsyncMock, patch
+    from src.core.schemas import PaperSection
+
+    rank_engine = PaperRankEngine()
+    
+    # Paper 0 in raw pool has low relevance
+    low_rel_paper = Paper(
+        id="raw-0-low",
+        title="Unrelated Cooking Techniques",
+        abstract="Traditional recipes and baking methods.",
+        citation_count=0,
+        pdf_url="https://example.com/cooking.pdf",
+    )
+    # Paper 1 in raw pool has high relevance and high citations
+    high_rel_paper = Paper(
+        id="raw-1-high",
+        title="Attention Is All You Need and Transformer Scaling",
+        abstract="We propose the Transformer model with self-attention for sequence modeling.",
+        citation_count=100000,
+        pdf_url="https://example.com/transformer.pdf",
+    )
+
+    raw_pool = [low_rel_paper, high_rel_paper]
+    fetched_urls = []
+
+    async def mock_fetch_pdf(url):
+        fetched_urls.append(url)
+        return [PaperSection(title="Ablation", content="Ablation studies show self-attention is essential.")]
+
+    with patch.object(rank_engine.resolver, "search_openalex", new_callable=AsyncMock, return_value=raw_pool), \
+         patch.object(rank_engine.resolver, "search_arxiv", new_callable=AsyncMock, return_value=[]), \
+         patch.object(rank_engine.pdf_extractor, "fetch_and_parse_pdf", side_effect=mock_fetch_pdf):
+        
+        req = RankRequest(query="Transformer", limit=5, full_text_top=1)
+        res = await rank_engine.rank(req)
+
+        # Only the true top paper (high_rel_paper) should have been parsed for full text!
+        assert len(fetched_urls) == 1
+        assert fetched_urls[0] == "https://example.com/transformer.pdf"
+        assert res.papers[0].id == "raw-1-high"
+        assert res.papers[0].sections is not None
+        assert len(res.papers[0].sections) == 1
+        # Low relevance paper must NOT have been downloaded
+        assert low_rel_paper.pdf_url not in fetched_urls
+
+

@@ -87,9 +87,14 @@ class PaperRankEngine:
 
         nodes_count, edges_count = self.graph_engine.get_graph_stats(citation_graph)
 
-        # 3. Optional Section-Aware Full-Text extraction for Top N
-        if req.full_text_top > 0:
-            for p in papers[:min(req.full_text_top, len(papers))]:
+        # 3. Fast Preliminary Scoring & Ranking across all pool candidates
+        papers = self.score_paper_list(papers, req.query, req.weights, prestige_scores=prestige_scores)
+
+        # 4. Optional Section-Aware Full-Text extraction for True Top N
+        if req.full_text_top > 0 and papers:
+            top_candidates = papers[:min(req.full_text_top, len(papers))]
+            extracted_any = False
+            for p in top_candidates:
                 if not p.sections:
                     # Prioritize Europe PMC JATS XML if PMCID is present
                     if p.pmcid:
@@ -97,6 +102,7 @@ class PaperRankEngine:
                             xml_sections = await self.resolver.fetch_europepmc_xml(p.pmcid)
                             if xml_sections:
                                 p.sections = xml_sections
+                                extracted_any = True
                         except Exception as e:
                             logger.debug("[PaperRank] Europe PMC XML fallback to PDF: %s", e)
 
@@ -106,11 +112,14 @@ class PaperRankEngine:
                             sections = await self.pdf_extractor.fetch_and_parse_pdf(p.pdf_url)
                             if sections:
                                 p.sections = sections
+                                extracted_any = True
                         except Exception as e:
                             logger.debug("[PaperRank] PDF extraction error: %s", e)
 
-        # 4. Score each paper across 6 components using score_paper_list
-        papers = self.score_paper_list(papers, req.query, req.weights, prestige_scores=prestige_scores)
+            # Re-score if full-text sections were newly extracted
+            if extracted_any:
+                papers = self.score_paper_list(papers, req.query, req.weights, prestige_scores=prestige_scores)
+
         ranked = papers[:min(req.limit, len(papers))]
 
         # 5. Optional Per-Paper Critique for Top N

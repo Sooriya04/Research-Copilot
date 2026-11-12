@@ -1,3 +1,4 @@
+import hashlib
 import re
 import urllib.parse
 from typing import Dict, List, Optional
@@ -94,7 +95,7 @@ class MultiProviderSearchEngine:
                             year = created[0][0]
 
                         papers.append(Paper(
-                            id=f"doi:{doi}" if doi else f"crossref:{hash(title)}",
+                            id=f"doi:{doi}" if doi else f"crossref:{hashlib.sha256(title.encode('utf-8')).hexdigest()[:12]}",
                             title=title,
                             abstract=item.get("abstract", ""),
                             authors=authors,

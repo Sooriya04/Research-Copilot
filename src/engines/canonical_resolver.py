@@ -1,3 +1,4 @@
+import hashlib
 import re
 from typing import Optional, Tuple
 from src.core.canonical_models import AuthorEntity, CanonicalPaper, SourceMetadata
@@ -147,7 +148,7 @@ class CanonicalPaperResolver:
             f"doi:{p.doi}" if p.doi
             else (f"arxiv:{base_arxiv}" if base_arxiv
             else (f"openalex:{p.openalex_id}" if p.openalex_id
-            else f"paper:{hash(p.title)}"))
+            else f"paper:{hashlib.sha256(p.title.encode('utf-8')).hexdigest()[:12]}"))
         )
 
         # Canonical Authors

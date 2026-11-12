@@ -1,3 +1,4 @@
+import hashlib
 import re
 from typing import Any, Dict, List, Optional, Tuple
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -348,8 +349,9 @@ async def compare_papers(req: CompareRequest, db: AsyncSession = Depends(get_db)
                 primary_source = canon.sources[0].source_name.upper()
             if canon.research_gaps:
                 for idx, g in enumerate(canon.research_gaps):
+                    g_hash = hashlib.sha256(g.description.encode('utf-8')).hexdigest()[:12]
                     found_gaps.append(CompareResearchGap(
-                        id=f"gap-db-{idx}-{abs(hash(g.description)) % 100000}",
+                        id=f"gap-db-{idx}-{g_hash}",
                         category=g.category,
                         title=f"{g.category.replace('_', ' ').title()}: {g.description[:45]}...",
                         description=g.description,
@@ -434,8 +436,9 @@ async def compare_papers(req: CompareRequest, db: AsyncSession = Depends(get_db)
                         if any(pid in [identifier, clean_arxiv, f"arxiv:{clean_arxiv}"] for pid in p_ids):
                             g_desc = g.get("description") or g.get("title", "")
                             if not any(x.description == g_desc for x in found_gaps):
+                                g_synth_hash = hashlib.sha256(g_desc.encode('utf-8')).hexdigest()[:12]
                                 found_gaps.append(CompareResearchGap(
-                                    id=f"gap-synth-{abs(hash(g_desc)) % 100000}",
+                                    id=f"gap-synth-{g_synth_hash}",
                                     category="graph_synthesis",
                                     title=g.get("title", "Synthesized Research Gap"),
                                     description=g_desc,
@@ -747,8 +750,10 @@ async def critique_paper(req: CritiqueRequest, db: AsyncSession = Depends(get_db
         )
 
     if not p:
+        p_title_clean = title_query or "untitled"
+        p_hash = hashlib.sha256(p_title_clean.encode('utf-8')).hexdigest()[:12]
         p = Paper(
-            id=synth_id or f"paper-{abs(hash(title_query or 'untitled')) % 1000000}",
+            id=synth_id or f"paper-{p_hash}",
             title=title_query or (clean_arxiv and f"arXiv:{clean_arxiv}") or "Untitled Research Document",
             abstract=req.abstract or "",
         )
@@ -834,7 +839,8 @@ async def critique_paper(req: CritiqueRequest, db: AsyncSession = Depends(get_db
     )
 
     # Step 3: Persist complete synthesis into SQLite paper_syntheses table
-    target_synth_id = (clean_arxiv or synth_id or p.id or f"synth-{abs(hash(p.title)) % 1000000}").strip()
+    p_synth_hash = hashlib.sha256((p.title or "untitled").encode('utf-8')).hexdigest()[:12]
+    target_synth_id = (clean_arxiv or synth_id or p.id or f"synth-{p_synth_hash}").strip()
     checklist_dict = rubric.model_dump() if hasattr(rubric, "model_dump") else (rubric.dict() if hasattr(rubric, "dict") else rubric)
     claims_dict_list = [c.model_dump() if hasattr(c, "model_dump") else (c.dict() if hasattr(c, "dict") else c) for c in claims_list]
     breakdown_dict = (

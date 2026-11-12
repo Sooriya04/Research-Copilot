@@ -405,8 +405,9 @@ class CitationGraphEngine:
         if not pdf_url and arxiv_id:
             pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
 
+        oa_hash = hashlib.sha256(title.encode('utf-8')).hexdigest()[:12]
         return Paper(
-            id=clean_wid or f"openalex:{hash(title)}",
+            id=clean_wid or f"openalex:{oa_hash}",
             title=title.strip(),
             abstract=abstract.strip(),
             authors=authors,

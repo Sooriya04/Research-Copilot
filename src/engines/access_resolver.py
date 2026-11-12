@@ -1,3 +1,4 @@
+import hashlib
 import re
 import urllib.parse
 from typing import Dict, List, Optional, Tuple
@@ -130,7 +131,7 @@ class AccessResolver:
                             pub_year = int(published_elem.text[:4])
                             
                         papers.append(Paper(
-                            id=f"arxiv:{arxiv_id}" if arxiv_id else f"raw:{hash(title_elem.text)}",
+                            id=f"arxiv:{arxiv_id}" if arxiv_id else f"raw:{hashlib.sha256(title_elem.text.encode('utf-8')).hexdigest()[:12]}",
                             title=re.sub(r"\s+", " ", title_elem.text).strip(),
                             abstract=re.sub(r"\s+", " ", summary_elem.text).strip() if summary_elem is not None and summary_elem.text else "",
                             authors=authors,
@@ -281,8 +282,9 @@ class AccessResolver:
 
         if not paper:
             # Fallback paper object created from identifier when external metadata APIs are unreachable
+            raw_hash = hashlib.sha256(identifier.encode('utf-8')).hexdigest()[:12]
             paper = Paper(
-                id=f"{id_type}:{clean_id}" if id_type != "query" else f"raw:{hash(identifier)}",
+                id=f"{id_type}:{clean_id}" if id_type != "query" else f"raw:{raw_hash}",
                 title=clean_id if id_type != "query" else identifier,
                 abstract="",
                 doi=clean_id if id_type == "doi" else None,
@@ -461,8 +463,9 @@ class AccessResolver:
         referenced_works = item.get("referenced_works", [])
         topics = [t.get("display_name") for t in item.get("topics", []) if t.get("display_name")]
         
+        oa_hash = hashlib.sha256(title.encode('utf-8')).hexdigest()[:12]
         return Paper(
-            id=item.get("id", f"openalex:{hash(title)}"),
+            id=item.get("id", f"openalex:{oa_hash}"),
             title=title.strip(),
             abstract=abstract.strip(),
             authors=authors,

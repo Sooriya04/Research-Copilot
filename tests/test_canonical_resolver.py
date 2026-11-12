@@ -44,3 +44,32 @@ async def test_resolve_canonical_arxiv():
     assert "Attention" in paper.title
     assert paper.arxiv_id == "1706.03762"
     assert paper.is_open_access is True
+
+
+@pytest.mark.asyncio
+async def test_deterministic_fallback_canonical_id():
+    import hashlib
+    from unittest.mock import AsyncMock, patch
+    from src.core.schemas import Paper, PaperAccessResponse
+
+    resolver = CanonicalPaperResolver()
+    title = "Quantum Computing Fault Tolerance Survey"
+    expected_hash = hashlib.sha256(title.encode("utf-8")).hexdigest()[:12]
+    
+    mock_paper = Paper(
+        id=f"raw:{expected_hash}",
+        title=title,
+        abstract="Fault tolerant surface codes.",
+    )
+    mock_access_resp = PaperAccessResponse(
+        identifier=title,
+        id_type="title",
+        paper=mock_paper,
+        candidates=[],
+    )
+
+    with patch.object(resolver.access_resolver, "resolve_identifier", new_callable=AsyncMock, return_value=mock_access_resp):
+        res = await resolver.resolve(title)
+        assert res is not None
+        assert res.canonical_id == f"paper:{expected_hash}"
+
