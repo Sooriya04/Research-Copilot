@@ -31,6 +31,13 @@ class WorkspaceModel(Base):
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
     state_json = Column(JSON, default=dict)
 
+    memories = relationship(
+        "WorkspaceMemoryModel",
+        back_populates="workspace",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
 class SessionModel(Base):
     """Research sessions and query states."""
     __tablename__ = "sessions"
@@ -136,8 +143,11 @@ class WorkspaceMemoryModel(Base):
     title = Column(String, nullable=False)
     content = Column(Text, nullable=False)
     status = Column(String, default="active")  # active, confirmed, refuted, archived
+    provenance_source = Column(String, nullable=True)
     created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+    workspace = relationship("WorkspaceModel", back_populates="memories")
 
 
 class PaperDocumentModel(Base):

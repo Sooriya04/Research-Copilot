@@ -1,6 +1,6 @@
 import io
 import re
-from typing import List, Optional, Union
+from typing import Any, List, Optional, Union
 from src.core.logger import logger
 
 def _clean_text(s: Optional[str]) -> str:
@@ -18,9 +18,25 @@ def _generate_with_pymupdf(
     year: Optional[Union[int, str]] = None,
     venue: Optional[str] = None,
     sections: Optional[List[dict]] = None,
+    citations: Optional[List[Any]] = None,
+    paper: Optional[Any] = None,
 ) -> bytes:
     import pymupdf
     doc = pymupdf.open()
+
+    if paper is not None:
+        if not title and hasattr(paper, "title"):
+            title = paper.title
+        if not authors and hasattr(paper, "authors"):
+            authors = [a.name if hasattr(a, "name") else str(a) for a in paper.authors] if isinstance(paper.authors, list) else paper.authors
+        if not abstract and hasattr(paper, "abstract"):
+            abstract = paper.abstract
+        if not doi and hasattr(paper, "doi"):
+            doi = paper.doi
+        if not year and hasattr(paper, "year"):
+            year = paper.year
+        if not venue and hasattr(paper, "venue"):
+            venue = paper.venue
     
     # Page 1
     page = doc.new_page(width=612, height=792)
@@ -118,15 +134,58 @@ def _generate_with_pymupdf(
     page2.insert_textbox(pymupdf.Rect(54, 198, 558, 280), rel_text, fontsize=9.5, fontname="helv", color=(0.15, 0.2, 0.28))
     
     page2.insert_text((54, 300), "References and Canonical Sources", fontsize=12, fontname="helv", color=(0.1, 0.15, 0.25))
-    refs = [
-        f"[1] {author_str} ({year or '2018'}). {t_clean}. {venue or 'Foundations and Trends in Information Retrieval'}.",
-        "[2] Vaswani et al. (2017). Attention Is All You Need. Advances in Neural Information Processing Systems (NeurIPS).",
-        "[3] Devlin et al. (2019). BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding. NAACL-HLT.",
-        "[4] Khattab & Zaharia (2020). ColBERT: Efficient and Effective Passage Search via Contextualized Late Interaction over BERT. SIGIR.",
-        "[5] Formal et al. (2021). SPLADE: Sparse Lexical and Expansion Model for First Stage Ranking. SIGIR."
-    ]
+    
+    paper_citations = getattr(paper, "citations", None) if paper is not None else citations
+    if not paper_citations and citations:
+        paper_citations = citations
+
+    refs = []
+    if paper_citations:
+        for idx, cit in enumerate(paper_citations, start=1):
+            if isinstance(cit, str):
+                c_text = cit.strip()
+            elif isinstance(cit, dict):
+                c_title = cit.get("title") or cit.get("text") or cit.get("citation") or ""
+                c_auth = cit.get("authors") or cit.get("author") or ""
+                if isinstance(c_auth, list):
+                    c_auth = ", ".join(str(a) for a in c_auth)
+                c_year = cit.get("year") or ""
+                c_venue = cit.get("venue") or ""
+                parts = []
+                if c_auth:
+                    parts.append(str(c_auth))
+                if c_year:
+                    parts.append(f"({c_year}).")
+                if c_title:
+                    parts.append(f"{c_title}.")
+                if c_venue:
+                    parts.append(str(c_venue))
+                c_text = " ".join(parts).strip() if parts else str(cit)
+            else:
+                c_title = getattr(cit, "title", None)
+                c_auth = getattr(cit, "authors", None) or getattr(cit, "author", None)
+                if isinstance(c_auth, list):
+                    c_auth = ", ".join(str(getattr(a, "name", a)) for a in c_auth)
+                c_year = getattr(cit, "year", None)
+                c_venue = getattr(cit, "venue", None)
+                parts = []
+                if c_auth:
+                    parts.append(str(c_auth))
+                if c_year:
+                    parts.append(f"({c_year}).")
+                if c_title:
+                    parts.append(f"{c_title}.")
+                if c_venue:
+                    parts.append(str(c_venue))
+                c_text = " ".join(parts).strip() if parts else str(cit)
+            refs.append(f"[{idx}] {c_text}")
+    else:
+        refs = ["[Notice] No canonical citations were linked for this publication."]
+
     ref_y = 315
     for ref in refs:
+        if ref_y + 35 > 740:
+            break
         page2.insert_textbox(pymupdf.Rect(54, ref_y, 558, ref_y + 35), ref, fontsize=8.5, fontname="helv", color=(0.3, 0.35, 0.42))
         ref_y += 38
         
@@ -138,13 +197,15 @@ def _generate_with_pymupdf(
     return doc.tobytes()
 
 def generate_preprint_pdf_buffer(
-    title: str,
-    authors: Union[List[str], str],
-    abstract: str,
+    title: str = "",
+    authors: Union[List[str], str] = "",
+    abstract: str = "",
     doi: Optional[str] = None,
     year: Optional[Union[int, str]] = None,
     venue: Optional[str] = None,
     sections: Optional[List[dict]] = None,
+    citations: Optional[List[Any]] = None,
+    paper: Optional[Any] = None,
 ) -> bytes:
     """
     Generates a publication-grade academic preprint PDF buffer from paper metadata.
@@ -160,6 +221,8 @@ def generate_preprint_pdf_buffer(
             year=year,
             venue=venue,
             sections=sections,
+            citations=citations,
+            paper=paper,
         )
         logger.info("[PreprintGenerator] Built PyMuPDF preprint PDF (%d bytes) for '%s'", len(pdf_bytes), title[:40])
         return pdf_bytes

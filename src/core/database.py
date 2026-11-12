@@ -46,6 +46,10 @@ async def init_db() -> None:
                 pe_cols = {row[1] for row in cursor.fetchall()}
                 if pe_cols and "reproduction_map_json" not in pe_cols:
                     cursor.execute("ALTER TABLE paper_evidence ADD COLUMN reproduction_map_json JSON")
+                cursor.execute("PRAGMA table_info(workspace_memories)")
+                wm_cols = {row[1] for row in cursor.fetchall()}
+                if wm_cols and "provenance_source" not in wm_cols:
+                    cursor.execute("ALTER TABLE workspace_memories ADD COLUMN provenance_source VARCHAR")
             except Exception as e:
                 logger.debug("Column migration note: %s", e)
         await conn.run_sync(_migrate_columns)

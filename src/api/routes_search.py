@@ -320,6 +320,7 @@ async def proxy_pdf_stream(request: Request, url: str = Query(..., description="
                 doi=resolved.paper.doi,
                 year=resolved.paper.year,
                 venue=getattr(resolved.paper, "venue", None) or getattr(resolved.paper, "journal", None),
+                paper=resolved.paper,
             )
             headers = {
                 "Content-Type": "application/pdf",
@@ -393,6 +394,7 @@ async def get_preprint_buffer_endpoint(
         except Exception as e:
             logger.warning("[PreprintEndpoint] Metadata resolution failed for '%s': %s", identifier, e)
 
+    paper_obj = res.paper if ("res" in locals() and res and getattr(res, "paper", None)) else None
     pdf_bytes = generate_preprint_pdf_buffer(
         title=doc_title or "Scholarly Publication Preprint",
         authors=doc_authors or ["Academic Authors"],
@@ -401,6 +403,7 @@ async def get_preprint_buffer_endpoint(
         year=doc_year,
         venue=doc_venue,
         sections=sections,
+        paper=paper_obj,
     )
 
     headers = {

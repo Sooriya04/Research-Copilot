@@ -117,6 +117,7 @@ class CanonicalPaper(BaseModel):
     pdf_url: Optional[str] = None
     is_open_access: bool = False
     citation_count: int = 0
+    citations: List[Any] = Field(default_factory=list)
     sources: List[SourceMetadata] = Field(default_factory=list)
     sections: List[PaperSectionEntity] = Field(default_factory=list)
     benchmarks: List[BenchmarkEvidence] = Field(default_factory=list)

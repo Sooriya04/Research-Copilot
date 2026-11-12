@@ -2,7 +2,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.database import get_db
 from src.core.models import ArtifactModel, ProjectModel, SessionModel, WorkspaceModel, WorkspaceMemoryModel
@@ -240,10 +240,11 @@ async def get_workspace(workspace_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.delete("/workspaces/{workspace_id}")
 async def delete_workspace(workspace_id: str, db: AsyncSession = Depends(get_db)):
-    """Delete a research workspace."""
+    """Delete a research workspace and cascade delete its memories."""
     ws = await db.get(WorkspaceModel, workspace_id)
     if not ws:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Workspace '{workspace_id}' not found.")
+    await db.execute(delete(WorkspaceMemoryModel).where(WorkspaceMemoryModel.workspace_id == workspace_id))
     await db.delete(ws)
     await db.commit()
     return {"status": "deleted", "workspace_id": workspace_id}
