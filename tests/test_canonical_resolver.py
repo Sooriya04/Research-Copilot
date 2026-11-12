@@ -38,12 +38,35 @@ def test_identifier_normalization():
 
 @pytest.mark.asyncio
 async def test_resolve_canonical_arxiv():
+    from unittest.mock import AsyncMock, patch
+    from src.core.schemas import Paper, Author, PaperAccessResponse
+
     resolver = CanonicalPaperResolver()
-    paper = await resolver.resolve("1706.03762")
-    assert paper is not None
-    assert "Attention" in paper.title
-    assert paper.arxiv_id == "1706.03762"
-    assert paper.is_open_access is True
+    mock_paper = Paper(
+        id="arxiv:1706.03762",
+        title="Attention Is All You Need",
+        abstract="The dominant sequence transduction models are based on complex recurrent or convolutional neural networks.",
+        authors=[Author(name="Ashish Vaswani"), Author(name="Noam Shazeer")],
+        year=2017,
+        arxiv_id="1706.03762",
+        primary_source="arxiv",
+        url="https://arxiv.org/abs/1706.03762",
+        pdf_url="https://arxiv.org/pdf/1706.03762.pdf",
+        is_open_access=True,
+    )
+    mock_resp = PaperAccessResponse(
+        identifier="1706.03762",
+        id_type="arxiv",
+        paper=mock_paper,
+        candidates=[],
+    )
+    with patch.object(resolver, "_lookup_in_sqlite", return_value=None), \
+         patch.object(resolver.access_resolver, "resolve_identifier", new_callable=AsyncMock, return_value=mock_resp):
+        paper = await resolver.resolve("1706.03762")
+        assert paper is not None
+        assert "Attention" in paper.title
+        assert paper.arxiv_id == "1706.03762"
+        assert paper.is_open_access is True
 
 
 @pytest.mark.asyncio

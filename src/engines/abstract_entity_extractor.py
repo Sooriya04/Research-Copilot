@@ -10,28 +10,7 @@ from src.providers.llm import LocalOllamaProvider
 # In-memory extraction cache keyed by stable paper identifier or title hash
 _EXTRACTION_CACHE: Dict[str, Dict[str, Any]] = {}
 
-
-def _extract_json(text: str) -> Optional[Dict[str, Any]]:
-    """Helper to extract JSON dict from potentially noisy LLM response."""
-    if not text:
-        return None
-    cleaned = text.replace("```json", "").replace("```", "").strip()
-    try:
-        data = json.loads(cleaned)
-        if isinstance(data, dict):
-            return data
-    except Exception:
-        pass
-    import re
-    match = re.search(r"\{.*\}", cleaned, re.DOTALL)
-    if match:
-        try:
-            data = json.loads(match.group(0))
-            if isinstance(data, dict):
-                return data
-        except Exception:
-            pass
-    return None
+from src.core.json_utils import _extract_json
 
 
 class AbstractEntityExtractor:

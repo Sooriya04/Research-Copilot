@@ -50,33 +50,7 @@ class SynthesisSchema(BaseModel):
     model: str = "frontier"
 
 
-def extract_json_from_llm_text(text: str) -> Optional[Dict[str, Any]]:
-    """Robustly extract a JSON dictionary from potentially noisy LLM output."""
-    if not text:
-        return None
-    cleaned = text.strip()
-    # Strip markdown fences
-    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"\s*```$", "", cleaned)
-    cleaned = cleaned.strip()
-
-    try:
-        data = json.loads(cleaned)
-        if isinstance(data, dict):
-            return data
-    except Exception:
-        pass
-
-    # Regex block search fallback
-    match = re.search(r"\{[\s\S]*\}", cleaned)
-    if match:
-        try:
-            data = json.loads(match.group(0))
-            if isinstance(data, dict):
-                return data
-        except Exception:
-            pass
-    return None
+from src.core.json_utils import extract_json_from_llm_text
 
 
 class CritiqueSynthesizer:
