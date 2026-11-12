@@ -155,5 +155,14 @@ async def test_resolve_paper_guarantees_pdf_url():
         assert len(data["candidates"]) >= 1
 
 
+@pytest.mark.asyncio
+async def test_unmatched_api_route_returns_404():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/api/v1/nonexistent_route")
+        assert resp.status_code == 404
+        assert resp.json() == {"detail": "Not Found"}
+
+
+
 
 

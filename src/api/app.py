@@ -1,7 +1,7 @@
 import os
 import secrets
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from fastapi.responses import FileResponse
@@ -107,7 +107,7 @@ def create_app() -> FastAPI:
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa_frontend(full_path: str, request: Request):
         if full_path.startswith("api/"):
-            return None
+            raise HTTPException(status_code=404, detail="Not Found")
         dist_index = os.path.join(dist_dir, "index.html")
         if os.path.exists(dist_index):
             return FileResponse(dist_index)
