@@ -1,5 +1,5 @@
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,6 +26,12 @@ class ResearchChatRequest(BaseModel):
     provider: Optional[str] = None
     model: Optional[str] = "gemini-2.0-flash-lite"
     mode: Optional[str] = "auto"  # "auto" | "paper" | "research"
+
+
+class ChatStreamRequest(BaseModel):
+    messages: List[ChatMessage]
+    model: Optional[str] = "gemini-2.0-flash-lite"
+    provider: Optional[str] = None
 
 
 class ResearchChatResponse(BaseModel):
@@ -118,12 +124,13 @@ async def chat_message_endpoint(req: ResearchChatRequest, db: AsyncSession = Dep
         augmented_messages.append(m)
 
     try:
-        reply = await provider.complete(augmented_messages, model=req.model or "gemini-2.0-flash-lite")
+        reply = await provider.complete(augmented_messages, model=req.model or "gemini-2.0-flash-lite", json_mode=False)
         # Clean JSON wrappers if LLM returned JSON formatted text
-        if reply.strip().startswith("{") and "response" in reply:
+        if reply.strip().startswith("{"):
             try:
                 data = json.loads(reply)
-                reply = data.get("response") or data.get("summary") or reply
+                if isinstance(data, dict):
+                    reply = data.get("response") or data.get("summary") or data.get("message") or reply
             except Exception:
                 pass
         return ResearchChatResponse(
@@ -145,12 +152,35 @@ async def chat_message_endpoint(req: ResearchChatRequest, db: AsyncSession = Dep
 
 
 @router.post("/stream")
-async def chat_stream_endpoint(messages: List[ChatMessage], model: str = "gemini-2.0-flash-lite"):
-    """Stream LLM responses using Server-Sent Events (SSE)."""
-    provider = get_llm_provider(model=model or "")
+async def chat_stream_endpoint(
+    req: Union[ChatStreamRequest, List[ChatMessage]],
+    model: Optional[str] = None,
+):
+    """Stream LLM responses using Server-Sent Events (SSE). Accepts ChatStreamRequest JSON body or ChatMessage list."""
+    if isinstance(req, list):
+        messages = req
+        model_name = model or "gemini-2.0-flash-lite"
+        provider_name = None
+    else:
+        messages = req.messages
+        model_name = req.model or model or "gemini-2.0-flash-lite"
+        provider_name = req.provider
+
+    from src.core.provider_settings import resolve_provider_credentials
+    resolved_creds = await resolve_provider_credentials(
+        provider_id=provider_name or ("gemini" if "gemini" in (model_name or "") else ""),
+        explicit_model=model_name,
+    )
+    provider = get_llm_provider(
+        provider_name=resolved_creds.get("provider_id"),
+        model=resolved_creds.get("model"),
+        api_key=resolved_creds.get("api_key"),
+        base_url=resolved_creds.get("base_url"),
+    )
+    active_model = resolved_creds.get("model") or model_name
 
     async def event_generator():
-        async for delta in provider.stream_chat(messages, model=model):
+        async for delta in provider.stream_chat(messages, model=active_model):
             yield {
                 "event": "delta",
                 "data": json.dumps({"content": delta})

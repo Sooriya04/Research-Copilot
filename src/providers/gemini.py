@@ -1,6 +1,6 @@
 import json
 import os
-from typing import AsyncGenerator, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional
 import httpx
 from src.core.config import settings
 from src.core.logger import logger
@@ -70,13 +70,22 @@ class GeminiFlashLiteProvider(BaseLLMProvider):
                 "error": f"Gemini connection failed: {str(e)}",
             }
 
-    async def complete(self, messages: List[ChatMessage], model: Optional[str] = None, temperature: float = 0.2) -> str:
-        """Generate structured text/JSON completion."""
+    async def complete(
+        self,
+        messages: List[ChatMessage],
+        model: Optional[str] = None,
+        temperature: float = 0.2,
+        response_mime_type: Optional[str] = None,
+        json_mode: bool = False,
+        **kwargs: Any,
+    ) -> str:
+        """Generate text/JSON completion."""
         target_model = model or self.model
+        effective_mime = response_mime_type or ("application/json" if json_mode else None)
 
         if not self.api_key:
             logger.info("[GeminiProvider] No API key detected. Using deterministic fallback analyzer.")
-            return self._fallback_structured_response(messages)
+            return self._fallback_structured_response(messages, json_mode=bool(effective_mime == "application/json"))
 
         # Separate system instructions from conversational contents for standard Gemini v1beta API
         system_parts = []
@@ -95,22 +104,23 @@ class GeminiFlashLiteProvider(BaseLLMProvider):
             contents.append({"role": "user", "parts": system_parts})
             system_parts = []
 
+        gen_config = {"temperature": temperature}
+        if effective_mime:
+            gen_config["responseMimeType"] = effective_mime
+
         payload = {
             "contents": contents,
-            "generationConfig": {
-                "temperature": temperature,
-                "responseMimeType": "application/json"
-            }
+            "generationConfig": gen_config,
         }
         if system_parts:
             payload["system_instruction"] = {"parts": system_parts}
 
         # Candidate models to try in order of efficiency
         candidate_models = [target_model]
-        if "gemini-3.5-flash-lite" not in candidate_models:
-            candidate_models.append("gemini-3.5-flash-lite")
-        if "gemini-flash-lite-latest" not in candidate_models:
-            candidate_models.append("gemini-flash-lite-latest")
+        if "gemini-2.0-flash" not in candidate_models:
+            candidate_models.append("gemini-2.0-flash")
+        if "gemini-1.5-flash" not in candidate_models:
+            candidate_models.append("gemini-1.5-flash")
 
         try:
             async with httpx.AsyncClient(timeout=45.0) as client:
@@ -129,17 +139,39 @@ class GeminiFlashLiteProvider(BaseLLMProvider):
                         logger.warning("[GeminiProvider] Request returned status %d: %s.", resp.status_code, resp.text[:200])
                         break
 
-                return self._fallback_structured_response(messages)
+                return self._fallback_structured_response(messages, json_mode=bool(effective_mime == "application/json"))
         except Exception as e:
             logger.error("[GeminiProvider] Exception during generation: %s", e)
-            return self._fallback_structured_response(messages)
+            return self._fallback_structured_response(messages, json_mode=bool(effective_mime == "application/json"))
 
-    async def stream_chat(self, messages: List[ChatMessage], model: Optional[str] = None, temperature: float = 0.2) -> AsyncGenerator[str, None]:
-        res = await self.complete(messages, model=model, temperature=temperature)
+    async def stream_chat(
+        self,
+        messages: List[ChatMessage],
+        model: Optional[str] = None,
+        temperature: float = 0.2,
+        response_mime_type: Optional[str] = None,
+        json_mode: bool = False,
+        **kwargs: Any,
+    ) -> AsyncGenerator[str, None]:
+        res = await self.complete(
+            messages,
+            model=model,
+            temperature=temperature,
+            response_mime_type=response_mime_type,
+            json_mode=json_mode,
+            **kwargs,
+        )
         yield res
 
-    def _fallback_structured_response(self, messages: List[ChatMessage]) -> str:
-        """Deterministic offline fallback response matching required JSON schema."""
+    def _fallback_structured_response(self, messages: List[ChatMessage], json_mode: bool = True) -> str:
+        """Deterministic offline fallback response matching required format (JSON or freeform Markdown)."""
+        if not json_mode:
+            return (
+                "### Research Copilot Analysis\n\n"
+                "- **Core Finding**: Investigates representation scaling, attention mechanism dynamics, and empirical benchmark efficiency.\n"
+                "- **Mathematical Formulation**: Optimized via regularized objective: $$\\min_\\theta \\mathcal{L}(\\theta)$$\n"
+                "- **Empirical Validation**: Demonstrates statistical gains across standard benchmark evaluation splits against strong baselines."
+            )
         prompt_text = " ".join(m.content for m in messages)
         return json.dumps({
             "problem": "Investigates core computational bottlenecks and sample complexity in the target domain.",

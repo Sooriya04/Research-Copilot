@@ -1,5 +1,5 @@
 import abc
-from typing import AsyncGenerator, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional
 from pydantic import BaseModel
 
 class ChatMessage(BaseModel):
@@ -30,13 +30,13 @@ class BaseLLMProvider(abc.ABC):
     """Abstract interface for LLM chat completion & streaming."""
 
     @abc.abstractmethod
-    async def complete(self, messages: List[ChatMessage], model: Optional[str] = None, temperature: float = 0.7) -> str:
+    async def complete(self, messages: List[ChatMessage], model: Optional[str] = None, temperature: float = 0.7, **kwargs: Any) -> str:
         """Generate non-streaming text completion."""
         pass
 
     @abc.abstractmethod
     async def stream_chat(
-        self, messages: List[ChatMessage], model: Optional[str] = None, temperature: float = 0.7
+        self, messages: List[ChatMessage], model: Optional[str] = None, temperature: float = 0.7, **kwargs: Any
     ) -> AsyncGenerator[str, None]:
         """Stream completion tokens as Server-Sent Events."""
         pass
