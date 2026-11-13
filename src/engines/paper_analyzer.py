@@ -4,6 +4,7 @@ from src.core.canonical_models import (
     BenchmarkEvidence, CanonicalPaper, CodeRepository, ExtractedClaim,
     PaperSectionEntity, PaperSectionType, StructuredPaperSummary, VerificationStatus
 )
+from src.core.json_utils import parse_llm_json
 from src.core.logger import logger
 from src.providers.base import ChatMessage
 from src.providers.gemini import GeminiFlashLiteProvider
@@ -87,14 +88,14 @@ class PaperAnalyzer:
             ChatMessage(role="user", content=f"Analyze this research paper evidence package:\n\n{evidence_pkg}")
         ]
 
-        raw_json_str = await self.provider.complete(messages)
-
         try:
-            parsed = json.loads(raw_json_str)
-        except Exception:
-            # Fallback if markdown fence was included
-            clean_str = raw_json_str.replace("```json", "").replace("```", "").strip()
-            parsed = json.loads(clean_str)
+            raw_json_str = await self.provider.complete(messages, json_mode=True)
+        except TypeError:
+            raw_json_str = await self.provider.complete(messages)
+
+        parsed = parse_llm_json(raw_json_str, default={})
+        if not isinstance(parsed, dict):
+            parsed = {}
 
         claims = [
             ExtractedClaim(

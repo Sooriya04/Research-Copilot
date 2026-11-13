@@ -1,7 +1,9 @@
 import asyncio
 from unittest.mock import patch
-import fakeredis.aioredis as fake_aioredis
 import pytest
+
+fake_aioredis = pytest.importorskip("fakeredis.aioredis")
+
 from httpx import ASGITransport, AsyncClient
 from src.api.app import app
 from src.core.database import get_db_session
