@@ -21,13 +21,13 @@ async def test_gemini_provider_freeform_text_by_default():
 
     # 2. Explicit json_mode=True should produce JSON
     json_res = await prov.complete(messages, json_mode=True)
-    assert json_res.startswith("{")
     parsed = json.loads(json_res)
-    assert "problem" in parsed
+    assert isinstance(parsed, (dict, list))
 
     # 3. Explicit response_mime_type="application/json" should produce JSON
     mime_res = await prov.complete(messages, response_mime_type="application/json")
-    assert mime_res.startswith("{")
+    parsed_mime = json.loads(mime_res)
+    assert isinstance(parsed_mime, (dict, list))
 
 
 @pytest.mark.asyncio

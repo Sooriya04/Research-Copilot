@@ -1,6 +1,7 @@
 import hashlib
 import re
 import urllib.parse
+import weakref
 from typing import Dict, List, Optional, Tuple
 import xml.etree.ElementTree as ET
 import httpx
@@ -11,13 +12,49 @@ from src.core.schemas import Author, Paper, PaperAccessCandidate, PaperAccessRes
 class AccessResolver:
     """Multi-source scientific paper search and legal full-text access resolver."""
 
-    def __init__(self, timeout: float = 15.0):
+    _instances: "weakref.WeakSet[AccessResolver]" = weakref.WeakSet()
+
+    def __init__(self, timeout: float = 15.0, client: Optional[httpx.AsyncClient] = None):
         self.timeout = timeout
         self.headers = {
             "User-Agent": f"ResearchCopilot/{settings.app_version} (mailto:{settings.openalex_email})"
         }
         if settings.openalex_api_key:
             self.headers["Authorization"] = f"Bearer {settings.openalex_api_key}"
+        self._client: Optional[httpx.AsyncClient] = client
+        AccessResolver._instances.add(self)
+
+    @property
+    def client(self) -> httpx.AsyncClient:
+        """Returns the persistent httpx.AsyncClient, creating one if not initialized or closed."""
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                timeout=self.timeout,
+                headers=self.headers,
+                follow_redirects=True,
+            )
+        return self._client
+
+    async def aclose(self) -> None:
+        """Close underlying persistent HTTP client."""
+        if self._client is not None and not self._client.is_closed:
+            await self._client.aclose()
+            self._client = None
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.aclose()
+
+    @classmethod
+    async def aclose_all(cls) -> None:
+        """Close all persistent HTTP clients across active instances."""
+        for inst in list(cls._instances):
+            try:
+                await inst.aclose()
+            except Exception as e:
+                logger.debug("[AccessResolver] Error closing client: %s", e)
 
     @staticmethod
     def detect_identifier_type(identifier: str) -> Tuple[str, str]:
@@ -71,17 +108,16 @@ class AccessResolver:
             params["api_key"] = settings.openalex_api_key
         papers: List[Paper] = []
         try:
-            async with httpx.AsyncClient(timeout=self.timeout, headers=self.headers) as client:
-                resp = await client.get(url, params=params)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    for item in data.get("results", []):
-                        paper = self._parse_openalex_item(item)
-                        if paper:
-                            papers.append(paper)
-                    logger.info("[OpenAlex] Fetched %d papers for query: '%s'", len(papers), query)
-                else:
-                    logger.warning("[OpenAlex] Search failed with status %d: %s", resp.status_code, resp.text[:200])
+            resp = await self.client.get(url, params=params)
+            if resp.status_code == 200:
+                data = resp.json()
+                for item in data.get("results", []):
+                    paper = self._parse_openalex_item(item)
+                    if paper:
+                        papers.append(paper)
+                logger.info("[OpenAlex] Fetched %d papers for query: '%s'", len(papers), query)
+            else:
+                logger.warning("[OpenAlex] Search failed with status %d: %s", resp.status_code, resp.text[:200])
         except Exception as e:
             logger.error("[OpenAlex] Search exception for query '%s': %s", query, e)
         return papers
@@ -101,76 +137,74 @@ class AccessResolver:
 
         papers: List[Paper] = []
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                resp = await client.get(url)
-                if resp.status_code == 200:
-                    root = ET.fromstring(resp.text)
-                    ns = {"atom": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas/atom"}
+            resp = await self.client.get(url)
+            if resp.status_code == 200:
+                root = ET.fromstring(resp.text)
+                ns = {"atom": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas/atom"}
+                
+                for entry in root.findall("atom:entry", ns):
+                    id_elem = entry.find("atom:id", ns)
+                    title_elem = entry.find("atom:title", ns)
+                    summary_elem = entry.find("atom:summary", ns)
+                    published_elem = entry.find("atom:published", ns)
                     
-                    for entry in root.findall("atom:entry", ns):
-                        id_elem = entry.find("atom:id", ns)
-                        title_elem = entry.find("atom:title", ns)
-                        summary_elem = entry.find("atom:summary", ns)
-                        published_elem = entry.find("atom:published", ns)
+                    if title_elem is None or title_elem.text is None:
+                        continue
                         
-                        if title_elem is None or title_elem.text is None:
-                            continue
+                    raw_id = id_elem.text.strip() if id_elem is not None and id_elem.text else ""
+                    arxiv_id = raw_id.split("/abs/")[-1] if "/abs/" in raw_id else raw_id
+                    
+                    authors: List[Author] = []
+                    for author_elem in entry.findall("atom:author", ns):
+                        name_elem = author_elem.find("atom:name", ns)
+                        if name_elem is not None and name_elem.text:
+                            authors.append(Author(name=name_elem.text.strip()))
                             
-                        raw_id = id_elem.text.strip() if id_elem is not None and id_elem.text else ""
-                        arxiv_id = raw_id.split("/abs/")[-1] if "/abs/" in raw_id else raw_id
+                    pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf" if arxiv_id else None
+                    pub_year = None
+                    if published_elem is not None and published_elem.text:
+                        pub_year = int(published_elem.text[:4])
                         
-                        authors: List[Author] = []
-                        for author_elem in entry.findall("atom:author", ns):
-                            name_elem = author_elem.find("atom:name", ns)
-                            if name_elem is not None and name_elem.text:
-                                authors.append(Author(name=name_elem.text.strip()))
-                                
-                        pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf" if arxiv_id else None
-                        pub_year = None
-                        if published_elem is not None and published_elem.text:
-                            pub_year = int(published_elem.text[:4])
-                            
-                        papers.append(Paper(
-                            id=f"arxiv:{arxiv_id}" if arxiv_id else f"raw:{hashlib.sha256(title_elem.text.encode('utf-8')).hexdigest()[:12]}",
-                            title=re.sub(r"\s+", " ", title_elem.text).strip(),
-                            abstract=re.sub(r"\s+", " ", summary_elem.text).strip() if summary_elem is not None and summary_elem.text else "",
-                            authors=authors,
-                            year=pub_year,
-                            publication_date=published_elem.text if published_elem is not None else None,
-                            arxiv_id=arxiv_id,
-                            primary_source="arxiv",
-                            url=raw_id,
-                            pdf_url=pdf_url,
-                            is_open_access=True,
-                        ))
-                    logger.info("[arXiv] Fetched %d papers for query: '%s'", len(papers), query)
-                else:
-                    logger.warning("[arXiv] Search failed with status %d", resp.status_code)
+                    papers.append(Paper(
+                        id=f"arxiv:{arxiv_id}" if arxiv_id else f"raw:{hashlib.sha256(title_elem.text.encode('utf-8')).hexdigest()[:12]}",
+                        title=re.sub(r"\s+", " ", title_elem.text).strip(),
+                        abstract=re.sub(r"\s+", " ", summary_elem.text).strip() if summary_elem is not None and summary_elem.text else "",
+                        authors=authors,
+                        year=pub_year,
+                        publication_date=published_elem.text if published_elem is not None else None,
+                        arxiv_id=arxiv_id,
+                        primary_source="arxiv",
+                        url=raw_id,
+                        pdf_url=pdf_url,
+                        is_open_access=True,
+                    ))
+                logger.info("[arXiv] Fetched %d papers for query: '%s'", len(papers), query)
+            else:
+                logger.warning("[arXiv] Search failed with status %d", resp.status_code)
         except Exception as e:
             logger.error("[arXiv] Search exception: %s", e)
 
         # Resilient fallback if arXiv API timed out for a direct arXiv ID
         if not papers and is_arxiv_id:
             try:
-                async with httpx.AsyncClient(timeout=5.0) as client:
-                    s2_url = f"https://api.semanticscholar.org/graph/v1/paper/arXiv:{clean_id}?fields=title,abstract,authors,year,isOpenAccess,openAccessPdf"
-                    resp = await client.get(s2_url)
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        title = data.get("title")
-                        if title:
-                            papers.append(Paper(
-                                id=f"arxiv:{clean_id}",
-                                title=title,
-                                abstract=data.get("abstract") or "",
-                                authors=[Author(name=a.get("name", "Author")) for a in data.get("authors", [])],
-                                year=data.get("year"),
-                                arxiv_id=clean_id,
-                                primary_source="arxiv",
-                                url=f"https://arxiv.org/abs/{clean_id}",
-                                pdf_url=f"https://arxiv.org/pdf/{clean_id}.pdf",
-                                is_open_access=True,
-                            ))
+                s2_url = f"https://api.semanticscholar.org/graph/v1/paper/arXiv:{clean_id}?fields=title,abstract,authors,year,isOpenAccess,openAccessPdf"
+                resp = await self.client.get(s2_url)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    title = data.get("title")
+                    if title:
+                        papers.append(Paper(
+                            id=f"arxiv:{clean_id}",
+                            title=title,
+                            abstract=data.get("abstract") or "",
+                            authors=[Author(name=a.get("name", "Author")) for a in data.get("authors", [])],
+                            year=data.get("year"),
+                            arxiv_id=clean_id,
+                            primary_source="arxiv",
+                            url=f"https://arxiv.org/abs/{clean_id}",
+                            pdf_url=f"https://arxiv.org/pdf/{clean_id}.pdf",
+                            is_open_access=True,
+                        ))
             except Exception:
                 pass
 
@@ -186,99 +220,99 @@ class AccessResolver:
         if settings.openalex_api_key:
             oa_params["api_key"] = settings.openalex_api_key
 
-        async with httpx.AsyncClient(timeout=self.timeout, headers=self.headers) as client:
-            if id_type == "openalex":
-                url = f"{settings.openalex_base_url}/works/{clean_id}"
-                try:
-                    resp = await client.get(url, params=oa_params)
-                    if resp.status_code == 200:
-                        paper = self._parse_openalex_item(resp.json())
-                except Exception as e:
-                    logger.debug("[AccessResolver] OpenAlex resolution error: %s", e)
-            elif id_type == "doi":
-                url = f"{settings.openalex_base_url}/works/https://doi.org/{clean_id}"
-                try:
-                    resp = await client.get(url, params=oa_params)
-                    if resp.status_code == 200:
-                        paper = self._parse_openalex_item(resp.json())
-                except Exception as e:
-                    logger.debug("[AccessResolver] OpenAlex DOI resolution error: %s", e)
-            elif id_type == "arxiv":
-                try:
-                    papers = await self.search_arxiv(clean_id, limit=1)
-                    if papers:
-                        paper = papers[0]
-                except Exception as e:
-                    logger.debug("[AccessResolver] arXiv resolution error: %s", e)
-            elif id_type == "semanticscholar":
-                s2_url = f"https://api.semanticscholar.org/graph/v1/paper/{clean_id}?fields=title,abstract,authors,year,externalIds,venue,citationCount,isOpenAccess,openAccessPdf"
-                try:
-                    s2_resp = await client.get(s2_url)
-                    if s2_resp.status_code == 200:
-                        s2_data = s2_resp.json()
-                        ext_ids = s2_data.get("externalIds", {})
-                        arxiv_id = ext_ids.get("ArXiv")
-                        doi_val = ext_ids.get("DOI")
-                        oa_pdf = s2_data.get("openAccessPdf", {}) or {}
-                        pdf_url = oa_pdf.get("url") or (f"https://arxiv.org/pdf/{arxiv_id}.pdf" if arxiv_id else None)
-                        paper = Paper(
-                            id=f"s2:{clean_id}",
-                            title=s2_data.get("title") or "Untitled Paper",
-                            abstract=s2_data.get("abstract") or "",
-                            authors=[Author(name=a.get("name", "Author")) for a in s2_data.get("authors", [])],
-                            year=s2_data.get("year"),
-                            doi=doi_val,
-                            arxiv_id=arxiv_id,
-                            primary_source="semanticscholar",
-                            url=f"https://www.semanticscholar.org/paper/{clean_id}",
-                            pdf_url=pdf_url,
-                            citation_count=s2_data.get("citationCount") or 0,
-                            is_open_access=bool(s2_data.get("isOpenAccess") or pdf_url),
-                        )
-                except Exception as e:
-                    logger.debug("[AccessResolver] S2 API resolution failed: %s", e)
-            else:
-                try:
-                    papers = await self.search_openalex(clean_id, limit=1)
-                    if papers:
-                        paper = papers[0]
-                except Exception as e:
-                    logger.debug("[AccessResolver] OpenAlex query search error: %s", e)
-
-            # CrossRef fallback if DOI provided and paper is missing or lacks abstract
-            if id_type == "doi" and (not paper or not paper.abstract):
-                try:
-                    cr_resp = await client.get(
-                        f"https://api.crossref.org/works/{clean_id}",
-                        headers={"User-Agent": "ResearchCopilot/2.0 (mailto:scholar@researchcopilot.org)"}
+        client = self.client
+        if id_type == "openalex":
+            url = f"{settings.openalex_base_url}/works/{clean_id}"
+            try:
+                resp = await client.get(url, params=oa_params)
+                if resp.status_code == 200:
+                    paper = self._parse_openalex_item(resp.json())
+            except Exception as e:
+                logger.debug("[AccessResolver] OpenAlex resolution error: %s", e)
+        elif id_type == "doi":
+            url = f"{settings.openalex_base_url}/works/https://doi.org/{clean_id}"
+            try:
+                resp = await client.get(url, params=oa_params)
+                if resp.status_code == 200:
+                    paper = self._parse_openalex_item(resp.json())
+            except Exception as e:
+                logger.debug("[AccessResolver] OpenAlex DOI resolution error: %s", e)
+        elif id_type == "arxiv":
+            try:
+                papers = await self.search_arxiv(clean_id, limit=1)
+                if papers:
+                    paper = papers[0]
+            except Exception as e:
+                logger.debug("[AccessResolver] arXiv resolution error: %s", e)
+        elif id_type == "semanticscholar":
+            s2_url = f"https://api.semanticscholar.org/graph/v1/paper/{clean_id}?fields=title,abstract,authors,year,externalIds,venue,citationCount,isOpenAccess,openAccessPdf"
+            try:
+                s2_resp = await client.get(s2_url)
+                if s2_resp.status_code == 200:
+                    s2_data = s2_resp.json()
+                    ext_ids = s2_data.get("externalIds", {})
+                    arxiv_id = ext_ids.get("ArXiv")
+                    doi_val = ext_ids.get("DOI")
+                    oa_pdf = s2_data.get("openAccessPdf", {}) or {}
+                    pdf_url = oa_pdf.get("url") or (f"https://arxiv.org/pdf/{arxiv_id}.pdf" if arxiv_id else None)
+                    paper = Paper(
+                        id=f"s2:{clean_id}",
+                        title=s2_data.get("title") or "Untitled Paper",
+                        abstract=s2_data.get("abstract") or "",
+                        authors=[Author(name=a.get("name", "Author")) for a in s2_data.get("authors", [])],
+                        year=s2_data.get("year"),
+                        doi=doi_val,
+                        arxiv_id=arxiv_id,
+                        primary_source="semanticscholar",
+                        url=f"https://www.semanticscholar.org/paper/{clean_id}",
+                        pdf_url=pdf_url,
+                        citation_count=s2_data.get("citationCount") or 0,
+                        is_open_access=bool(s2_data.get("isOpenAccess") or pdf_url),
                     )
-                    if cr_resp.status_code == 200:
-                        cr_msg = cr_resp.json().get("message", {})
-                        if not paper:
-                            authors_list = []
-                            for a in cr_msg.get("author", []):
-                                g = a.get("given", "").strip()
-                                f = a.get("family", "").strip()
-                                authors_list.append(Author(name=f"{g} {f}".strip() or "Author"))
-                            pub_parts = (cr_msg.get("published-print") or cr_msg.get("published-online") or {}).get("date-parts", [[]])[0]
-                            year_val = pub_parts[0] if pub_parts else None
-                            container = cr_msg.get("container-title", [""])[0] if cr_msg.get("container-title") else None
-                            paper = Paper(
-                                id=f"doi:{clean_id}",
-                                title=(cr_msg.get("title") or ["Untitled Paper"])[0],
-                                authors=authors_list,
-                                year=year_val,
-                                doi=clean_id,
-                                primary_source="crossref",
-                                url=f"https://doi.org/{clean_id}",
-                                journal=container,
-                            )
-                        if not paper.abstract and cr_msg.get("abstract"):
-                            raw_abs = cr_msg.get("abstract")
-                            clean_abs = re.sub(r"<[^>]+>", "", raw_abs).strip()
-                            paper.abstract = clean_abs
-                except Exception as e:
-                    logger.debug("[AccessResolver] CrossRef lookup failed: %s", e)
+            except Exception as e:
+                logger.debug("[AccessResolver] S2 API resolution failed: %s", e)
+        else:
+            try:
+                papers = await self.search_openalex(clean_id, limit=1)
+                if papers:
+                    paper = papers[0]
+            except Exception as e:
+                logger.debug("[AccessResolver] OpenAlex query search error: %s", e)
+
+        # CrossRef fallback if DOI provided and paper is missing or lacks abstract
+        if id_type == "doi" and (not paper or not paper.abstract):
+            try:
+                cr_resp = await client.get(
+                    f"https://api.crossref.org/works/{clean_id}",
+                    headers={"User-Agent": "ResearchCopilot/2.0 (mailto:scholar@researchcopilot.org)"}
+                )
+                if cr_resp.status_code == 200:
+                    cr_msg = cr_resp.json().get("message", {})
+                    if not paper:
+                        authors_list = []
+                        for a in cr_msg.get("author", []):
+                            g = a.get("given", "").strip()
+                            f = a.get("family", "").strip()
+                            authors_list.append(Author(name=f"{g} {f}".strip() or "Author"))
+                        pub_parts = (cr_msg.get("published-print") or cr_msg.get("published-online") or {}).get("date-parts", [[]])[0]
+                        year_val = pub_parts[0] if pub_parts else None
+                        container = cr_msg.get("container-title", [""])[0] if cr_msg.get("container-title") else None
+                        paper = Paper(
+                            id=f"doi:{clean_id}",
+                            title=(cr_msg.get("title") or ["Untitled Paper"])[0],
+                            authors=authors_list,
+                            year=year_val,
+                            doi=clean_id,
+                            primary_source="crossref",
+                            url=f"https://doi.org/{clean_id}",
+                            journal=container,
+                        )
+                    if not paper.abstract and cr_msg.get("abstract"):
+                        raw_abs = cr_msg.get("abstract")
+                        clean_abs = re.sub(r"<[^>]+>", "", raw_abs).strip()
+                        paper.abstract = clean_abs
+            except Exception as e:
+                logger.debug("[AccessResolver] CrossRef lookup failed: %s", e)
 
         if not paper:
             # Fallback paper object created from identifier when external metadata APIs are unreachable
@@ -295,57 +329,56 @@ class AccessResolver:
         if paper:
             # Multi-source fallback candidate resolution if PDF or arXiv ID is missing
             if not paper.pdf_url and not paper.arxiv_id:
-                async with httpx.AsyncClient(timeout=self.timeout, headers=self.headers) as client:
-                    # 1. Check Unpaywall for open-access PDF
-                    if paper.doi:
-                        try:
-                            upw_resp = await client.get(
-                                f"https://api.unpaywall.org/v2/{paper.doi}?email={settings.openalex_email or 'scholar@researchcopilot.org'}"
-                            )
-                            if upw_resp.status_code == 200:
-                                upw_data = upw_resp.json()
-                                if upw_data.get("is_oa"):
-                                    best_oa = upw_data.get("best_oa_location") or {}
-                                    pdf_cand = best_oa.get("url_for_pdf") or best_oa.get("url")
-                                    if pdf_cand:
-                                        paper.pdf_url = pdf_cand
-                                        paper.is_open_access = True
-                        except Exception as e:
-                            logger.debug("[AccessResolver] Unpaywall lookup failed: %s", e)
+                # 1. Check Unpaywall for open-access PDF
+                if paper.doi:
+                    try:
+                        upw_resp = await client.get(
+                            f"https://api.unpaywall.org/v2/{paper.doi}?email={settings.openalex_email or 'scholar@researchcopilot.org'}"
+                        )
+                        if upw_resp.status_code == 200:
+                            upw_data = upw_resp.json()
+                            if upw_data.get("is_oa"):
+                                best_oa = upw_data.get("best_oa_location") or {}
+                                pdf_cand = best_oa.get("url_for_pdf") or best_oa.get("url")
+                                if pdf_cand:
+                                    paper.pdf_url = pdf_cand
+                                    paper.is_open_access = True
+                    except Exception as e:
+                        logger.debug("[AccessResolver] Unpaywall lookup failed: %s", e)
 
-                    # 2. Resolve DOI via Semantic Scholar to check for open access PDF or linked arXiv ID
-                    if not paper.pdf_url and paper.doi:
-                        try:
-                            s2_url = f"https://api.semanticscholar.org/graph/v1/paper/{paper.doi}?fields=title,abstract,externalIds,openAccessPdf,tldr"
-                            s2_resp = await client.get(s2_url)
-                            if s2_resp.status_code == 200:
-                                s2_data = s2_resp.json()
-                                ext_ids = s2_data.get("externalIds", {})
-                                if ext_ids.get("ArXiv"):
-                                    paper.arxiv_id = ext_ids["ArXiv"]
-                                    paper.pdf_url = f"https://arxiv.org/pdf/{paper.arxiv_id}.pdf"
-                                elif s2_data.get("openAccessPdf", {}).get("url"):
-                                    paper.pdf_url = s2_data["openAccessPdf"]["url"]
-                                if not paper.abstract:
-                                    paper.abstract = s2_data.get("abstract") or s2_data.get("tldr", {}).get("text") or ""
-                        except Exception as e:
-                            logger.debug("[AccessResolver] S2 DOI fallback failed: %s", e)
+                # 2. Resolve DOI via Semantic Scholar to check for open access PDF or linked arXiv ID
+                if not paper.pdf_url and paper.doi:
+                    try:
+                        s2_url = f"https://api.semanticscholar.org/graph/v1/paper/{paper.doi}?fields=title,abstract,externalIds,openAccessPdf,tldr"
+                        s2_resp = await client.get(s2_url)
+                        if s2_resp.status_code == 200:
+                            s2_data = s2_resp.json()
+                            ext_ids = s2_data.get("externalIds", {})
+                            if ext_ids.get("ArXiv"):
+                                paper.arxiv_id = ext_ids["ArXiv"]
+                                paper.pdf_url = f"https://arxiv.org/pdf/{paper.arxiv_id}.pdf"
+                            elif s2_data.get("openAccessPdf", {}).get("url"):
+                                paper.pdf_url = s2_data["openAccessPdf"]["url"]
+                            if not paper.abstract:
+                                paper.abstract = s2_data.get("abstract") or s2_data.get("tldr", {}).get("text") or ""
+                    except Exception as e:
+                        logger.debug("[AccessResolver] S2 DOI fallback failed: %s", e)
 
-                    # 3. If still missing, try title search on arXiv
-                    if not paper.pdf_url and not paper.arxiv_id and paper.title:
-                        try:
-                            clean_title = re.sub(r"[^a-zA-Z0-9\s]", " ", paper.title.split(":")[0]).strip()
-                            if len(clean_title) >= 4:
-                                arxiv_matches = await self.search_arxiv(clean_title, limit=3)
-                                for am in arxiv_matches:
-                                    t1 = re.sub(r"\W+", "", am.title.lower())
-                                    t2 = re.sub(r"\W+", "", paper.title.lower())
-                                    if t1 in t2 or t2 in t1 or am.title.lower().startswith(clean_title.lower()):
-                                        paper.arxiv_id = am.arxiv_id
-                                        paper.pdf_url = am.pdf_url or f"https://arxiv.org/pdf/{am.arxiv_id}.pdf"
-                                        break
-                        except Exception as e:
-                            logger.debug("[AccessResolver] arXiv title fallback search failed: %s", e)
+                # 3. If still missing, try title search on arXiv
+                if not paper.pdf_url and not paper.arxiv_id and paper.title:
+                    try:
+                        clean_title = re.sub(r"[^a-zA-Z0-9\s]", " ", paper.title.split(":")[0]).strip()
+                        if len(clean_title) >= 4:
+                            arxiv_matches = await self.search_arxiv(clean_title, limit=3)
+                            for am in arxiv_matches:
+                                t1 = re.sub(r"\W+", "", am.title.lower())
+                                t2 = re.sub(r"\W+", "", paper.title.lower())
+                                if t1 in t2 or t2 in t1 or am.title.lower().startswith(clean_title.lower()):
+                                    paper.arxiv_id = am.arxiv_id
+                                    paper.pdf_url = am.pdf_url or f"https://arxiv.org/pdf/{am.arxiv_id}.pdf"
+                                    break
+                    except Exception as e:
+                        logger.debug("[AccessResolver] arXiv title fallback search failed: %s", e)
 
             # Build access candidates
             if paper.pdf_url:
@@ -516,18 +549,17 @@ class AccessResolver:
         logger.info("[AccessResolver] Fetching Europe PMC full-text XML for %s", normalized_pmcid)
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout, headers=self.headers, follow_redirects=True) as client:
-                resp = await client.get(url)
-                if resp.status_code == 404:
-                    logger.debug("[AccessResolver] Europe PMC full-text XML not available (404) for %s", normalized_pmcid)
-                    return []
-                if resp.status_code != 200:
-                    logger.warning("[AccessResolver] Europe PMC XML request returned status %d for %s", resp.status_code, normalized_pmcid)
-                    return []
-                if not resp.content or len(resp.content) < 100:
-                    return []
+            resp = await self.client.get(url)
+            if resp.status_code == 404:
+                logger.debug("[AccessResolver] Europe PMC full-text XML not available (404) for %s", normalized_pmcid)
+                return []
+            if resp.status_code != 200:
+                logger.warning("[AccessResolver] Europe PMC XML request returned status %d for %s", resp.status_code, normalized_pmcid)
+                return []
+            if not resp.content or len(resp.content) < 100:
+                return []
 
-                return self.parse_jats_xml(resp.content)
+            return self.parse_jats_xml(resp.content)
         except httpx.TimeoutException:
             logger.warning("[AccessResolver] Europe PMC XML request timed out for %s", normalized_pmcid)
             return []

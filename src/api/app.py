@@ -34,6 +34,8 @@ async def lifespan(app: FastAPI):
     await init_db()
     yield
     logger.info("Shutting down Research Copilot API Server...")
+    from src.engines.access_resolver import AccessResolver
+    await AccessResolver.aclose_all()
 
 
 def create_app() -> FastAPI:
