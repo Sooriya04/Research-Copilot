@@ -179,7 +179,6 @@ class PDFVisualExtractor:
                             claim_ids=[]
                         ))
 
-            doc.close()
         except Exception as e:
             logger.error("PDFVisualExtractor failed to extract visual assets for %s: %s", paper_id, e)
         finally:

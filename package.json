@@ -1,4 +1,10 @@
 {
+  "name": "research-copilot",
+  "private": true,
+  "scripts": {
+    "dev": "./run.sh",
+    "build": "npm run --prefix frontend build"
+  },
   "dependencies": {
     "marked": "^18.0.13"
   }
