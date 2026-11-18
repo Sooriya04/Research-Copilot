@@ -5,7 +5,7 @@ def setup_logger(name: str = "research_copilot", level: int = logging.INFO) -> l
     logger = logging.getLogger(name)
     if not logger.handlers:
         logger.setLevel(level)
-        handler = logging.StreamHandler(sys.stdout)
+        handler = logging.StreamHandler(sys.stderr)
         handler.setLevel(level)
         formatter = logging.Formatter(
             fmt="%(asctime)s [%(levelname)s] [%(name)s] %(message)s",

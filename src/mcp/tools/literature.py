@@ -110,17 +110,20 @@ async def handle_search_literature(arguments: Dict[str, Any]) -> str:
         async def _pwc_wrapper():
             from src.engines.paperswithcode import PapersWithCodeClient
             client = PapersWithCodeClient()
-            pwc_papers = await client.search_papers(query, limit=limit)
+            tasks = await client.search_tasks(query, limit=limit)
             out = []
-            for p in pwc_papers:
+            for t in tasks:
+                task_id = t.get("id") or "task"
+                name = t.get("name") or task_id
+                desc = t.get("description") or f"Evaluation benchmarks for {name}."
                 out.append(Paper(
-                    id=f"pwc:{p.id}",
-                    title=p.title,
-                    abstract=p.abstract or "Papers with Code benchmark entry.",
+                    id=f"pwc:{task_id}",
+                    title=f"Benchmark Task: {name}",
+                    abstract=desc,
                     authors=[],
-                    year=p.published_year,
-                    url=p.url,
-                    pdf_url=p.pdf_url,
+                    year=None,
+                    url=t.get("url") or f"https://paperswithcode.com/task/{task_id}",
+                    pdf_url=None,
                     primary_source="paperswithcode",
                     is_open_access=True,
                 ))

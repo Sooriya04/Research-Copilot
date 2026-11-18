@@ -505,17 +505,20 @@ async def search_unified_endpoint(req: UnifiedSearchRequest, request: Request, d
         async def _pwc_wrapper():
             from src.engines.paperswithcode import PapersWithCodeClient
             client = PapersWithCodeClient()
-            pwc_papers = await client.search_papers(req.query, limit=req.limit_per_source)
+            tasks = await client.search_tasks(req.query, limit=req.limit_per_source)
             converted = []
-            for p in pwc_papers:
+            for t in tasks:
+                task_id = t.get("id") or "task"
+                name = t.get("name") or task_id
+                desc = t.get("description") or f"Evaluation benchmarks for {name}."
                 converted.append(Paper(
-                    id=f"pwc:{p.id}",
-                    title=p.title,
-                    abstract=p.abstract or "Papers with Code benchmark repository entry.",
-                    authors=[Author(name=a) for a in (p.authors or [])],
-                    year=p.published_year,
-                    url=p.url,
-                    pdf_url=p.pdf_url,
+                    id=f"pwc:{task_id}",
+                    title=f"Benchmark Task: {name}",
+                    abstract=desc,
+                    authors=[],
+                    year=None,
+                    url=t.get("url") or f"https://paperswithcode.com/task/{task_id}",
+                    pdf_url=None,
                     primary_source="paperswithcode",
                     is_open_access=True,
                 ))

@@ -138,6 +138,27 @@ async def test_mcp_search_literature_execution(monkeypatch):
     assert data["papers"][0]["title"] == "Sparse Mixture of Experts Routing"
     assert "Alice Smith" in data["papers"][0]["authors"]
 
+    # 2. Test paperswithcode source handling
+    req_pwc = json.dumps({
+        "jsonrpc": "2.0",
+        "id": 105,
+        "method": "tools/call",
+        "params": {
+            "name": "search_literature",
+            "arguments": {
+                "query": "classification",
+                "sources": ["paperswithcode"],
+                "limit": 3,
+            },
+        },
+    })
+    res_pwc = json.loads(await server.handle_raw_message(req_pwc))
+    assert res_pwc["id"] == 105
+    data_pwc = json.loads(res_pwc["result"]["content"][0]["text"])
+    assert data_pwc["query"] == "classification"
+    assert len(data_pwc["papers"]) > 0
+    assert data_pwc["papers"][0]["primary_source"] == "paperswithcode"
+
 
 @pytest.mark.asyncio
 async def test_mcp_resolve_paper_validation():
