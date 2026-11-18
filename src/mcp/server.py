@@ -39,6 +39,10 @@ from src.mcp.tools.novelty_studio import (
     SYNTHESIZE_CRITIQUE_METADATA,
     handle_synthesize_critique,
 )
+from src.mcp.tools.reproduction import (
+    GENERATE_REPRODUCTION_PLAN_METADATA,
+    handle_generate_reproduction_plan,
+)
 
 
 
@@ -65,6 +69,9 @@ def create_mcp_server() -> MCPProtocolHandler:
     server.register_tool(EXTRACT_RESEARCH_GAPS_METADATA, handle_extract_research_gaps)
     server.register_tool(GENERATE_NOVEL_HYPOTHESES_METADATA, handle_generate_novel_hypotheses)
     server.register_tool(SYNTHESIZE_CRITIQUE_METADATA, handle_synthesize_critique)
+
+    # Register Domain 5 Tools: Reproduction & Experiment Planning
+    server.register_tool(GENERATE_REPRODUCTION_PLAN_METADATA, handle_generate_reproduction_plan)
 
     return server
 

@@ -112,8 +112,8 @@
   [x] generate_novel_hypotheses  (Implemented, grounded multi-paper hypotheses, falsifiability criteria, 4 mechanisms)
   [x] synthesize_critique        (Implemented, peer-review methodology critique, validity threats, calibrated verdict score)
 
-[ Domain 5: Reproduction & Experiment Planning ]
-  [ ] generate_reproduction_plan
+[ Domain 5: Reproduction & Experiment Planning ] — In Progress (1 of 2 Tools)
+  [x] generate_reproduction_plan (Implemented, multi-hardware budget, uv/pip env spec, 4 execution phases, early-abort checkpoints)
   [ ] audit_reproducibility
 
 [ Domain 6: Knowledge Graph & Synthesis ]
