@@ -5,7 +5,7 @@ Tools:
   - summarize_paper: Multi-dimensional executive and architectural summary with benchmark & claim verification.
   - extract_paper_assets: Figure, table, and equation coordinate extraction.
   - verify_paper_claim: Ground claims against verbatim paper text with empirical verification.
-  - paper_grounded_qa: (Coming next) Hybrid RAG Q&A with page citations.
+  - paper_grounded_qa: Hybrid RAG Q&A with page citations, quotes, and bounding-box coordinates.
 """
 import asyncio
 import json
@@ -18,7 +18,9 @@ from src.core.logger import logger
 from src.engines.canonical_resolver import CanonicalPaperResolver
 from src.engines.claim_verifier import ClaimVerifier
 from src.engines.excerpt_verifier import DeterministicExcerptVerifier
+from src.engines.grounded_qa import GroundedQAEngine
 from src.engines.paper_intelligence_engine import PaperIntelligenceEngine
+from src.engines.pdf_coordinate_engine import PDFCoordinateEngine
 from src.engines.pdf_extractor import PDFExtractor
 from src.engines.pdf_parser import PDFSectionExtractor
 from src.engines.pdf_visual_extractor import PDFVisualExtractor
@@ -31,6 +33,8 @@ _paper_intel_engine = PaperIntelligenceEngine()
 _visual_extractor = PDFVisualExtractor()
 _claim_verifier = ClaimVerifier()
 _excerpt_verifier = DeterministicExcerptVerifier()
+_grounded_qa_engine = GroundedQAEngine()
+_coord_engine = PDFCoordinateEngine()
 
 
 READ_PAPER_FULL_METADATA = {
@@ -695,6 +699,123 @@ async def handle_verify_paper_claim(arguments: Dict[str, Any]) -> str:
         "page_numbers": matched_pages,
         "exact_quotes": exact_quotes[:3],
         "analysis": analysis,
+    }
+
+    return json.dumps(payload, indent=2)
+
+
+PAPER_GROUNDED_QA_METADATA = {
+    "name": "paper_grounded_qa",
+    "description": (
+        "Performs hybrid dense-retrieval and deterministic scientific Q&A against a research paper's full text, "
+        "evidence sections, and benchmark data. Returns strictly grounded answers with page citations, verbatim "
+        "excerpts, bounding-box coordinates, and confidence assessments."
+    ),
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "paper_id": {
+                "type": "string",
+                "description": "Paper identifier: arXiv ID (e.g. '1706.03762'), DOI, or scientific paper title.",
+            },
+            "question": {
+                "type": "string",
+                "description": "Research question or query regarding paper methodology, results, hyperparameters, or architecture.",
+            },
+            "provider": {
+                "type": "string",
+                "description": "Optional LLM provider override (e.g. 'gemini', 'ollama', 'openai', 'anthropic').",
+            },
+            "model": {
+                "type": "string",
+                "description": "Optional specific model override name.",
+            },
+        },
+        "required": ["paper_id", "question"],
+    },
+}
+
+
+async def handle_paper_grounded_qa(arguments: Dict[str, Any]) -> str:
+    """Answer scientific research questions grounded strictly in paper text and coordinates."""
+    paper_id = (arguments.get("paper_id") or arguments.get("identifier") or "").strip()
+    if not paper_id:
+        raise ValueError("Field 'paper_id' is required and cannot be empty.")
+
+    question = (arguments.get("question") or arguments.get("q") or "").strip()
+    if not question:
+        raise ValueError("Field 'question' is required and cannot be empty.")
+
+    provider_override = arguments.get("provider")
+    model_override = arguments.get("model")
+
+    logger.info("[MCP paper_grounded_qa] Asking question for '%s': '%s'", paper_id, question[:80])
+
+    canonical = await _canonical_resolver.resolve(paper_id)
+    if not canonical:
+        return json.dumps({
+            "success": False,
+            "error": f"Paper '{paper_id}' could not be resolved across scientific sources.",
+        }, indent=2)
+
+    doc = None
+    pdf_bytes = None
+    if canonical.pdf_url:
+        try:
+            pdf_bytes = await _pdf_extractor.fetch_pdf_bytes(canonical.pdf_url)
+            if pdf_bytes:
+                doc = _coord_engine.parse_pdf(pdf_bytes, paper_id=canonical.canonical_id)
+        except Exception as e:
+            logger.warning("[MCP paper_grounded_qa] PDF parse for coordinates failed: %s", e)
+
+    full_text_parts = [
+        f"Title: {canonical.title}",
+        f"Abstract:\n{canonical.abstract or ''}",
+    ]
+    for sec in (canonical.sections or []):
+        full_text_parts.append(f"Section {sec.title}:\n{sec.content}")
+
+    if canonical.benchmarks:
+        full_text_parts.append("Benchmarks:\n" + "\n".join(
+            f"- {b.task} ({b.dataset}): {b.metric} = {b.value}" for b in canonical.benchmarks
+        ))
+
+    full_text = "\n\n".join(full_text_parts)
+
+    qa_resp = await _grounded_qa_engine.answer_question(
+        paper_id=canonical.canonical_id,
+        question=question,
+        doc=doc,
+        full_text=full_text,
+        provider_override=provider_override,
+        model_override=model_override,
+    )
+
+    payload = {
+        "success": True,
+        "paper_id": canonical.canonical_id,
+        "title": canonical.title,
+        "question": qa_resp.question,
+        "answer": qa_resp.answer,
+        "confidence": qa_resp.confidence,
+        "insufficient_evidence": qa_resp.insufficient_evidence,
+        "citations": [
+            {
+                "page": c.page,
+                "excerpt": c.excerpt,
+                "exact_match": c.exact_match,
+                "highlight_rects": [
+                    {
+                        "x": r.x,
+                        "y": r.y,
+                        "width": r.width,
+                        "height": r.height,
+                    }
+                    for r in (c.highlight_rects or [])
+                ],
+            }
+            for c in (qa_resp.citations or [])
+        ],
     }
 
     return json.dumps(payload, indent=2)

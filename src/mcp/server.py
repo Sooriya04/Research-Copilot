@@ -24,6 +24,8 @@ from src.mcp.tools.paper_reader import (
     handle_extract_paper_assets,
     VERIFY_PAPER_CLAIM_METADATA,
     handle_verify_paper_claim,
+    PAPER_GROUNDED_QA_METADATA,
+    handle_paper_grounded_qa,
 )
 
 
@@ -31,16 +33,17 @@ def create_mcp_server() -> MCPProtocolHandler:
     """Create and configure MCP protocol dispatcher with registered tools."""
     server = MCPProtocolHandler()
 
-    # Register Domain 1 Tools
+    # Register Domain 1 Tools: Literature Discovery
     server.register_tool(SEARCH_LITERATURE_METADATA, handle_search_literature)
     server.register_tool(RESOLVE_PAPER_METADATA, handle_resolve_paper)
     server.register_tool(GET_PAPER_CITATIONS_METADATA, handle_get_paper_citations)
 
-    # Register Domain 2 Tools
+    # Register Domain 2 Tools: Paper Intelligence & Evidence
     server.register_tool(READ_PAPER_FULL_METADATA, handle_read_paper_full)
     server.register_tool(SUMMARIZE_PAPER_METADATA, handle_summarize_paper)
     server.register_tool(EXTRACT_PAPER_ASSETS_METADATA, handle_extract_paper_assets)
     server.register_tool(VERIFY_PAPER_CLAIM_METADATA, handle_verify_paper_claim)
+    server.register_tool(PAPER_GROUNDED_QA_METADATA, handle_paper_grounded_qa)
 
     return server
 

@@ -634,3 +634,105 @@ async def test_mcp_verify_paper_claim_refuted_by_benchmark(monkeypatch):
     assert data["verdict"] == "REFUTED"
     assert "contradiction" in data["analysis"].lower()
     assert "28.4" in data["analysis"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_tools_list_contains_paper_grounded_qa():
+    server = create_mcp_server()
+    req = json.dumps({"jsonrpc": "2.0", "id": 500, "method": "tools/list"})
+    res = json.loads(await server.handle_raw_message(req))
+
+    tool_names = [t["name"] for t in res["result"]["tools"]]
+    assert "paper_grounded_qa" in tool_names
+
+    tool_def = next(t for t in res["result"]["tools"] if t["name"] == "paper_grounded_qa")
+    assert "paper_id" in tool_def["inputSchema"]["required"]
+    assert "question" in tool_def["inputSchema"]["required"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_paper_grounded_qa_validation():
+    server = create_mcp_server()
+    req = json.dumps({
+        "jsonrpc": "2.0",
+        "id": 501,
+        "method": "tools/call",
+        "params": {
+            "name": "paper_grounded_qa",
+            "arguments": {"paper_id": "1706.03762", "question": ""},
+        },
+    })
+    res = json.loads(await server.handle_raw_message(req))
+    assert res["id"] == 501
+    assert res["result"]["isError"] is True
+    assert "question" in res["result"]["content"][0]["text"].lower()
+
+
+@pytest.mark.asyncio
+async def test_mcp_paper_grounded_qa_execution(monkeypatch):
+    from src.core.evidence_schemas import CitationItem, GroundedQAResponse, HighlightRect
+    from src.mcp.tools import paper_reader
+
+    server = create_mcp_server()
+
+    mock_canonical = CanonicalPaper(
+        canonical_id="arxiv:1706.03762",
+        title="Attention Is All You Need",
+        abstract="We introduce the Transformer.",
+        authors=[AuthorEntity(name="Ashish Vaswani")],
+        year=2017,
+        arxiv_id="1706.03762",
+    )
+
+    mock_qa_response = GroundedQAResponse(
+        paper_id="arxiv:1706.03762",
+        question="How does multi-head attention work?",
+        answer="Multi-head attention projects queries, keys, and values h times with different, learned linear projections.",
+        confidence="verified",
+        insufficient_evidence=False,
+        citations=[
+            CitationItem(
+                page=4,
+                excerpt="Multi-head attention allows the model to jointly attend to information from different representation subspaces.",
+                exact_match=True,
+                highlight_rects=[HighlightRect(x=0.1, y=0.3, width=0.8, height=0.05)],
+            )
+        ],
+    )
+
+    async def mock_resolve(identifier):
+        return mock_canonical
+
+    async def mock_answer_question(**kwargs):
+        return mock_qa_response
+
+    monkeypatch.setattr(paper_reader._canonical_resolver, "resolve", mock_resolve)
+    monkeypatch.setattr(paper_reader._grounded_qa_engine, "answer_question", mock_answer_question)
+
+    req = json.dumps({
+        "jsonrpc": "2.0",
+        "id": 502,
+        "method": "tools/call",
+        "params": {
+            "name": "paper_grounded_qa",
+            "arguments": {
+                "paper_id": "1706.03762",
+                "question": "How does multi-head attention work?",
+            },
+        },
+    })
+
+    res = json.loads(await server.handle_raw_message(req))
+    assert res["id"] == 502
+    data = json.loads(res["result"]["content"][0]["text"])
+
+    assert data["success"] is True
+    assert data["title"] == "Attention Is All You Need"
+    assert "Multi-head attention projects queries" in data["answer"]
+    assert data["confidence"] == "verified"
+    assert data["insufficient_evidence"] is False
+    assert len(data["citations"]) == 1
+    assert data["citations"][0]["page"] == 4
+    assert data["citations"][0]["exact_match"] is True
+    assert len(data["citations"][0]["highlight_rects"]) == 1
+    assert data["citations"][0]["highlight_rects"][0]["x"] == 0.1
