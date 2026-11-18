@@ -34,6 +34,8 @@ from src.mcp.tools.code_benchmarks import (
 from src.mcp.tools.novelty_studio import (
     EXTRACT_RESEARCH_GAPS_METADATA,
     handle_extract_research_gaps,
+    GENERATE_NOVEL_HYPOTHESES_METADATA,
+    handle_generate_novel_hypotheses,
 )
 
 
@@ -59,6 +61,7 @@ def create_mcp_server() -> MCPProtocolHandler:
 
     # Register Domain 4 Tools: Gap Analysis & Novelty Studio
     server.register_tool(EXTRACT_RESEARCH_GAPS_METADATA, handle_extract_research_gaps)
+    server.register_tool(GENERATE_NOVEL_HYPOTHESES_METADATA, handle_generate_novel_hypotheses)
 
     return server
 

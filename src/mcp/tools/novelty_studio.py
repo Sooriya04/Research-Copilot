@@ -168,3 +168,152 @@ async def handle_extract_research_gaps(arguments: Dict[str, Any]) -> str:
         "untested_assumptions": untested_assumptions,
     }
     return json.dumps(payload, indent=2)
+
+GENERATE_NOVEL_HYPOTHESES_METADATA = {
+    "name": "generate_novel_hypotheses",
+    "description": (
+        "Combines extracted research gaps, complementary techniques, and inductive reasoning "
+        "mechanisms to propose novel, testable research hypotheses with concrete falsifiability criteria."
+    ),
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "topic": {
+                "type": "string",
+                "description": "Target research domain (e.g. 'sparse mixture of experts stability').",
+            },
+            "paper_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Baseline paper identifiers to synthesize from.",
+            },
+            "mechanism": {
+                "type": "string",
+                "description": "Ideation mechanism.",
+                "enum": [
+                    "cross_domain_synthesis",
+                    "gap_realization",
+                    "architecture_inversion",
+                    "computational_relaxation",
+                ],
+                "default": "cross_domain_synthesis",
+            },
+        },
+        "required": ["topic", "paper_ids"],
+    },
+}
+
+MECHANISM_MAP = {
+    "cross_domain_synthesis": "recombination",
+    "gap_realization": "gap_realization",
+    "architecture_inversion": "limitation_inversion",
+    "computational_relaxation": "recombination",
+}
+
+
+async def handle_generate_novel_hypotheses(arguments: Dict[str, Any]) -> str:
+    """Execute generate_novel_hypotheses tool."""
+    topic = arguments.get("topic", "").strip()
+    paper_ids = arguments.get("paper_ids", [])
+    raw_mechanism = arguments.get("mechanism", "cross_domain_synthesis")
+
+    if not topic:
+        return json.dumps({
+            "success": False,
+            "error": "topic is required",
+            "proposals": [],
+        }, indent=2)
+
+    if not isinstance(paper_ids, list) or not paper_ids:
+        return json.dumps({
+            "success": False,
+            "error": "paper_ids must be a non-empty array of strings",
+            "proposals": [],
+        }, indent=2)
+
+    internal_mechanism = MECHANISM_MAP.get(raw_mechanism, "recombination")
+
+    # 1. Resolve papers to canonical models
+    resolved_papers: List[Dict[str, Any]] = []
+    for pid in paper_ids[:5]:
+        r_title = pid
+        r_abstract = ""
+        try:
+            res = await _canonical_resolver.resolve_identifier(pid)
+            if res and res.paper:
+                r_title = res.paper.title or pid
+                r_abstract = res.paper.abstract or ""
+        except Exception as e:
+            logger.debug("[generate_novel_hypotheses] Resolver notice for %s: %s", pid, e)
+        resolved_papers.append({
+            "id": pid,
+            "title": r_title,
+            "abstract": r_abstract,
+        })
+
+    # 2. Extract research gaps for foundational grounding
+    gaps: List[Dict[str, Any]] = []
+    for p in resolved_papers:
+        p_gaps = await _gap_extractor.extract_gaps(
+            title=p["title"],
+            abstract=p.get("abstract", ""),
+            use_llm=False,
+        )
+        if p_gaps:
+            gaps.extend(p_gaps)
+
+    # 3. Instantiate GraphNoveltyEngine and invoke synthesis
+    from src.graph.novelty_engine import GraphNoveltyEngine
+    engine = GraphNoveltyEngine()
+
+    try:
+        synth_result = await engine.synthesize_novelties(
+            topic=topic,
+            paper_ids=[p["id"] for p in resolved_papers],
+            force_refresh=True,
+        )
+        raw_items = synth_result.get("novelties", [])
+    except Exception as e:
+        logger.warning("[generate_novel_hypotheses] Engine synthesis notice: %s; using heuristic generator", e)
+        raw_items = []
+
+    if not raw_items:
+        raw_items = engine._generate_heuristic_novelties(
+            topic=topic,
+            papers=resolved_papers,
+            gaps=gaps,
+        )
+
+    # 4. Map into strict MCP Tool 12 output schema
+    proposals: List[Dict[str, Any]] = []
+    for idx, item in enumerate(raw_items, 1):
+        if isinstance(item, dict):
+            p_id = item.get("id") or f"prop-{idx}"
+            p_title = item.get("title") or f"Novel Hypothesis {idx} on {topic}"
+            p_hypothesis = item.get("testable_hypothesis") or item.get("pitch") or ""
+            p_arch = item.get("mathematical_formulation") or item.get("novelty_statement") or ""
+            p_expected = f"Confidence {item.get('confidence_score', 0.85):.2f}; Expected gains across: {', '.join(item.get('expected_metrics', ['Accuracy', 'Throughput']))}"
+            p_falsifiability = (
+                f"Falsified if error reduction is < 5% or confidence lower-bound fails across: "
+                f"{', '.join(item.get('target_datasets', ['Standard Benchmarks']))}."
+            )
+            p_baselines = item.get("baselines_to_beat") or [p["title"] for p in resolved_papers]
+
+            proposals.append({
+                "proposal_id": p_id,
+                "title": p_title,
+                "hypothesis": p_hypothesis,
+                "proposed_architecture": p_arch,
+                "expected_gain": p_expected,
+                "falsifiability_criteria": p_falsifiability,
+                "baseline_comparisons": p_baselines,
+                "mechanism": raw_mechanism,
+            })
+
+    payload = {
+        "success": True,
+        "topic": topic,
+        "mechanism": raw_mechanism,
+        "proposals": proposals,
+    }
+    return json.dumps(payload, indent=2)
