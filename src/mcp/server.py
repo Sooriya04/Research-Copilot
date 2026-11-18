@@ -27,6 +27,11 @@ from src.mcp.tools.paper_reader import (
     PAPER_GROUNDED_QA_METADATA,
     handle_paper_grounded_qa,
 )
+from src.mcp.tools.code_benchmarks import (
+    GET_PAPER_CODE_REPOSITORIES_METADATA,
+    handle_get_paper_code_repositories,
+)
+
 
 
 def create_mcp_server() -> MCPProtocolHandler:
@@ -44,6 +49,9 @@ def create_mcp_server() -> MCPProtocolHandler:
     server.register_tool(EXTRACT_PAPER_ASSETS_METADATA, handle_extract_paper_assets)
     server.register_tool(VERIFY_PAPER_CLAIM_METADATA, handle_verify_paper_claim)
     server.register_tool(PAPER_GROUNDED_QA_METADATA, handle_paper_grounded_qa)
+
+    # Register Domain 3 Tools: Code & Benchmarks
+    server.register_tool(GET_PAPER_CODE_REPOSITORIES_METADATA, handle_get_paper_code_repositories)
 
     return server
 

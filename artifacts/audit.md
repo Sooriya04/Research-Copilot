@@ -102,8 +102,8 @@
   [x] verify_paper_claim         (Implemented, verbatim quote matching, benchmark check)
   [x] paper_grounded_qa          (Implemented, hybrid QA, citations with page coordinates)
 
-[ Domain 3: Code & Benchmarks ] — Up Next
-  [ ] get_paper_code_repositories
+[ Domain 3: Code & Benchmarks ] — In Progress (1 of 3 Tools)
+  [x] get_paper_code_repositories (Implemented, PapersWithCode/GitHub/HuggingFace repo extraction & live metadata enrichment)
   [ ] get_sota_leaderboard
   [ ] inspect_paper_datasets
 
