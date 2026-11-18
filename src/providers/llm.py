@@ -18,7 +18,7 @@ class LocalOllamaProvider(BaseLLMProvider):
         self.default_model = model or default_model or getattr(settings, "ollama_model", "phi4-mini")
         self._client: Optional[httpx.AsyncClient] = None
 
-    def _get_client(self, timeout: float = 60.0) -> httpx.AsyncClient:
+    def _get_client(self, timeout: float = 120.0) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(timeout=timeout)
         return self._client
@@ -33,8 +33,8 @@ class LocalOllamaProvider(BaseLLMProvider):
         target_model = (model or self.default_model or "phi4-mini").strip()
         start = time.perf_counter()
         try:
-            client = self._get_client(timeout=6.0)
-            tags_resp = await client.get(f"{self.base_url}/api/tags")
+            client = self._get_client()
+            tags_resp = await client.get(f"{self.base_url}/api/tags", timeout=6.0)
             if tags_resp.status_code != 200:
                 latency = round((time.perf_counter() - start) * 1000, 2)
                 return {
@@ -86,8 +86,8 @@ class LocalOllamaProvider(BaseLLMProvider):
     async def list_models(self) -> list:
         """Return list of locally installed generative model names."""
         try:
-            client = self._get_client(timeout=3.0)
-            resp = await client.get(f"{self.base_url}/api/tags")
+            client = self._get_client()
+            resp = await client.get(f"{self.base_url}/api/tags", timeout=3.0)
             if resp.status_code == 200:
                 raw = [m.get("name") for m in resp.json().get("models", []) if m.get("name")]
                 gen = [m for m in raw if "embed" not in m.lower()]
@@ -123,8 +123,8 @@ class LocalOllamaProvider(BaseLLMProvider):
         if json_mode:
             payload["format"] = "json"
         try:
-            client = self._get_client(timeout=60.0)
-            resp = await client.post(f"{self.base_url}/api/chat", json=payload)
+            client = self._get_client()
+            resp = await client.post(f"{self.base_url}/api/chat", json=payload, timeout=60.0)
             if resp.status_code == 200:
                 return resp.json().get("message", {}).get("content", "")
             raise ProviderError(f"Ollama error (HTTP {resp.status_code}): {resp.text}")
@@ -189,7 +189,7 @@ class LocalOpenAIProvider(BaseLLMProvider):
         self.api_key = api_key or os.getenv("LOCAL_OPENAI_API_KEY") or "local"
         self._client: Optional[httpx.AsyncClient] = None
 
-    def _get_client(self, timeout: float = 60.0) -> httpx.AsyncClient:
+    def _get_client(self, timeout: float = 120.0) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(timeout=timeout)
         return self._client
@@ -210,8 +210,8 @@ class LocalOpenAIProvider(BaseLLMProvider):
         target_model = (model or self.default_model).strip()
         start = time.perf_counter()
         try:
-            client = self._get_client(timeout=5.0)
-            resp = await client.get(f"{self.base_url}/models", headers=self._headers())
+            client = self._get_client()
+            resp = await client.get(f"{self.base_url}/models", headers=self._headers(), timeout=5.0)
             latency = round((time.perf_counter() - start) * 1000, 2)
             if resp.status_code == 200:
                 raw_models = [m.get("id") for m in resp.json().get("data", []) if m.get("id")]
@@ -255,11 +255,12 @@ class LocalOpenAIProvider(BaseLLMProvider):
             payload["response_format"] = {"type": "json_object"}
 
         try:
-            client = self._get_client(timeout=90.0)
+            client = self._get_client()
             resp = await client.post(
                 f"{self.base_url}/chat/completions",
                 headers=self._headers(),
                 json=payload,
+                timeout=90.0,
             )
             if resp.status_code == 200:
                 data = resp.json()

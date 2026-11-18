@@ -200,7 +200,7 @@ def generate_bibtex(
 ) -> str:
     """Generate clean, publication-ready BibTeX citation."""
     first_author = authors[0].split()[-1].lower() if authors else "anonymous"
-    clean_author = re.sub(r"[^a-z0-9]", "", first_author)
+    clean_author = re.sub(r"[^a-z0-9]", "", first_author) or "paper"
     cite_year = year or 2024
     clean_id = re.sub(r"[^a-zA-Z0-9]", "", canonical_id.split(":")[-1])[:6]
     cite_key = f"{clean_author}{cite_year}_{clean_id}"

@@ -233,6 +233,11 @@ async def test_mcp_resolve_paper_execution(monkeypatch):
     assert "@article{" in data["bibtex"]
     assert "Attention Is All You Need" in data["bibtex"]
 
+    # Test non-latin author BibTeX citation key fallback
+    from src.mcp.tools.literature import generate_bibtex
+    non_latin_bib = generate_bibtex("arxiv:2401.12345", "Non-Latin Author Paper", ["李明"], 2024)
+    assert "@article{paper2024_" in non_latin_bib
+
     # 2. Unknown identifier
     unknown_req = json.dumps({
         "jsonrpc": "2.0",
