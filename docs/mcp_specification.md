@@ -53,6 +53,7 @@ The platform provides **6 Service Domains** with **18 High-Impact Tools**:
 | | `resolve_paper` | Resolve DOI/arXiv/PubMed/URL to metadata & open-access PDF. |
 | | `get_paper_citations` | Forward & backward citation network expansion. |
 | **Domain 2: Paper Intelligence & Evidence** | `read_paper_full` | Structured section extraction (Abstract, Method, Results, Limitations). |
+| | `summarize_paper` | Structured synthesis (problem, contributions, methodology, claims). |
 | | `extract_paper_assets` | Extract figures, tables, and equations with coordinates. |
 | | `verify_paper_claim` | Ground claims against paper text with verbatim quote verification. |
 | | `paper_grounded_qa` | Hybrid vector + graph RAG Q&A over paper text with page citations. |
@@ -131,7 +132,20 @@ The platform provides **6 Service Domains** with **18 High-Impact Tools**:
   - `reading_time_minutes` (*integer*): Estimated human read time.
 - **Underlying Engine:** `src/engines/pdf_parser.py`, `src/engines/section_extractor.py`.
 
-#### Tool 5: `extract_paper_assets`
+#### Tool 5: `summarize_paper`
+- **Description:** Generates or retrieves an end-to-end multi-dimensional scientific analysis of a paper, combining problem formulation, core architectural contributions, methodology, empirical experiments, limitations, open questions, Papers with Code benchmark records, and verified claims with SQLite persistence.
+- **Input Parameters:**
+  - `identifier` (*string, required*): arXiv ID, DOI, or title.
+  - `force_refresh` (*boolean, optional, default: `false`*): Whether to bypass cached SQLite analysis.
+- **Output:**
+  - `paper_id` (*string*): Canonical paper identifier.
+  - `summary` (*object*): Structured summary with `problem`, `contributions`, `methodology`, `experiments`, `limitations`, `open_questions`, and `claims`.
+  - `benchmarks` (*array*): Benchmark evaluation records from Papers with Code.
+  - `code_repositories` (*array*): Associated GitHub repositories with stars and frameworks.
+  - `cached` (*boolean*): Whether returned from SQLite cache.
+- **Underlying Engine:** `src/engines/paper_intelligence_engine.py`, `src/engines/paper_analyzer.py`, `src/engines/claim_verifier.py`.
+
+#### Tool 6: `extract_paper_assets`
 - **Description:** Extracts all visual and mathematical assets embedded in the paper: high-resolution figures, tabular benchmarks with parsed column headers, and key LaTeX equations with bounding-box coordinates.
 - **Input Parameters:**
   - `paper_id` (*string, required*): Paper identifier.
