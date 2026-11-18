@@ -107,8 +107,8 @@
   [ ] get_sota_leaderboard
   [ ] inspect_paper_datasets
 
-[ Domain 4: Gap Analysis & Novelty Studio ]
-  [ ] extract_research_gaps
+[ Domain 4: Gap Analysis & Novelty Studio ] — In Progress (1 of 3 Tools)
+  [x] extract_research_gaps      (Implemented, author limitations, structural gaps, combinatorial synthesis)
   [ ] generate_novel_hypotheses
   [ ] synthesize_critique
 
