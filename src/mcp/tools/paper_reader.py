@@ -4,7 +4,7 @@ Tools:
   - read_paper_full: Structured section extraction (Abstract, Method, Results, Limitations).
   - summarize_paper: Multi-dimensional executive and architectural summary with benchmark & claim verification.
   - extract_paper_assets: Figure, table, and equation coordinate extraction.
-  - verify_paper_claim: (Coming next) Ground claims against verbatim paper text.
+  - verify_paper_claim: Ground claims against verbatim paper text with empirical verification.
   - paper_grounded_qa: (Coming next) Hybrid RAG Q&A with page citations.
 """
 import asyncio
@@ -16,6 +16,8 @@ from src.core.canonical_models import PaperSummarizeRequest
 from src.core.database import get_db_session
 from src.core.logger import logger
 from src.engines.canonical_resolver import CanonicalPaperResolver
+from src.engines.claim_verifier import ClaimVerifier
+from src.engines.excerpt_verifier import DeterministicExcerptVerifier
 from src.engines.paper_intelligence_engine import PaperIntelligenceEngine
 from src.engines.pdf_extractor import PDFExtractor
 from src.engines.pdf_parser import PDFSectionExtractor
@@ -27,6 +29,8 @@ _pdf_extractor = PDFExtractor(timeout=25.0)
 _pdf_parser = PDFSectionExtractor()
 _paper_intel_engine = PaperIntelligenceEngine()
 _visual_extractor = PDFVisualExtractor()
+_claim_verifier = ClaimVerifier()
+_excerpt_verifier = DeterministicExcerptVerifier()
 
 
 READ_PAPER_FULL_METADATA = {
@@ -506,3 +510,191 @@ async def handle_extract_paper_assets(arguments: Dict[str, Any]) -> str:
         result["equations"] = equations_out
 
     return json.dumps(result, indent=2)
+
+
+def _find_supporting_quotes(claim_tokens: List[str], text: str, max_quotes: int = 3) -> List[str]:
+    """Identify sentences with highest token match for claim evidence."""
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    scored: List[Tuple[float, str]] = []
+    for s in sentences:
+        s_clean = s.strip()
+        if len(s_clean) < 15:
+            continue
+        s_tokens = set(re.findall(r"\b[A-Za-z0-9_-]{3,}\b", s_clean.lower()))
+        matched = [t for t in claim_tokens if t in s_tokens]
+        if matched:
+            score = len(matched) / max(len(claim_tokens), 1)
+            scored.append((score, s_clean))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [s for _, s in scored[:max_quotes]]
+
+
+VERIFY_PAPER_CLAIM_METADATA = {
+    "name": "verify_paper_claim",
+    "description": (
+        "Audits a scientific assertion or experimental claim against paper text and benchmark records using "
+        "mechanical substring verification, alphanumeric projection, and token coverage. Returns verdict "
+        "(SUPPORTED, REFUTED, PARTIALLY_SUPPORTED, UNVERIFIABLE), confidence score, exact verbatim quotes, "
+        "and cited page numbers."
+    ),
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "paper_id": {
+                "type": "string",
+                "description": "Paper identifier: arXiv ID (e.g. '1706.03762'), DOI, or scientific paper title.",
+            },
+            "claim_text": {
+                "type": "string",
+                "description": "The scientific assertion, numerical claim, or hypothesis to verify against the paper.",
+            },
+            "target_page": {
+                "type": "integer",
+                "description": "Optional page number to prioritize checking.",
+            },
+        },
+        "required": ["paper_id", "claim_text"],
+    },
+}
+
+
+async def handle_verify_paper_claim(arguments: Dict[str, Any]) -> str:
+    """Verify claim assertion against paper pages, sections, and benchmark tables."""
+    paper_id = (arguments.get("paper_id") or arguments.get("identifier") or "").strip()
+    if not paper_id:
+        raise ValueError("Field 'paper_id' is required and cannot be empty.")
+
+    claim_text = (arguments.get("claim_text") or arguments.get("claim") or "").strip()
+    if not claim_text:
+        raise ValueError("Field 'claim_text' is required and cannot be empty.")
+
+    target_page = arguments.get("target_page")
+    if target_page is not None:
+        try:
+            target_page = int(target_page)
+        except (ValueError, TypeError):
+            target_page = None
+
+    logger.info("[MCP verify_paper_claim] Verifying claim for '%s': '%s'", paper_id, claim_text[:80])
+
+    canonical = await _canonical_resolver.resolve(paper_id)
+    if not canonical:
+        return json.dumps({
+            "success": False,
+            "error": f"Paper '{paper_id}' could not be resolved across scientific sources.",
+        }, indent=2)
+
+    # 1. Collect pages text
+    pages_text: Dict[int, str] = {}
+    if canonical.pdf_url:
+        try:
+            pdf_bytes = await _pdf_extractor.fetch_pdf_bytes(canonical.pdf_url)
+            if pdf_bytes:
+                doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+                for idx in range(len(doc)):
+                    pages_text[idx + 1] = doc[idx].get_text("text") or ""
+                doc.close()
+        except Exception as e:
+            logger.warning("[MCP verify_paper_claim] PDF text extraction failed for %s: %s", canonical.pdf_url, e)
+
+    # Fallback to abstract and sections if no PDF text
+    if not pages_text:
+        corpus = (canonical.abstract or "") + "\n\n"
+        for sec in (canonical.sections or []):
+            corpus += f"{sec.title}\n{sec.content}\n\n"
+        pages_text[1] = corpus.strip()
+
+    # 2. Benchmark check for empirical claims
+    refuted = False
+    refute_reason = ""
+    benchmark_matches: List[str] = []
+    if canonical.benchmarks:
+        claim_lower = claim_text.lower()
+        for b in canonical.benchmarks:
+            task_or_ds = (b.dataset or b.task or "").lower()
+            metric_name = (b.metric or "").lower()
+            if metric_name and metric_name in claim_lower:
+                b_val = str(b.value).strip()
+                if b_val and b_val in claim_text:
+                    benchmark_matches.append(f"Confirmed in {b.task} ({b.metric}={b.value}).")
+                elif task_or_ds and task_or_ds in claim_lower:
+                    refuted = True
+                    refute_reason = (
+                        f"Benchmark contradiction: Claimed value differs from published {b.dataset} "
+                        f"benchmark ({b.metric}={b.value})."
+                    )
+
+    # 3. Textual verification across pages
+    claim_tokens = _claim_verifier._tokenize(claim_text)
+    exact_match_pages: List[int] = []
+    best_fuzzy_page = None
+    best_coverage = 0.0
+    exact_quotes: List[str] = []
+
+    page_order = sorted(pages_text.keys(), key=lambda p: 0 if p == target_page else 1)
+
+    for p_num in page_order:
+        p_text = pages_text[p_num]
+        if not p_text.strip():
+            continue
+
+        is_exact, cov = _excerpt_verifier.verify_excerpt_on_page_text(p_text, claim_text)
+        if is_exact:
+            exact_match_pages.append(p_num)
+            supporting = _find_supporting_quotes(claim_tokens, p_text, max_quotes=2)
+            for q in supporting:
+                if q not in exact_quotes:
+                    exact_quotes.append(q)
+        else:
+            if cov > best_coverage:
+                best_coverage = cov
+                best_fuzzy_page = p_num
+
+    # 4. Formulate Verdict
+    if refuted:
+        verdict = "REFUTED"
+        verifiable_score = 0.90
+        analysis = refute_reason
+    elif exact_match_pages:
+        verdict = "SUPPORTED"
+        verifiable_score = 1.0
+        analysis = f"Claim mechanically verified with exact verbatim quotes on page(s): {exact_match_pages}."
+    elif best_coverage >= 0.80:
+        verdict = "SUPPORTED"
+        verifiable_score = round(best_coverage, 2)
+        analysis = f"Strong semantic and token alignment ({int(best_coverage * 100)}%) on page {best_fuzzy_page}."
+        if best_fuzzy_page:
+            exact_quotes.extend(_find_supporting_quotes(claim_tokens, pages_text[best_fuzzy_page], max_quotes=2))
+    elif best_coverage >= 0.45:
+        verdict = "PARTIALLY_SUPPORTED"
+        verifiable_score = round(best_coverage, 2)
+        analysis = (
+            f"Partial textual overlap ({int(best_coverage * 100)}%) on page {best_fuzzy_page}. "
+            "Key concepts present but assertion not fully verified."
+        )
+        if best_fuzzy_page:
+            exact_quotes.extend(_find_supporting_quotes(claim_tokens, pages_text[best_fuzzy_page], max_quotes=2))
+    else:
+        verdict = "UNVERIFIABLE"
+        verifiable_score = round(best_coverage, 2)
+        analysis = f"Insufficient grounding found in paper text (maximum token alignment was {int(best_coverage * 100)}%)."
+
+    if benchmark_matches:
+        analysis += " " + " ".join(benchmark_matches)
+
+    matched_pages = exact_match_pages or ([best_fuzzy_page] if best_fuzzy_page and best_coverage >= 0.45 else [])
+
+    payload = {
+        "success": True,
+        "paper_id": canonical.canonical_id,
+        "title": canonical.title,
+        "claim_text": claim_text,
+        "verdict": verdict,
+        "verifiable_score": verifiable_score,
+        "mechanically_verified": bool(exact_match_pages),
+        "page_numbers": matched_pages,
+        "exact_quotes": exact_quotes[:3],
+        "analysis": analysis,
+    }
+
+    return json.dumps(payload, indent=2)

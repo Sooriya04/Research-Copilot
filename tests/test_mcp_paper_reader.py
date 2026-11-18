@@ -488,3 +488,149 @@ async def test_mcp_extract_paper_assets_filter_equations(monkeypatch):
     assert "tables" not in data
     assert data["total_equations"] >= 1
     assert "(2)" in data["equations"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_tools_list_contains_verify_paper_claim():
+    server = create_mcp_server()
+    req = json.dumps({"jsonrpc": "2.0", "id": 400, "method": "tools/list"})
+    res = json.loads(await server.handle_raw_message(req))
+
+    tool_names = [t["name"] for t in res["result"]["tools"]]
+    assert "verify_paper_claim" in tool_names
+
+    tool_def = next(t for t in res["result"]["tools"] if t["name"] == "verify_paper_claim")
+    assert "paper_id" in tool_def["inputSchema"]["required"]
+    assert "claim_text" in tool_def["inputSchema"]["required"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_verify_paper_claim_validation():
+    server = create_mcp_server()
+    req = json.dumps({
+        "jsonrpc": "2.0",
+        "id": 401,
+        "method": "tools/call",
+        "params": {
+            "name": "verify_paper_claim",
+            "arguments": {"paper_id": "1706.03762", "claim_text": ""},
+        },
+    })
+    res = json.loads(await server.handle_raw_message(req))
+    assert res["id"] == 401
+    assert res["result"]["isError"] is True
+    assert "claim_text" in res["result"]["content"][0]["text"].lower()
+
+
+@pytest.mark.asyncio
+async def test_mcp_verify_paper_claim_supported(monkeypatch):
+    import pymupdf as fitz
+    from src.mcp.tools import paper_reader
+
+    server = create_mcp_server()
+
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text(
+        (50, 100),
+        "The Transformer achieves 28.4 BLEU on the WMT 2014 English-to-German translation task, "
+        "improving over the existing best results by over 2 BLEU."
+    )
+    pdf_bytes = doc.tobytes()
+    doc.close()
+
+    mock_canonical = CanonicalPaper(
+        canonical_id="arxiv:1706.03762",
+        title="Attention Is All You Need",
+        abstract="We propose the Transformer.",
+        authors=[AuthorEntity(name="Ashish Vaswani")],
+        year=2017,
+        pdf_url="https://arxiv.org/pdf/1706.03762.pdf",
+    )
+
+    async def mock_resolve(identifier):
+        return mock_canonical
+
+    async def mock_fetch_bytes(url):
+        return pdf_bytes
+
+    monkeypatch.setattr(paper_reader._canonical_resolver, "resolve", mock_resolve)
+    monkeypatch.setattr(paper_reader._pdf_extractor, "fetch_pdf_bytes", mock_fetch_bytes)
+
+    req = json.dumps({
+        "jsonrpc": "2.0",
+        "id": 402,
+        "method": "tools/call",
+        "params": {
+            "name": "verify_paper_claim",
+            "arguments": {
+                "paper_id": "1706.03762",
+                "claim_text": "Transformer achieves 28.4 BLEU on the WMT 2014 English-to-German translation task",
+            },
+        },
+    })
+
+    res = json.loads(await server.handle_raw_message(req))
+    assert res["id"] == 402
+    data = json.loads(res["result"]["content"][0]["text"])
+
+    assert data["success"] is True
+    assert data["verdict"] == "SUPPORTED"
+    assert data["verifiable_score"] >= 0.8
+    assert 1 in data["page_numbers"]
+    assert len(data["exact_quotes"]) >= 1
+    assert "28.4 BLEU" in data["exact_quotes"][0]
+
+
+@pytest.mark.asyncio
+async def test_mcp_verify_paper_claim_refuted_by_benchmark(monkeypatch):
+    from src.core.canonical_models import BenchmarkEvidence
+    from src.mcp.tools import paper_reader
+
+    server = create_mcp_server()
+
+    mock_canonical = CanonicalPaper(
+        canonical_id="arxiv:1706.03762",
+        title="Attention Is All You Need",
+        abstract="We propose the Transformer.",
+        authors=[AuthorEntity(name="Ashish Vaswani")],
+        year=2017,
+        pdf_url=None,
+        benchmarks=[
+            BenchmarkEvidence(
+                task="Machine Translation",
+                dataset="WMT 2014 En-De",
+                metric="BLEU",
+                value="28.4",
+                model="Transformer (big)",
+            )
+        ],
+    )
+
+    async def mock_resolve(identifier):
+        return mock_canonical
+
+    monkeypatch.setattr(paper_reader._canonical_resolver, "resolve", mock_resolve)
+
+    # Claim asserts 42.0 BLEU on WMT 2014 En-De (contradicting published 28.4)
+    req = json.dumps({
+        "jsonrpc": "2.0",
+        "id": 403,
+        "method": "tools/call",
+        "params": {
+            "name": "verify_paper_claim",
+            "arguments": {
+                "paper_id": "1706.03762",
+                "claim_text": "Model achieves 42.0 BLEU on WMT 2014 En-De",
+            },
+        },
+    })
+
+    res = json.loads(await server.handle_raw_message(req))
+    assert res["id"] == 403
+    data = json.loads(res["result"]["content"][0]["text"])
+
+    assert data["success"] is True
+    assert data["verdict"] == "REFUTED"
+    assert "contradiction" in data["analysis"].lower()
+    assert "28.4" in data["analysis"]

@@ -22,6 +22,8 @@ from src.mcp.tools.paper_reader import (
     handle_summarize_paper,
     EXTRACT_PAPER_ASSETS_METADATA,
     handle_extract_paper_assets,
+    VERIFY_PAPER_CLAIM_METADATA,
+    handle_verify_paper_claim,
 )
 
 
@@ -38,6 +40,7 @@ def create_mcp_server() -> MCPProtocolHandler:
     server.register_tool(READ_PAPER_FULL_METADATA, handle_read_paper_full)
     server.register_tool(SUMMARIZE_PAPER_METADATA, handle_summarize_paper)
     server.register_tool(EXTRACT_PAPER_ASSETS_METADATA, handle_extract_paper_assets)
+    server.register_tool(VERIFY_PAPER_CLAIM_METADATA, handle_verify_paper_claim)
 
     return server
 
