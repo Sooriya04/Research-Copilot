@@ -311,3 +311,180 @@ async def test_mcp_summarize_paper_pipeline_failure_fallback(monkeypatch):
     assert data["title"] == "Heuristic Fallback Paper"
     assert "fallback" in data["note"].lower()
     assert data["summary"]["model_used"] == "extractive-fallback"
+
+
+@pytest.mark.asyncio
+async def test_mcp_tools_list_contains_extract_paper_assets():
+    server = create_mcp_server()
+    req = json.dumps({"jsonrpc": "2.0", "id": 300, "method": "tools/list"})
+    res = json.loads(await server.handle_raw_message(req))
+
+    tool_names = [t["name"] for t in res["result"]["tools"]]
+    assert "extract_paper_assets" in tool_names
+
+    tool_def = next(t for t in res["result"]["tools"] if t["name"] == "extract_paper_assets")
+    assert "paper_id" in tool_def["inputSchema"]["required"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_extract_paper_assets_validation():
+    server = create_mcp_server()
+    req = json.dumps({
+        "jsonrpc": "2.0",
+        "id": 301,
+        "method": "tools/call",
+        "params": {
+            "name": "extract_paper_assets",
+            "arguments": {"paper_id": ""},
+        },
+    })
+    res = json.loads(await server.handle_raw_message(req))
+    assert res["id"] == 301
+    assert res["result"]["isError"] is True
+    assert "paper_id" in res["result"]["content"][0]["text"].lower()
+
+
+@pytest.mark.asyncio
+async def test_mcp_extract_paper_assets_execution(monkeypatch):
+    import pymupdf as fitz
+    from src.core.evidence_schemas import FigureAsset
+    from src.mcp.tools import paper_reader
+
+    server = create_mcp_server()
+
+    # Generate small real PDF in memory
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((50, 80), "Figure 1: The Transformer model architecture.")
+    page.insert_text((50, 160), "Table 1: Maximum BLEU scores on translation.")
+    page.insert_text((50, 240), "Attention(Q, K, V) = softmax(QK^T / sqrt(d_k))V   (1)")
+    pdf_bytes = doc.tobytes()
+    doc.close()
+
+    mock_canonical = CanonicalPaper(
+        canonical_id="arxiv:1706.03762",
+        title="Attention Is All You Need",
+        abstract="We introduce the Transformer model.",
+        authors=[AuthorEntity(name="Ashish Vaswani")],
+        year=2017,
+        arxiv_id="1706.03762",
+        pdf_url="https://arxiv.org/pdf/1706.03762.pdf",
+    )
+
+    sample_visuals = [
+        FigureAsset(
+            id="fig-p1-1",
+            label="Figure 1",
+            caption="Figure 1: The Transformer model architecture.",
+            page=1,
+            asset_type="figure",
+            bbox=[50.0, 40.0, 400.0, 100.0],
+            image_data_url="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+        ),
+        FigureAsset(
+            id="tbl-p1-2",
+            label="Table 1",
+            caption="Table 1: Maximum BLEU scores on translation.",
+            page=1,
+            asset_type="table",
+            bbox=[50.0, 120.0, 400.0, 180.0],
+            image_data_url="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+        ),
+    ]
+
+    async def mock_resolve(identifier):
+        return mock_canonical
+
+    async def mock_fetch_bytes(url):
+        return pdf_bytes
+
+    def mock_extract_visuals(bytes_in, paper_id, max_assets):
+        return sample_visuals
+
+    monkeypatch.setattr(paper_reader._canonical_resolver, "resolve", mock_resolve)
+    monkeypatch.setattr(paper_reader._pdf_extractor, "fetch_pdf_bytes", mock_fetch_bytes)
+    monkeypatch.setattr(paper_reader._visual_extractor, "extract_visual_assets", mock_extract_visuals)
+
+    # Test "all" asset types with include_image_data=True
+    req = json.dumps({
+        "jsonrpc": "2.0",
+        "id": 302,
+        "method": "tools/call",
+        "params": {
+            "name": "extract_paper_assets",
+            "arguments": {
+                "paper_id": "1706.03762",
+                "asset_type": "all",
+                "include_image_data": True,
+            },
+        },
+    })
+
+    res = json.loads(await server.handle_raw_message(req))
+    assert res["id"] == 302
+    data = json.loads(res["result"]["content"][0]["text"])
+
+    assert data["success"] is True
+    assert data["title"] == "Attention Is All You Need"
+    assert data["total_figures"] == 1
+    assert data["total_tables"] == 1
+    assert data["figures"][0]["figure_id"] == "fig-p1-1"
+    assert "image_data_url" in data["figures"][0]
+    assert data["tables"][0]["table_id"] == "tbl-p1-2"
+    assert data["total_equations"] >= 1
+    assert "Attention" in data["equations"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_extract_paper_assets_filter_equations(monkeypatch):
+    import pymupdf as fitz
+    from src.mcp.tools import paper_reader
+
+    server = create_mcp_server()
+
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((50, 100), "L_{G} = E_{x}[log D(x)] + E_{z}[log(1 - D(G(z)))]   (2)")
+    pdf_bytes = doc.tobytes()
+    doc.close()
+
+    mock_canonical = CanonicalPaper(
+        canonical_id="arxiv:1406.2661",
+        title="Generative Adversarial Nets",
+        authors=[AuthorEntity(name="Ian Goodfellow")],
+        year=2014,
+        pdf_url="https://arxiv.org/pdf/1406.2661.pdf",
+    )
+
+    async def mock_resolve(identifier):
+        return mock_canonical
+
+    async def mock_fetch_bytes(url):
+        return pdf_bytes
+
+    monkeypatch.setattr(paper_reader._canonical_resolver, "resolve", mock_resolve)
+    monkeypatch.setattr(paper_reader._pdf_extractor, "fetch_pdf_bytes", mock_fetch_bytes)
+
+    req = json.dumps({
+        "jsonrpc": "2.0",
+        "id": 303,
+        "method": "tools/call",
+        "params": {
+            "name": "extract_paper_assets",
+            "arguments": {
+                "paper_id": "1406.2661",
+                "asset_type": "equations",
+            },
+        },
+    })
+
+    res = json.loads(await server.handle_raw_message(req))
+    assert res["id"] == 303
+    data = json.loads(res["result"]["content"][0]["text"])
+
+    assert data["success"] is True
+    assert "equations" in data
+    assert "figures" not in data
+    assert "tables" not in data
+    assert data["total_equations"] >= 1
+    assert "(2)" in data["equations"][0]["text"]
