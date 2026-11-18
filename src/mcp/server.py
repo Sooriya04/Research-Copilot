@@ -10,6 +10,8 @@ from src.mcp.protocol import MCPProtocolHandler
 from src.mcp.tools.literature import (
     SEARCH_LITERATURE_METADATA,
     handle_search_literature,
+    RESOLVE_PAPER_METADATA,
+    handle_resolve_paper,
 )
 
 
@@ -19,6 +21,7 @@ def create_mcp_server() -> MCPProtocolHandler:
 
     # Register Domain 1 Tools
     server.register_tool(SEARCH_LITERATURE_METADATA, handle_search_literature)
+    server.register_tool(RESOLVE_PAPER_METADATA, handle_resolve_paper)
 
     return server
 

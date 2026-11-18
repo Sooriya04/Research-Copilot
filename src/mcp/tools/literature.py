@@ -2,22 +2,25 @@
 Domain 1: Literature Discovery MCP Tools.
 Tools:
   - search_literature: Unified multi-source scientific search across 8+ databases.
-  - resolve_paper: (Coming next) Canonical metadata & open-access resolution.
+  - resolve_paper: Canonical metadata & open-access resolution.
   - get_paper_citations: (Coming next) Forward and backward citation expansion.
 """
 import asyncio
 import json
+import re
 from typing import Any, Dict, List, Optional
 from src.core.logger import logger
 from src.core.schemas import Paper
 from src.engines.access_resolver import AccessResolver
+from src.engines.canonical_resolver import CanonicalPaperResolver
 from src.engines.multi_provider_search import MultiProviderSearchEngine
 from src.engines.paper_rank import PaperRankEngine
 from src.api.routes_search import deduplicate_papers
 
 
-# Shared singleton search engines
+# Shared singleton search & resolution engines
 _resolver = AccessResolver()
+_canonical_resolver = CanonicalPaperResolver()
 _multi_search = MultiProviderSearchEngine()
 _rank_engine = PaperRankEngine()
 
@@ -180,5 +183,100 @@ async def handle_search_literature(arguments: Dict[str, Any]) -> str:
         "total_results": len(formatted_papers),
         "source_breakdown": source_stats,
         "papers": formatted_papers,
+    }
+    return json.dumps(payload, indent=2)
+
+
+def generate_bibtex(
+    canonical_id: str,
+    title: str,
+    authors: List[str],
+    year: Optional[int],
+    doi: Optional[str] = None,
+    url: Optional[str] = None,
+) -> str:
+    """Generate clean, publication-ready BibTeX citation."""
+    first_author = authors[0].split()[-1].lower() if authors else "anonymous"
+    clean_author = re.sub(r"[^a-z0-9]", "", first_author)
+    cite_year = year or 2024
+    clean_id = re.sub(r"[^a-zA-Z0-9]", "", canonical_id.split(":")[-1])[:6]
+    cite_key = f"{clean_author}{cite_year}_{clean_id}"
+
+    fields = [
+        f"  title = {{{title}}}",
+        f"  author = {{{' and '.join(authors) if authors else 'Unknown'}}}",
+        f"  year = {{{cite_year}}}",
+    ]
+    if doi:
+        fields.append(f"  doi = {{{doi}}}")
+    if url:
+        fields.append(f"  url = {{{url}}}")
+
+    return f"@article{{{cite_key},\n" + ",\n".join(fields) + "\n}"
+
+
+RESOLVE_PAPER_METADATA = {
+    "name": "resolve_paper",
+    "description": (
+        "Resolves any paper identifier (DOI, arXiv ID, PubMed ID, OpenAlex ID, URL, or title) "
+        "into a canonical record, verifying open-access PDF availability and generating formatted BibTeX."
+    ),
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "identifier": {
+                "type": "string",
+                "description": "Paper DOI (e.g. '10.1145/3394486.3403177'), arXiv ID (e.g. '1706.03762'), PMID, or URL",
+            },
+        },
+        "required": ["identifier"],
+    },
+}
+
+
+async def handle_resolve_paper(arguments: Dict[str, Any]) -> str:
+    """Resolve an identifier into canonical metadata and formatted BibTeX."""
+    identifier = arguments.get("identifier", "").strip()
+    if not identifier:
+        raise ValueError("Field 'identifier' is required and cannot be empty.")
+
+    logger.info("[MCP resolve_paper] Resolving identifier: '%s'", identifier)
+    canonical = await _canonical_resolver.resolve(identifier)
+    if not canonical:
+        return json.dumps({
+            "success": False,
+            "error": f"Paper identifier '{identifier}' could not be resolved across scientific databases.",
+        }, indent=2)
+
+    authors_list = [a.name for a in (canonical.authors or []) if hasattr(a, "name")]
+    primary_url = canonical.pdf_url or (
+        f"https://doi.org/{canonical.doi}" if canonical.doi
+        else (f"https://arxiv.org/abs/{canonical.arxiv_id}" if canonical.arxiv_id else "")
+    )
+
+    bibtex = generate_bibtex(
+        canonical_id=canonical.canonical_id,
+        title=canonical.title,
+        authors=authors_list,
+        year=canonical.year,
+        doi=canonical.doi,
+        url=primary_url,
+    )
+
+    payload = {
+        "success": True,
+        "canonical_id": canonical.canonical_id,
+        "title": canonical.title,
+        "abstract": canonical.abstract or "",
+        "authors": authors_list,
+        "year": canonical.year,
+        "venue": canonical.venue,
+        "doi": canonical.doi,
+        "arxiv_id": canonical.arxiv_id,
+        "openalex_id": canonical.openalex_id,
+        "pdf_url": canonical.pdf_url,
+        "is_open_access": bool(canonical.is_open_access or canonical.pdf_url),
+        "citation_count": canonical.citation_count or 0,
+        "bibtex": bibtex,
     }
     return json.dumps(payload, indent=2)

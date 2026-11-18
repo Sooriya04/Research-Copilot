@@ -137,3 +137,94 @@ async def test_mcp_search_literature_execution(monkeypatch):
     assert data["total_results"] == 1
     assert data["papers"][0]["title"] == "Sparse Mixture of Experts Routing"
     assert "Alice Smith" in data["papers"][0]["authors"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_resolve_paper_validation():
+    server = create_mcp_server()
+    req = json.dumps({
+        "jsonrpc": "2.0",
+        "id": 201,
+        "method": "tools/call",
+        "params": {
+            "name": "resolve_paper",
+            "arguments": {"identifier": ""},
+        },
+    })
+    res = json.loads(await server.handle_raw_message(req))
+    assert res["id"] == 201
+    assert res["result"]["isError"] is True
+    assert "identifier" in res["result"]["content"][0]["text"].lower()
+
+
+@pytest.mark.asyncio
+async def test_mcp_resolve_paper_execution(monkeypatch):
+    from src.core.canonical_models import AuthorEntity, CanonicalPaper, SourceMetadata
+    from src.mcp.tools import literature
+
+    server = create_mcp_server()
+
+    mock_canonical = CanonicalPaper(
+        canonical_id="arxiv:1706.03762",
+        title="Attention Is All You Need",
+        abstract="The dominant sequence transduction models are based on complex recurrent or convolutional neural networks...",
+        authors=[
+            AuthorEntity(name="Ashish Vaswani"),
+            AuthorEntity(name="Noam Shazeer"),
+        ],
+        year=2017,
+        arxiv_id="1706.03762",
+        doi="10.48550/arXiv.1706.03762",
+        pdf_url="https://arxiv.org/pdf/1706.03762.pdf",
+        is_open_access=True,
+        citation_count=120000,
+        sources=[
+            SourceMetadata(source_name="arxiv", external_id="1706.03762", url="https://arxiv.org/abs/1706.03762"),
+        ],
+    )
+
+    async def mock_resolve(identifier):
+        if "1706.03762" in identifier:
+            return mock_canonical
+        return None
+
+    monkeypatch.setattr(literature._canonical_resolver, "resolve", mock_resolve)
+
+    # 1. Successful resolution
+    req = json.dumps({
+        "jsonrpc": "2.0",
+        "id": 202,
+        "method": "tools/call",
+        "params": {
+            "name": "resolve_paper",
+            "arguments": {"identifier": "1706.03762"},
+        },
+    })
+    res = json.loads(await server.handle_raw_message(req))
+    assert res["id"] == 202
+    data = json.loads(res["result"]["content"][0]["text"])
+
+    assert data["success"] is True
+    assert data["canonical_id"] == "arxiv:1706.03762"
+    assert data["title"] == "Attention Is All You Need"
+    assert "Ashish Vaswani" in data["authors"]
+    assert data["is_open_access"] is True
+    assert "@article{" in data["bibtex"]
+    assert "Attention Is All You Need" in data["bibtex"]
+
+    # 2. Unknown identifier
+    unknown_req = json.dumps({
+        "jsonrpc": "2.0",
+        "id": 203,
+        "method": "tools/call",
+        "params": {
+            "name": "resolve_paper",
+            "arguments": {"identifier": "unknown:9999999"},
+        },
+    })
+    unknown_res = json.loads(await server.handle_raw_message(unknown_req))
+    assert unknown_res["id"] == 203
+    unknown_data = json.loads(unknown_res["result"]["content"][0]["text"])
+    assert unknown_data["success"] is False
+    assert "could not be resolved" in unknown_data["error"]
+
