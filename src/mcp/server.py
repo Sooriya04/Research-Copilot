@@ -15,6 +15,10 @@ from src.mcp.tools.literature import (
     GET_PAPER_CITATIONS_METADATA,
     handle_get_paper_citations,
 )
+from src.mcp.tools.paper_reader import (
+    READ_PAPER_FULL_METADATA,
+    handle_read_paper_full,
+)
 
 
 def create_mcp_server() -> MCPProtocolHandler:
@@ -25,6 +29,9 @@ def create_mcp_server() -> MCPProtocolHandler:
     server.register_tool(SEARCH_LITERATURE_METADATA, handle_search_literature)
     server.register_tool(RESOLVE_PAPER_METADATA, handle_resolve_paper)
     server.register_tool(GET_PAPER_CITATIONS_METADATA, handle_get_paper_citations)
+
+    # Register Domain 2 Tools
+    server.register_tool(READ_PAPER_FULL_METADATA, handle_read_paper_full)
 
     return server
 
