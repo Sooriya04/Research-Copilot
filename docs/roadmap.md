@@ -23,8 +23,9 @@ Implementation roadmap and milestones for the **Research Copilot** platform.
 - [x] Complete endpoints reference directory (`ENDPOINTS.md`)
 - [x] Architectural innovations & ideas document (`ideas.md`)
 
-### Phase 3: Coding Agent Sandboxing & Bio Tools (Next)
-- [ ] MCP Router connecting Claude Code, OpenAI Codex, and OpenCode
+### Phase 3: Coding Agent Sandboxing & Bio Tools (In Progress)
+- [x] MCP Specification: 18 tools, 6 service domains, resources & prompts ([mcp_specification.md](file:///media/workspace/Research-Copilot/docs/mcp_specification.md))
+- [ ] MCP Server Implementation (`src/mcp/`) connecting Claude Code, Cursor, and Antigravity
 - [ ] Containerized Docker execution sandbox for ML training recipes
 - [ ] Biomolecular structure prediction (Chai-1 / Boltz-1 / DiffDock) dispatch
 - [ ] Interactive Ketcher chemical sketch viewer
