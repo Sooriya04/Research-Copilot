@@ -24,6 +24,7 @@ frontend/node_modules/
 public
 artifacts/*
 !artifacts/status.md
+!artifacts/audit.md
 data/
 *.db
 *.sqlite
