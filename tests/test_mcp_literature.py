@@ -254,3 +254,105 @@ async def test_mcp_resolve_paper_execution(monkeypatch):
     assert unknown_data["success"] is False
     assert "could not be resolved" in unknown_data["error"]
 
+
+@pytest.mark.asyncio
+async def test_mcp_get_paper_citations_validation():
+    server = create_mcp_server()
+    req = json.dumps({
+        "jsonrpc": "2.0",
+        "id": 301,
+        "method": "tools/call",
+        "params": {
+            "name": "get_paper_citations",
+            "arguments": {"paper_id": ""},
+        },
+    })
+    res = json.loads(await server.handle_raw_message(req))
+    assert res["id"] == 301
+    assert res["result"]["isError"] is True
+    assert "paper_id" in res["result"]["content"][0]["text"].lower()
+
+
+@pytest.mark.asyncio
+async def test_mcp_get_paper_citations_execution(monkeypatch):
+    from src.core.canonical_models import AuthorEntity, CanonicalPaper, SourceMetadata
+    from src.mcp.tools import literature
+
+    server = create_mcp_server()
+
+    mock_canonical = CanonicalPaper(
+        canonical_id="arxiv:1706.03762",
+        title="Attention Is All You Need",
+        abstract="Transformer architecture.",
+        authors=[AuthorEntity(name="Ashish Vaswani")],
+        year=2017,
+        arxiv_id="1706.03762",
+        openalex_id="W2741809807",
+        citation_count=100000,
+        sources=[
+            SourceMetadata(
+                source_name="arxiv",
+                external_id="1706.03762",
+                url="https://arxiv.org/abs/1706.03762",
+                raw_metadata={"referenced_works": ["W2122222222"]},
+            )
+        ],
+    )
+
+    sample_work_citing = {
+        "id": "https://openalex.org/W2964344444",
+        "title": "BERT: Pre-training of Deep Bidirectional Transformers",
+        "publication_year": 2018,
+        "cited_by_count": 80000,
+        "authorships": [{"author": {"display_name": "Jacob Devlin"}}],
+    }
+
+    sample_work_referenced = {
+        "id": "https://openalex.org/W2122222222",
+        "title": "Neural Machine Translation by Jointly Learning to Align and Translate",
+        "publication_year": 2014,
+        "cited_by_count": 30000,
+        "authorships": [{"author": {"display_name": "Dzmitry Bahdanau"}}],
+    }
+
+    async def mock_resolve(identifier):
+        return mock_canonical
+
+    async def mock_fetch_citing(client, oa_id, limit=10):
+        return [sample_work_citing]
+
+    async def mock_fetch_referenced(client, ref_ids):
+        return [sample_work_referenced]
+
+    monkeypatch.setattr(literature._canonical_resolver, "resolve", mock_resolve)
+    monkeypatch.setattr(literature._citation_engine, "_fetch_citing_works", mock_fetch_citing)
+    monkeypatch.setattr(literature._citation_engine, "_fetch_referenced_works", mock_fetch_referenced)
+
+    req = json.dumps({
+        "jsonrpc": "2.0",
+        "id": 302,
+        "method": "tools/call",
+        "params": {
+            "name": "get_paper_citations",
+            "arguments": {
+                "paper_id": "1706.03762",
+                "direction": "both",
+                "limit": 10,
+            },
+        },
+    })
+
+    res = json.loads(await server.handle_raw_message(req))
+    assert res["id"] == 302
+    data = json.loads(res["result"]["content"][0]["text"])
+
+    assert data["success"] is True
+    assert data["seed_paper"]["title"] == "Attention Is All You Need"
+    assert data["total_citations_found"] == 1
+    assert data["citations"][0]["title"] == "BERT: Pre-training of Deep Bidirectional Transformers"
+    assert "prestige_score" in data["citations"][0]
+    assert data["total_references_found"] == 1
+    assert data["references"][0]["title"] == "Neural Machine Translation by Jointly Learning to Align and Translate"
+    assert data["graph_topology"]["total_nodes"] == 3
+
+

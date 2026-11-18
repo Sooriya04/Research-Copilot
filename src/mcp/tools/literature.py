@@ -3,16 +3,20 @@ Domain 1: Literature Discovery MCP Tools.
 Tools:
   - search_literature: Unified multi-source scientific search across 8+ databases.
   - resolve_paper: Canonical metadata & open-access resolution.
-  - get_paper_citations: (Coming next) Forward and backward citation expansion.
+  - get_paper_citations: Forward and backward citation expansion with PageRank.
 """
 import asyncio
 import json
 import re
 from typing import Any, Dict, List, Optional
+import httpx
+import networkx as nx
+from src.core.config import settings
 from src.core.logger import logger
-from src.core.schemas import Paper
+from src.core.schemas import Author, Paper
 from src.engines.access_resolver import AccessResolver
 from src.engines.canonical_resolver import CanonicalPaperResolver
+from src.engines.citation_graph import CitationGraphEngine
 from src.engines.multi_provider_search import MultiProviderSearchEngine
 from src.engines.paper_rank import PaperRankEngine
 from src.api.routes_search import deduplicate_papers
@@ -21,6 +25,7 @@ from src.api.routes_search import deduplicate_papers
 # Shared singleton search & resolution engines
 _resolver = AccessResolver()
 _canonical_resolver = CanonicalPaperResolver()
+_citation_engine = CitationGraphEngine()
 _multi_search = MultiProviderSearchEngine()
 _rank_engine = PaperRankEngine()
 
@@ -281,5 +286,197 @@ async def handle_resolve_paper(arguments: Dict[str, Any]) -> str:
         "is_open_access": bool(canonical.is_open_access or canonical.pdf_url),
         "citation_count": canonical.citation_count or 0,
         "bibtex": bibtex,
+    }
+    return json.dumps(payload, indent=2)
+
+
+GET_PAPER_CITATIONS_METADATA = {
+    "name": "get_paper_citations",
+    "description": (
+        "Expands the citation network of a paper, retrieving forward citations (papers that cited this work) "
+        "and backward references (prior works cited by this paper) with PageRank prestige scores."
+    ),
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "paper_id": {
+                "type": "string",
+                "description": "Paper identifier (DOI, arXiv ID, OpenAlex ID, or title)",
+            },
+            "direction": {
+                "type": "string",
+                "enum": ["forward", "backward", "both"],
+                "description": "Direction of citation traversal: 'forward' (citations), 'backward' (references), or 'both'. Default: 'both'.",
+            },
+            "limit": {
+                "type": "integer",
+                "description": "Maximum number of citations to retrieve per direction (default: 15, max: 50).",
+            },
+        },
+        "required": ["paper_id"],
+    },
+}
+
+
+async def handle_get_paper_citations(arguments: Dict[str, Any]) -> str:
+    """Retrieve forward and backward citation network with PageRank scores."""
+    paper_id = arguments.get("paper_id", "").strip()
+    if not paper_id:
+        raise ValueError("Field 'paper_id' is required and cannot be empty.")
+
+    direction = (arguments.get("direction") or "both").lower()
+    limit = max(1, min(int(arguments.get("limit", 15)), 50))
+
+    logger.info("[MCP get_paper_citations] Expanding citations for '%s' (direction=%s, limit=%d)", paper_id, direction, limit)
+
+    canonical = await _canonical_resolver.resolve(paper_id)
+    if not canonical:
+        return json.dumps({
+            "success": False,
+            "error": f"Seed paper '{paper_id}' could not be resolved across scientific databases.",
+        }, indent=2)
+
+    # Convert to Paper object for citation engine
+    author_objs = [Author(name=a.name) for a in (canonical.authors or []) if hasattr(a, "name")]
+    seed_paper = Paper(
+        id=canonical.canonical_id,
+        title=canonical.title,
+        abstract=canonical.abstract or "",
+        authors=author_objs,
+        year=canonical.year,
+        doi=canonical.doi,
+        arxiv_id=canonical.arxiv_id,
+        openalex_id=canonical.openalex_id,
+        citation_count=canonical.citation_count or 0,
+        is_open_access=canonical.is_open_access,
+        pdf_url=canonical.pdf_url,
+    )
+
+    references_list: List[Dict[str, Any]] = []
+    citations_list: List[Dict[str, Any]] = []
+
+    # Extract referenced_works if already attached to canonical sources
+    if hasattr(canonical, "sources") and canonical.sources:
+        for s in canonical.sources:
+            if hasattr(s, "raw_metadata") and isinstance(s.raw_metadata, dict):
+                rw = s.raw_metadata.get("referenced_works")
+                if rw:
+                    seed_paper.referenced_works = rw
+                    break
+
+    # Query OpenAlex for work details if openalex_id or doi available
+    oa_id = _citation_engine._extract_openalex_id(seed_paper)
+    if not oa_id and seed_paper.doi:
+        clean_doi = seed_paper.doi.strip()
+        try:
+            async with httpx.AsyncClient(timeout=6.0, headers=_citation_engine.headers) as client:
+                resp = await client.get(f"{settings.openalex_base_url}/works/https://doi.org/{clean_doi}")
+                if resp.status_code == 200:
+                    work_data = resp.json()
+                    oa_id = _citation_engine.normalize_node_id(work_data.get("id"))
+                    seed_paper.referenced_works = work_data.get("referenced_works", [])
+                    seed_paper.openalex_id = oa_id
+        except Exception as e:
+            logger.debug("[MCP get_paper_citations] DOI lookup notice: %s", e)
+    elif oa_id and not seed_paper.referenced_works and direction in ("backward", "both"):
+        try:
+            async with httpx.AsyncClient(timeout=6.0, headers=_citation_engine.headers) as client:
+                resp = await client.get(f"{settings.openalex_base_url}/works/{oa_id}")
+                if resp.status_code == 200:
+                    work_data = resp.json()
+                    seed_paper.referenced_works = work_data.get("referenced_works", [])
+        except Exception as e:
+            logger.debug("[MCP get_paper_citations] Work referenced_works lookup notice: %s", e)
+
+    # Perform directed fetch
+    async with httpx.AsyncClient(timeout=8.0, headers=_citation_engine.headers) as client:
+        tasks = []
+        if direction in ("forward", "both") and oa_id:
+            tasks.append(_citation_engine._fetch_citing_works(client, oa_id, limit=limit))
+        else:
+            tasks.append(asyncio.sleep(0, result=[]))
+
+        if direction in ("backward", "both") and seed_paper.referenced_works:
+            tasks.append(_citation_engine._fetch_referenced_works(client, seed_paper.referenced_works[:limit]))
+        else:
+            tasks.append(asyncio.sleep(0, result=[]))
+
+        res_citing, res_refs = await asyncio.gather(*tasks, return_exceptions=True)
+
+        if isinstance(res_citing, list):
+            for item in res_citing:
+                p_obj = _citation_engine._parse_openalex_work(item)
+                if p_obj:
+                    citations_list.append({
+                        "id": p_obj.id,
+                        "title": p_obj.title,
+                        "authors": [a.name for a in p_obj.authors],
+                        "year": p_obj.year,
+                        "citation_count": p_obj.citation_count,
+                        "doi": p_obj.doi,
+                        "is_open_access": p_obj.is_open_access,
+                    })
+
+        if isinstance(res_refs, list):
+            for item in res_refs:
+                p_obj = _citation_engine._parse_openalex_work(item)
+                if p_obj:
+                    references_list.append({
+                        "id": p_obj.id,
+                        "title": p_obj.title,
+                        "authors": [a.name for a in p_obj.authors],
+                        "year": p_obj.year,
+                        "citation_count": p_obj.citation_count,
+                        "doi": p_obj.doi,
+                        "is_open_access": p_obj.is_open_access,
+                    })
+
+    # Build local graph for PageRank scoring
+    g = nx.DiGraph()
+    clean_seed_id = _citation_engine.normalize_node_id(seed_paper.id)
+    g.add_node(clean_seed_id, title=seed_paper.title, citations=seed_paper.citation_count)
+
+    for c in citations_list:
+        cid = _citation_engine.normalize_node_id(c["id"])
+        g.add_node(cid, title=c["title"], citations=c["citation_count"])
+        g.add_edge(cid, clean_seed_id)  # citing -> seed
+
+    for r in references_list:
+        rid = _citation_engine.normalize_node_id(r["id"])
+        g.add_node(rid, title=r["title"], citations=r["citation_count"])
+        g.add_edge(clean_seed_id, rid)  # seed -> reference
+
+    prestige_map = _citation_engine.calculate_prestige(g)
+
+    # Attach prestige scores
+    for c in citations_list:
+        cid = _citation_engine.normalize_node_id(c["id"])
+        c["prestige_score"] = round(prestige_map.get(cid, 0.0), 2)
+
+    for r in references_list:
+        rid = _citation_engine.normalize_node_id(r["id"])
+        r["prestige_score"] = round(prestige_map.get(rid, 0.0), 2)
+
+    citations_list.sort(key=lambda x: (x.get("prestige_score", 0), x.get("citation_count", 0)), reverse=True)
+    references_list.sort(key=lambda x: (x.get("prestige_score", 0), x.get("citation_count", 0)), reverse=True)
+
+    payload = {
+        "success": True,
+        "seed_paper": {
+            "id": seed_paper.id,
+            "title": seed_paper.title,
+            "year": seed_paper.year,
+            "citation_count": seed_paper.citation_count,
+            "prestige_score": round(prestige_map.get(clean_seed_id, 0.0), 2),
+        },
+        "direction": direction,
+        "total_citations_found": len(citations_list),
+        "total_references_found": len(references_list),
+        "citations": citations_list,
+        "references": references_list,
+        "graph_topology": {
+            "total_nodes": g.number_of_nodes(),
+            "total_edges": g.number_of_edges(),
+        },
     }
     return json.dumps(payload, indent=2)
