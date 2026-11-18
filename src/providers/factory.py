@@ -29,9 +29,12 @@ def get_llm_provider(
 
     if name == "gemini":
         from src.providers.gemini import GeminiFlashLiteProvider
-        return GeminiFlashLiteProvider(api_key=api_key or None, model=model or "gemini-2.0-flash-lite")
+        return GeminiFlashLiteProvider(api_key=api_key or None, model=model or "gemini-2.0-flash")
     elif name == "ollama":
         return LocalOllamaProvider(model=model or getattr(settings, "ollama_model", "phi4-mini"), base_url=base_url or None)
+    elif name in ("vllm", "lmstudio", "localai", "local-openai", "local"):
+        from src.providers.llm import LocalOpenAIProvider
+        return LocalOpenAIProvider(api_key=api_key or "local", model=model or "local-model", base_url=base_url or None)
     elif name == "nvidia":
         return NvidiaProvider(api_key=api_key or None, model=model or None, base_url=base_url or None)
     elif name == "groq":

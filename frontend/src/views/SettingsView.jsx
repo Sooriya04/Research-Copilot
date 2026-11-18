@@ -1455,6 +1455,8 @@ function ReasoningTabContent({ settings, formValues, onChange, onSave, saving, t
               style={makeSelectStyle(t)}
             >
               <option value="ollama">Ollama (Local Offline)</option>
+              <option value="vllm">vLLM (Local OpenAI Compatible)</option>
+              <option value="lmstudio">LM Studio (Local)</option>
               <option value="gemini">Google Gemini</option>
               <option value="groq">Groq LPU</option>
               <option value="openrouter">OpenRouter</option>

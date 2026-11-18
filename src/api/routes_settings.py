@@ -31,7 +31,7 @@ from src.core.system_settings import (
 
 router = APIRouter(prefix="/api/v1/settings", tags=["Settings"])
 
-KNOWN_PROVIDERS = ["openai", "gemini", "nvidia", "deepseek", "groq", "ollama", "openrouter"]
+KNOWN_PROVIDERS = ["openai", "gemini", "nvidia", "deepseek", "groq", "ollama", "vllm", "lmstudio", "openrouter"]
 
 
 class ProviderConfig(BaseModel):
@@ -260,13 +260,17 @@ async def test_provider_connection_endpoint(req: TestConnectionRequest):
     model = (req.model or creds.get("model") or "").strip()
 
     if p_id == "gemini":
-        prov = GeminiFlashLiteProvider(api_key=api_key, model=model or "gemini-3.5-flash-lite")
+        prov = GeminiFlashLiteProvider(api_key=api_key, model=model or "gemini-2.0-flash")
         res = await prov.test_connection(model=model)
     elif p_id == "groq":
         prov = GroqProvider(api_key=api_key, model=model or "qwen/qwen3.8-27b")
         res = await prov.test_connection(model=model)
     elif p_id == "ollama":
         prov = LocalOllamaProvider(base_url=base_url, model=model)
+        res = await prov.test_connection(model=model)
+    elif p_id in ("vllm", "lmstudio", "local", "localai", "local-openai"):
+        from src.providers.llm import LocalOpenAIProvider
+        prov = LocalOpenAIProvider(api_key=api_key or "local", model=model or None, base_url=base_url or None)
         res = await prov.test_connection(model=model)
     elif p_id == "openrouter":
         prov = OpenRouterProvider(api_key=api_key, model=model, base_url=base_url)

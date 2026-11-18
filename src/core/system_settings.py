@@ -203,7 +203,7 @@ SYSTEM_SETTING_SPECS: Dict[str, Dict[str, Any]] = {
         "default": "ollama",
         "label": "Global Default LLM Provider",
         "description": "Default engine invoked for paper synthesis, novelty analysis, and autonomous planning.",
-        "options": ["ollama", "gemini", "groq", "openrouter", "openai", "nvidia", "deepseek"],
+        "options": ["ollama", "vllm", "lmstudio", "gemini", "groq", "openrouter", "openai", "nvidia", "deepseek"],
     },
     "max_loop_iterations": {
         "category": "reasoning",

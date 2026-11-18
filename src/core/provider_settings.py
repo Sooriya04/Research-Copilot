@@ -46,9 +46,11 @@ async def get_saved_provider_config(provider_id: str) -> Optional[Dict[str, Any]
 
 
 DEFAULT_PROVIDER_MODELS = {
-    "gemini": "gemini-3.5-flash-lite",
+    "gemini": "gemini-2.0-flash",
     "groq": "qwen/qwen3.8-27b",
     "ollama": "phi4-mini",
+    "vllm": "meta-llama/Llama-3.1-8B-Instruct",
+    "lmstudio": "local-model",
     "openrouter": "anthropic/claude-3.5-sonnet",
     "openai": "gpt-4o",
     "nvidia": "meta/llama-3.3-70b-instruct",
