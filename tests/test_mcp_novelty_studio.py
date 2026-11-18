@@ -126,3 +126,57 @@ async def test_generate_novel_hypotheses_mcp_server_dispatch():
     parsed = json.loads(content[0]["text"])
     assert parsed["success"] is True
     assert len(parsed["proposals"]) >= 1
+
+
+@pytest.mark.asyncio
+async def test_synthesize_critique_metadata():
+    from src.mcp.tools.novelty_studio import SYNTHESIZE_CRITIQUE_METADATA
+    assert SYNTHESIZE_CRITIQUE_METADATA["name"] == "synthesize_critique"
+    assert "paper_id" in SYNTHESIZE_CRITIQUE_METADATA["inputSchema"]["required"]
+
+
+@pytest.mark.asyncio
+async def test_synthesize_critique_invalid_args():
+    from src.mcp.tools.novelty_studio import handle_synthesize_critique
+    res_str = await handle_synthesize_critique({})
+    res = json.loads(res_str)
+    assert res["success"] is False
+    assert "error" in res
+
+
+@pytest.mark.asyncio
+async def test_synthesize_critique_execution():
+    from src.mcp.tools.novelty_studio import handle_synthesize_critique
+    res_str = await handle_synthesize_critique({"paper_id": "1706.03762"})
+    res = json.loads(res_str)
+    assert res["success"] is True
+    assert "strengths" in res
+    assert "weaknesses" in res
+    assert "threats_to_validity" in res
+    assert "verdict_score" in res
+    assert 1 <= res["verdict_score"] <= 10
+    assert len(res["strengths"]) > 0
+    assert len(res["weaknesses"]) > 0
+    assert len(res["threats_to_validity"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_synthesize_critique_mcp_server_dispatch():
+    server = create_mcp_server()
+    req = json.dumps({
+        "jsonrpc": "2.0",
+        "id": 13,
+        "method": "tools/call",
+        "params": {
+            "name": "synthesize_critique",
+            "arguments": {"paper_id": "1706.03762"}
+        }
+    })
+    resp_raw = await server.handle_raw_message(req)
+    resp = json.loads(resp_raw)
+    assert "result" in resp
+    content = resp["result"]["content"]
+    assert len(content) > 0
+    parsed = json.loads(content[0]["text"])
+    assert parsed["success"] is True
+    assert 1 <= parsed["verdict_score"] <= 10

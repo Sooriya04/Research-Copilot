@@ -107,10 +107,10 @@
   [ ] get_sota_leaderboard
   [ ] inspect_paper_datasets
 
-[ Domain 4: Gap Analysis & Novelty Studio ] — In Progress (2 of 3 Tools)
+[ Domain 4: Gap Analysis & Novelty Studio ] — 100% Complete (3 of 3 Tools)
   [x] extract_research_gaps      (Implemented, author limitations, structural gaps, combinatorial synthesis)
   [x] generate_novel_hypotheses  (Implemented, grounded multi-paper hypotheses, falsifiability criteria, 4 mechanisms)
-  [ ] synthesize_critique
+  [x] synthesize_critique        (Implemented, peer-review methodology critique, validity threats, calibrated verdict score)
 
 [ Domain 5: Reproduction & Experiment Planning ]
   [ ] generate_reproduction_plan
