@@ -72,3 +72,55 @@ async def test_generate_reproduction_plan_mcp_server_dispatch():
     parsed = json.loads(content[0]["text"])
     assert parsed["success"] is True
     assert parsed["target_compute"] == "multi_gpu"
+
+
+@pytest.mark.asyncio
+async def test_audit_reproducibility_metadata():
+    from src.mcp.tools.reproduction import AUDIT_REPRODUCIBILITY_METADATA
+    assert AUDIT_REPRODUCIBILITY_METADATA["name"] == "audit_reproducibility"
+    assert "paper_id" in AUDIT_REPRODUCIBILITY_METADATA["inputSchema"]["required"]
+
+
+@pytest.mark.asyncio
+async def test_audit_reproducibility_invalid_args():
+    from src.mcp.tools.reproduction import handle_audit_reproducibility
+    res_str = await handle_audit_reproducibility({})
+    res = json.loads(res_str)
+    assert res["success"] is False
+    assert "error" in res
+
+
+@pytest.mark.asyncio
+async def test_audit_reproducibility_execution():
+    from src.mcp.tools.reproduction import handle_audit_reproducibility
+    res_str = await handle_audit_reproducibility({"paper_id": "1706.03762"})
+    res = json.loads(res_str)
+    assert res["success"] is True
+    assert "score" in res
+    assert 0 <= res["score"] <= 100
+    assert "criteria_breakdown" in res
+    assert len(res["criteria_breakdown"]) == 8
+    assert "missing_artifacts" in res
+    assert isinstance(res["missing_artifacts"], list)
+
+
+@pytest.mark.asyncio
+async def test_audit_reproducibility_mcp_server_dispatch():
+    server = create_mcp_server()
+    req = json.dumps({
+        "jsonrpc": "2.0",
+        "id": 15,
+        "method": "tools/call",
+        "params": {
+            "name": "audit_reproducibility",
+            "arguments": {"paper_id": "1706.03762"}
+        }
+    })
+    resp_raw = await server.handle_raw_message(req)
+    resp = json.loads(resp_raw)
+    assert "result" in resp
+    content = resp["result"]["content"]
+    assert len(content) > 0
+    parsed = json.loads(content[0]["text"])
+    assert parsed["success"] is True
+    assert 0 <= parsed["score"] <= 100

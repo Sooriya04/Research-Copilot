@@ -2,6 +2,7 @@
 MCP Tools for Domain 5: Reproduction & Experiment Planning Service.
 Implements:
 - Tool 14: generate_reproduction_plan
+- Tool 15: audit_reproducibility
 """
 import asyncio
 import json
@@ -47,6 +48,20 @@ COMPUTE_SCALING_FACTORS = {
 }
 
 
+async def _resolve_paper_title_and_abstract(paper_id: str) -> tuple[str, str]:
+    """Helper to canonically resolve paper title and abstract."""
+    resolved_title = paper_id
+    abstract = ""
+    try:
+        res = await _canonical_resolver.resolve(paper_id)
+        if res:
+            resolved_title = res.title or paper_id
+            abstract = res.abstract or ""
+    except Exception as e:
+        logger.debug("[reproduction_tools] Resolver notice for %s: %s", paper_id, e)
+    return resolved_title, abstract
+
+
 async def handle_generate_reproduction_plan(arguments: Dict[str, Any]) -> str:
     """Execute generate_reproduction_plan tool."""
     paper_id = arguments.get("paper_id", "").strip()
@@ -62,18 +77,9 @@ async def handle_generate_reproduction_plan(arguments: Dict[str, Any]) -> str:
             "validation_checkpoints": [],
         }, indent=2)
 
-    # 1. Resolve paper to canonical representation
-    resolved_title = paper_id
-    abstract = ""
-    try:
-        res = await _canonical_resolver.resolve_identifier(paper_id)
-        if res and res.paper:
-            resolved_title = res.paper.title or paper_id
-            abstract = res.paper.abstract or ""
-    except Exception as e:
-        logger.debug("[generate_reproduction_plan] Resolver notice for %s: %s", paper_id, e)
+    resolved_title, abstract = await _resolve_paper_title_and_abstract(paper_id)
 
-    # 2. Invoke ReproductionMapEngine
+    # Invoke ReproductionMapper
     try:
         rep_map = await _reproduction_engine.generate_map(
             paper_id=paper_id,
@@ -88,12 +94,12 @@ async def handle_generate_reproduction_plan(arguments: Dict[str, Any]) -> str:
             evidence_summary=f"{resolved_title}. {abstract}",
         )
 
-    # 3. Compute scaled hours based on target hardware
+    # Compute scaled hours based on target hardware
     base_hours = rep_map.compute_budget.estimated_hours or 12.0
     scale = COMPUTE_SCALING_FACTORS.get(target_compute, 1.0)
     estimated_compute_hours = round(float(base_hours * scale), 1)
 
-    # 4. Construct Environment Specification
+    # Construct Environment Specification
     fw = rep_map.code_availability.framework or "PyTorch"
     cuda_req = "CUDA 12.1+ / cuDNN 8.9" if target_compute != "cpu" else "None (CPU only)"
     core_libs = [f"{fw.lower()}", "numpy>=1.24", "scipy>=1.10", "tqdm", "accelerate"]
@@ -110,7 +116,7 @@ async def handle_generate_reproduction_plan(arguments: Dict[str, Any]) -> str:
         "code_url": rep_map.code_availability.repo_url,
     }
 
-    # 5. Format Step-by-Step Instructions across 4 phases
+    # Format Step-by-Step Instructions across 4 phases
     phase_mapping = {
         "setup": "environment",
         "data_prep": "data_preparation",
@@ -129,14 +135,13 @@ async def handle_generate_reproduction_plan(arguments: Dict[str, Any]) -> str:
             "verification": step.verification_criteria,
         })
 
-    # Ensure all 4 key execution phases are present
     existing_phases = {s["phase"] for s in step_by_step_instructions}
     if "environment" not in existing_phases:
         repo = rep_map.code_availability.repo_url or "https://github.com/..."
         step_by_step_instructions.insert(0, {
             "step_number": 1,
             "phase": "environment",
-            "action": "Clone repository and install dependencies using uv",
+            "action": "Clone repository and initialize virtual environment with Python dependencies",
             "command": f"git clone {repo} && cd $(basename {repo} .git) && uv venv && source .venv/bin/activate && uv pip install -e .",
             "verification": "python -c 'import torch; print(torch.__version__)' succeeds without errors.",
         })
@@ -166,11 +171,9 @@ async def handle_generate_reproduction_plan(arguments: Dict[str, Any]) -> str:
             "verification": "Reported metrics match paper claims within 1.5% tolerance interval.",
         })
 
-    # Re-index steps
     for idx, s in enumerate(step_by_step_instructions, 1):
         s["step_number"] = idx
 
-    # 6. Validation Checkpoints for Early Abort
     validation_checkpoints = [
         {
             "checkpoint_name": "Epoch 1 Convergence Check",
@@ -205,5 +208,169 @@ async def handle_generate_reproduction_plan(arguments: Dict[str, Any]) -> str:
         "environment_spec": environment_spec,
         "step_by_step_instructions": step_by_step_instructions,
         "validation_checkpoints": validation_checkpoints,
+    }
+    return json.dumps(payload, indent=2)
+
+
+AUDIT_REPRODUCIBILITY_METADATA = {
+    "name": "audit_reproducibility",
+    "description": (
+        "Evaluates a paper against an 8-point empirical reproducibility rubric, assigning "
+        "scores for code availability, data access, hyperparameter transparency, compute disclosure, "
+        "and random seed reporting."
+    ),
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "paper_id": {
+                "type": "string",
+                "description": "Paper identifier (DOI, arXiv ID, or title).",
+            }
+        },
+        "required": ["paper_id"],
+    },
+}
+
+EIGHT_POINT_RUBRIC = [
+    {
+        "key": "code_availability",
+        "label": "Code Availability & Open-Source Release",
+        "weight": 15,
+        "patterns": [r"https?://(www\.)?(github|gitlab)\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", r"code\s+(is\s+)?available", r"repository"],
+        "artifact_if_missing": "Executable code repository or source script release.",
+    },
+    {
+        "key": "data_access",
+        "label": "Data Access & Benchmark Transparency",
+        "weight": 15,
+        "patterns": [r"https?://huggingface\.co/datasets", r"dataset\s+(is\s+)?available", r"download.*dataset", r"public.*benchmark", r"wmt", r"cifar", r"imagenet", r"benchmark"],
+        "artifact_if_missing": "Public dataset download link, accession ID, or training split manifests.",
+    },
+    {
+        "key": "hyperparameter_transparency",
+        "label": "Hyperparameter & Architecture Transparency",
+        "weight": 15,
+        "patterns": [r"learning\s+rate", r"batch\s+size", r"adamw?", r"optimizer", r"weight\s+decay", r"epochs?", r"warmup", r"dropout"],
+        "artifact_if_missing": "Comprehensive hyperparameter table (learning rates, batch sizes, optimizer configs).",
+    },
+    {
+        "key": "compute_disclosure",
+        "label": "Compute Budget & Hardware Specification",
+        "weight": 10,
+        "patterns": [r"(a100|h100|v100|t4|rtx\s*\d+|gpu|tpu)s?", r"gpu\s+hours?", r"trained\s+for\s+\d+\s+hours?", r"accelerator"],
+        "artifact_if_missing": "Hardware configuration, accelerator counts, and total GPU/TPU hours.",
+    },
+    {
+        "key": "random_seed_reporting",
+        "label": "Random Seed Reporting & Uncertainty",
+        "weight": 10,
+        "patterns": [r"random\s+seeds?", r"seeds?\s*=\s*\d+", r"averaged\s+over\s+\d+\s+runs?", r"confidence\s+intervals?", r"(\+\/|\u00b1)\s*\d+", r"variance", r"standard deviation"],
+        "artifact_if_missing": "Multi-seed variance reporting and random initialization seeds.",
+    },
+    {
+        "key": "ablation_studies",
+        "label": "Ablation Studies & Component Necessity",
+        "weight": 15,
+        "patterns": [r"ablation\s+(study|studies|experiments?|table)", r"ablated", r"without.*component", r"isolated"],
+        "artifact_if_missing": "Ablation experiment results isolating architectural components.",
+    },
+    {
+        "key": "evaluation_protocol",
+        "label": "Standardized Evaluation & Baseline Protocol",
+        "weight": 10,
+        "patterns": [r"compared\s+(with|against|to)\s+baselines?", r"sota\s+baselines?", r"baseline\s+models?", r"bleu", r"accuracy", r"perplexity"],
+        "artifact_if_missing": "Evaluation scripts and competitive published baseline comparisons.",
+    },
+    {
+        "key": "limitations_disclosure",
+        "label": "Failure Modes & Assumptions Disclosure",
+        "weight": 10,
+        "patterns": [r"limitations?", r"threats?\s+to\s+validity", r"failure\s+cases?", r"assumptions?", r"challenges?"],
+        "artifact_if_missing": "Explicit discussion of failure cases, assumptions, and validity boundaries.",
+    },
+]
+
+
+async def handle_audit_reproducibility(arguments: Dict[str, Any]) -> str:
+    """Execute audit_reproducibility tool."""
+    paper_id = arguments.get("paper_id", "").strip()
+    if not paper_id:
+        return json.dumps({
+            "success": False,
+            "error": "paper_id is required",
+            "score": 0,
+            "criteria_breakdown": {},
+            "missing_artifacts": [],
+        }, indent=2)
+
+    resolved_title, abstract = await _resolve_paper_title_and_abstract(paper_id)
+    corpus = f"{resolved_title}\n{abstract}".lower()
+
+    # Query reproduction engine for enriched evidence
+    try:
+        rep_map = await _reproduction_engine.generate_map(
+            paper_id=paper_id,
+            title=resolved_title,
+            abstract=abstract,
+            force_refresh=False,
+        )
+        if rep_map.code_availability.repo_url:
+            corpus += f"\n{rep_map.code_availability.repo_url}"
+        if rep_map.compute_budget.gpu_type:
+            corpus += f"\n{rep_map.compute_budget.gpu_type} {rep_map.compute_budget.estimated_hours} hours"
+        for ds in rep_map.dataset_checklist:
+            corpus += f"\n{ds.name} {ds.download_url or ''}"
+    except Exception:
+        pass
+
+    # Evaluate 8-point rubric
+    total_score = 0
+    criteria_breakdown: Dict[str, Any] = {}
+    missing_artifacts: List[str] = []
+
+    for item in EIGHT_POINT_RUBRIC:
+        key = item["key"]
+        weight = item["weight"]
+        label = item["label"]
+        matched = False
+        evidence_found = ""
+
+        for pat in item["patterns"]:
+            m = re.search(pat, corpus, re.IGNORECASE)
+            if m:
+                matched = True
+                evidence_found = m.group(0)
+                break
+
+        if matched:
+            earned = weight
+            total_score += earned
+            criteria_breakdown[key] = {
+                "label": label,
+                "score": earned,
+                "max_score": weight,
+                "passed": True,
+                "evidence": evidence_found,
+            }
+        else:
+            earned = 0
+            criteria_breakdown[key] = {
+                "label": label,
+                "score": earned,
+                "max_score": weight,
+                "passed": False,
+                "evidence": None,
+            }
+            missing_artifacts.append(item["artifact_if_missing"])
+
+    final_score = max(0, min(100, total_score))
+
+    payload = {
+        "success": True,
+        "paper_id": paper_id,
+        "title": resolved_title,
+        "score": final_score,
+        "criteria_breakdown": criteria_breakdown,
+        "missing_artifacts": missing_artifacts,
     }
     return json.dumps(payload, indent=2)

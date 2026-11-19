@@ -42,6 +42,8 @@ from src.mcp.tools.novelty_studio import (
 from src.mcp.tools.reproduction import (
     GENERATE_REPRODUCTION_PLAN_METADATA,
     handle_generate_reproduction_plan,
+    AUDIT_REPRODUCIBILITY_METADATA,
+    handle_audit_reproducibility,
 )
 
 
@@ -72,6 +74,7 @@ def create_mcp_server() -> MCPProtocolHandler:
 
     # Register Domain 5 Tools: Reproduction & Experiment Planning
     server.register_tool(GENERATE_REPRODUCTION_PLAN_METADATA, handle_generate_reproduction_plan)
+    server.register_tool(AUDIT_REPRODUCIBILITY_METADATA, handle_audit_reproducibility)
 
     return server
 
