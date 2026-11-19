@@ -42,6 +42,8 @@ from src.mcp.tools.novelty_studio import (
 from src.mcp.tools.knowledge_graph import (
     QUERY_KNOWLEDGE_GRAPH_METADATA,
     handle_query_knowledge_graph,
+    COMPARE_PAPERS_MATRIX_METADATA,
+    handle_compare_papers_matrix,
 )
 from src.mcp.tools.reproduction import (
     GENERATE_REPRODUCTION_PLAN_METADATA,
@@ -82,6 +84,7 @@ def create_mcp_server() -> MCPProtocolHandler:
 
     # Register Domain 6 Tools: Knowledge Graph & Synthesis
     server.register_tool(QUERY_KNOWLEDGE_GRAPH_METADATA, handle_query_knowledge_graph)
+    server.register_tool(COMPARE_PAPERS_MATRIX_METADATA, handle_compare_papers_matrix)
 
     return server
 
