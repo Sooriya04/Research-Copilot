@@ -38,4 +38,7 @@ ENDPOINTS.md
 feynman.md
 tasks/
 public_dist/
+dist/
+frontend/dist/
+build/
 .logs/
