@@ -9,9 +9,9 @@ from src.providers.base import BaseLLMProvider, ChatMessage
 class GeminiFlashLiteProvider(BaseLLMProvider):
     """Google Gemini Flash-Lite provider using Google Generative Language REST API."""
 
-    def __init__(self, api_key: Optional[str] = None, model: str = "gemini-2.0-flash"):
+    def __init__(self, api_key: Optional[str] = None, model: str = "gemini-3.5-flash-lite"):
         self.api_key = api_key if api_key is not None else (settings.gemini_api_key or os.getenv("GEMINI_API_KEY", ""))
-        self.model = model
+        self.model = model or "gemini-3.5-flash-lite"
         self.base_url = "https://generativelanguage.googleapis.com/v1beta"
 
     async def test_connection(self, model: Optional[str] = None) -> dict:
@@ -116,11 +116,10 @@ class GeminiFlashLiteProvider(BaseLLMProvider):
             payload["system_instruction"] = {"parts": system_parts}
 
         # Candidate models to try in order of efficiency
-        candidate_models = [target_model]
-        if "gemini-2.0-flash" not in candidate_models:
-            candidate_models.append("gemini-2.0-flash")
-        if "gemini-1.5-flash" not in candidate_models:
-            candidate_models.append("gemini-1.5-flash")
+        candidate_models = [target_model or "gemini-3.5-flash-lite"]
+        for cand in ["gemini-3.5-flash-lite", "gemini-2.5-flash"]:
+            if cand not in candidate_models:
+                candidate_models.append(cand)
 
         try:
             async with httpx.AsyncClient(timeout=45.0) as client:

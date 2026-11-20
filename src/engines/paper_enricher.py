@@ -122,6 +122,12 @@ class PaperEnricher:
         doi = self._clean_doi(data.get("doi"))
         openalex_id = data.get("openalex_id")
         paper_id = data.get("id") or (f"arxiv:{arxiv_id}" if arxiv_id else (f"doi:{doi}" if doi else "paper-unknown"))
+        if not openalex_id and paper_id and "openalex.org" in str(paper_id):
+            m_oa = re.search(r"W\d+", str(paper_id), flags=re.IGNORECASE)
+            if m_oa:
+                openalex_id = m_oa.group(0).upper()
+        if title == paper_id or title.startswith("http://") or title.startswith("https://"):
+            title = ""
 
         # Extract list fields
         authors = list(data.get("authors") or [])

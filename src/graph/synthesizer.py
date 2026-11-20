@@ -54,38 +54,59 @@ class GraphSynthesizer:
         self.db_path = db_path
         self._table_initialized = False
 
-    def _resolve_llm_provider(
+    async def _resolve_llm_provider(
         self,
         provider_name: Optional[str] = None,
         model: Optional[str] = None,
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
     ) -> Tuple[BaseLLMProvider, str, str]:
-        """Resolves the LLM provider for graph synthesis, preferring local Ollama if requested or default."""
+        """Resolves the LLM provider directly from user settings in SQLite or request parameters."""
         p_name = (provider_name or "").lower().strip()
         from src.core.config import settings
+        from src.core.provider_settings import resolve_provider_credentials
         from src.providers.factory import get_llm_provider
-
-        # If user explicitly wants ollama or local LLM
-        if p_name in ("ollama", "local", "localllm"):
-            target_model = model or getattr(settings, "ollama_model", "phi4-mini") or "phi4-mini"
-            return LocalOllamaProvider(model=target_model, base_url=base_url or None), "ollama", target_model
 
         if not p_name:
             if self._provider:
                 return self._provider, getattr(self._provider, "provider_name", "custom"), getattr(self._provider, "model", "default")
-            pref = getattr(settings, "default_llm_provider", "ollama") or "ollama"
-            if pref == "ollama":
-                target_model = model or getattr(settings, "ollama_model", "phi4-mini") or "phi4-mini"
-                return LocalOllamaProvider(model=target_model, base_url=base_url or None), "ollama", target_model
-            p_name = pref
+            p_name = (getattr(settings, "default_llm_provider", None) or "gemini").lower().strip()
+
+        creds = await resolve_provider_credentials(
+            provider_id=p_name,
+            explicit_key=api_key,
+            explicit_model=model,
+            explicit_base_url=base_url,
+        )
+
+        resolved_key = creds.get("api_key") or ""
+        resolved_model = (model or creds.get("model") or "").strip()
+        resolved_base_url = (base_url or creds.get("base_url") or "").strip()
+
+        # If user's selected provider lacks credentials, look up any configured provider from user Settings
+        if not resolved_key and p_name not in ("ollama", "local", "vllm", "lmstudio"):
+            for alt in ("gemini", "groq", "openai", "openrouter", "nvidia", "deepseek"):
+                alt_creds = await resolve_provider_credentials(alt)
+                if alt_creds.get("api_key"):
+                    p_name = alt
+                    resolved_key = alt_creds.get("api_key")
+                    resolved_model = model or alt_creds.get("model") or ""
+                    resolved_base_url = base_url or alt_creds.get("base_url") or ""
+                    break
 
         try:
-            prov = get_llm_provider(p_name, model=model or "", api_key=api_key or "", base_url=base_url or "")
-            return prov, p_name, model or getattr(prov, "model", "default")
-        except Exception:
-            target_model = model or getattr(settings, "ollama_model", "phi4-mini") or "phi4-mini"
-            return LocalOllamaProvider(model=target_model, base_url=base_url or None), "ollama", target_model
+            prov = get_llm_provider(
+                provider_name=p_name,
+                model=resolved_model,
+                api_key=resolved_key,
+                base_url=resolved_base_url,
+            )
+            effective_model = resolved_model or getattr(prov, "model", "default")
+            return prov, p_name, effective_model
+        except Exception as e:
+            logger.warning("[GraphSynthesizer] Failed instantiating configured provider '%s': %s", p_name, e)
+            target_model = resolved_model or getattr(settings, "ollama_model", "phi4-mini") or "phi4-mini"
+            return LocalOllamaProvider(model=target_model, base_url=resolved_base_url or None), "ollama", target_model
 
     async def _ensure_cache_table(self) -> None:
         """Create graph_synthesis_cache table if not exists."""
@@ -145,8 +166,9 @@ class GraphSynthesizer:
 
                 if row:
                     synthesis_data = json.loads(row[0])
-                    # If cached synthesis has 0 relations, 0 methods, and 0 gaps, it was a failed run - do not use
-                    if not synthesis_data.get("cross_paper_relations") and not synthesis_data.get("methods") and not synthesis_data.get("research_gaps"):
+                    # If cached synthesis has 0 relations, 0 methods, 0 gaps, AND 0 nodes, it was a failed run - do not use
+                    nodes_cached = row[1] or 0
+                    if not synthesis_data.get("cross_paper_relations") and not synthesis_data.get("methods") and not synthesis_data.get("research_gaps") and nodes_cached == 0:
                         logger.info("[GraphSynthesizer] Ignoring empty/corrupted SQLite synthesis cache for workspace '%s'", workspace_id)
                         return None
                     return {
@@ -156,6 +178,8 @@ class GraphSynthesizer:
                         "paper_ids": json.loads(row[3]) if row[3] else [],
                         "nodes_count": row[1],
                         "edges_count": row[2],
+                        "engine": synthesis_data.get("engine") or "gemini",
+                        "model": synthesis_data.get("model") or "gemini-3.5-flash-lite",
                         **synthesis_data,
                     }
         except Exception as e:
@@ -288,6 +312,8 @@ class GraphSynthesizer:
                     "workspace_id": clean_ws_id,
                     "cached": True,
                     "llm_called": False,
+                    "engine": cached_res.get("engine") or "gemini",
+                    "model": cached_res.get("model") or "gemini-3.5-flash-lite",
                     "papers_count": len(valid_papers),
                     "paper_ids": canonical_pids,
                     "cross_paper_relations_count": len(cached_res.get("cross_paper_relations", [])),
@@ -354,7 +380,7 @@ class GraphSynthesizer:
                 enriched_papers.append(p)
 
         # 4. Synthesize Cross-Paper Connections (Local Ollama phi4-mini or configured provider)
-        llm_provider, engine_name, model_name = self._resolve_llm_provider(
+        llm_provider, engine_name, model_name = await self._resolve_llm_provider(
             provider_name=provider_name,
             model=model,
             api_key=api_key,
@@ -386,7 +412,7 @@ class GraphSynthesizer:
             synthesis_result["synthesis_summary"] = f"Single focal paper '{enriched_papers[0].get('title', '')}' mapped with core methods and evaluation datasets."
 
         # 5. Apply Discovered Relations, Methods, Datasets & Gaps to Graph Store
-        await self._apply_synthesis_to_store(synthesis_result, ingested_paper_node_ids, clean_ws_id)
+        await self._apply_synthesis_to_store(synthesis_result, ingested_paper_node_ids, ws_node_id)
 
         # 6. Fetch Visual Elements
         elements = await self._get_scoped_elements(ws_node_id, list(ingested_paper_node_ids.values()))
@@ -493,6 +519,24 @@ class GraphSynthesizer:
                 return parsed, True
         except Exception as e:
             logger.info("[GraphSynthesizer] Primary LLM synthesis (%s) failed: %s", engine_name, e)
+            # Try Gemini or Groq fallback if configured before dropping to heuristics
+            from src.core.config import settings
+            from src.providers.factory import get_llm_provider
+            for fb_provider in ("gemini", "groq"):
+                has_key = getattr(settings, f"{fb_provider}_api_key", None)
+                if has_key:
+                    try:
+                        logger.info("[GraphSynthesizer] Attempting fallback LLM synthesis via %s", fb_provider)
+                        fb_prov = get_llm_provider(fb_provider)
+                        raw_res = await fb_prov.complete(messages, temperature=0.1)
+                        parsed = _extract_synthesis_json(raw_res)
+                        if isinstance(parsed, dict) and "cross_paper_relations" in parsed:
+                            parsed["engine"] = fb_provider
+                            parsed["model"] = getattr(fb_prov, "model", fb_provider)
+                            return parsed, True
+                    except Exception as fb_err:
+                        logger.warning("[GraphSynthesizer] Fallback %s failed: %s", fb_provider, fb_err)
+
             if not isinstance(provider, LocalOllamaProvider):
                 try:
                     logger.info("[GraphSynthesizer] Falling back to local Ollama phi4-mini for synthesis")
@@ -564,11 +608,12 @@ class GraphSynthesizer:
                 # Check shared datasets -> compared_to
                 elif set(p1.get("datasets", [])).intersection(set(p2.get("datasets", []))):
                     if i < j:
+                        shared_d_list = list(set(p1.get("datasets", [])).intersection(set(p2.get("datasets", []))))
                         relations.append({
                             "source_id": pid1,
                             "target_id": pid2,
                             "relation": "compared_to",
-                            "explanation": f"Evaluated across common benchmark datasets: {', '.join(set(p1.get('datasets', [])).intersection(set(p2.get('datasets', [])))[:2])}",
+                            "explanation": f"Evaluated across common benchmark datasets: {', '.join(shared_d_list[:2])}",
                             "weight": 1.5,
                         })
 
@@ -584,8 +629,34 @@ class GraphSynthesizer:
                 "paper_ids": [p.get("id") for p in papers[:2]],
             })
 
+        # Extract method & dataset lists
+        methods_list = []
+        datasets_list = []
+        for p in papers:
+            pid = p.get("id")
+            for m in p.get("methods", []):
+                norm = normalize_entity(m)
+                if norm and not any(x.get("name") == norm for x in methods_list):
+                    methods_list.append({"name": norm, "paper_ids": [pid]})
+            for d in p.get("datasets", []):
+                norm = normalize_entity(d)
+                if norm and not any(x.get("name") == norm for x in datasets_list):
+                    datasets_list.append({"name": norm, "paper_ids": [pid]})
+
+        # If empty, derive heuristic entities from titles
+        if not methods_list:
+            for p in papers:
+                pid = p.get("id")
+                t = p.get("title") or ""
+                extracted = extract_heuristic_entities(t, p.get("abstract", ""))
+                for m in extracted:
+                    if not any(x.get("name") == m for x in methods_list):
+                        methods_list.append({"name": m, "paper_ids": [pid]})
+
         return {
             "cross_paper_relations": relations,
+            "methods": methods_list,
+            "datasets": datasets_list,
             "shared_methods": list(shared_methods),
             "shared_datasets": list(shared_datasets),
             "research_gaps": gaps,
@@ -782,11 +853,20 @@ class GraphSynthesizer:
         allowed_node_ids = set()
         if ws_node_id in self.store.graph:
             allowed_node_ids.add(ws_node_id)
+            for succ in self.store.graph.successors(ws_node_id):
+                allowed_node_ids.add(succ)
+            for pred in self.store.graph.predecessors(ws_node_id):
+                allowed_node_ids.add(pred)
+
         for pid in paper_ids:
             if pid in self.store.graph:
                 allowed_node_ids.add(pid)
             elif slugify_id(pid) in self.store.graph:
                 allowed_node_ids.add(slugify_id(pid))
+            else:
+                existing_id = self.store.find_existing_paper_node(raw_id=pid)
+                if existing_id and existing_id in self.store.graph:
+                    allowed_node_ids.add(existing_id)
 
         # Include direct neighbors (methods, datasets, gaps, citations)
         for nid in list(allowed_node_ids):

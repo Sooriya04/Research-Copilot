@@ -431,7 +431,7 @@ export default function KnowledgeGraphView() {
   const [summaryData, setSummaryData] = useState(null);
 
   // AI Graph Synthesis states (with SQLite cache)
-  const [synthesisProvider, setSynthesisProvider] = useState('ollama'); // 'ollama' | 'gemini' | 'groq' | 'deepseek' | 'nvidia' | 'openrouter'
+  const [synthesisProvider, setSynthesisProvider] = useState('gemini'); // 'gemini' | 'ollama' | 'groq' | 'deepseek' | 'nvidia' | 'openrouter'
   const [buildingGraph, setBuildingGraph] = useState(false);
   const [buildStatusMessage, setBuildStatusMessage] = useState('');
   const [synthesisInfo, setSynthesisInfo] = useState(null);
@@ -693,6 +693,9 @@ export default function KnowledgeGraphView() {
         const found =
           (searchResults || []).find(p => p.id === pid || p.arxiv_id === pid) ||
           (graphSearchResults || []).find(p => p.id === pid || p.arxiv_id === pid) ||
+          (activeWorkspace?.state_json?.top_papers || []).find(p => p.id === pid || p.arxiv_id === pid) ||
+          (activeWorkspace?.state_json?.papers || []).find(p => p.id === pid || p.arxiv_id === pid) ||
+          (activeWorkspace?.top_papers || []).find(p => p.id === pid || p.arxiv_id === pid) ||
           (activeWorkspace?.papers || []).find(p => p.id === pid || p.arxiv_id === pid) ||
           (comparisonPapers || []).find(p => p.id === pid || p.arxiv_id === pid);
         if (found) {
@@ -705,6 +708,8 @@ export default function KnowledgeGraphView() {
             year: found.year,
             authors: (found.authors || []).map(a => typeof a === 'string' ? a : a.name || String(a)),
             topics: found.topics || [],
+            methods: found.methods || [],
+            datasets: found.datasets || [],
           };
         }
         return { id: pid, title: pid };
@@ -813,15 +818,21 @@ export default function KnowledgeGraphView() {
     }
   };
 
-  // Seed addedToGraphPaperIds from activeWorkspace.papers if staged list is empty
+  // Seed addedToGraphPaperIds from activeWorkspace if staged list is empty
   useEffect(() => {
-    if ((!addedToGraphPaperIds || addedToGraphPaperIds.length === 0) && activeWorkspace?.papers && activeWorkspace.papers.length > 0) {
-      const pids = activeWorkspace.papers.map(p => p.id || p.arxiv_id).filter(Boolean);
+    const wsPapers =
+      activeWorkspace?.state_json?.top_papers ||
+      activeWorkspace?.state_json?.papers ||
+      activeWorkspace?.top_papers ||
+      activeWorkspace?.papers ||
+      [];
+    if ((!addedToGraphPaperIds || addedToGraphPaperIds.length === 0) && wsPapers.length > 0) {
+      const pids = wsPapers.map(p => p.id || p.arxiv_id || p.canonical_id).filter(Boolean);
       if (pids.length > 0) {
         setAddedToGraphPaperIds(pids);
       }
     }
-  }, [activeWorkspace?.id, activeWorkspace?.papers?.length]);
+  }, [activeWorkspace?.id, activeWorkspace?.papers?.length, activeWorkspace?.top_papers?.length, activeWorkspace?.state_json]);
 
   useEffect(() => {
     setSelectedEntity(null);

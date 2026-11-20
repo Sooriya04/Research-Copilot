@@ -20,6 +20,34 @@ def mask_api_key(key: Optional[str]) -> Optional[str]:
     return f"{key_str[:6]}...{key_str[-4:]}"
 
 
+def get_saved_provider_config_sync(provider_id: str, db_path: str = "./data/research_copilot.db") -> Optional[Dict[str, Any]]:
+    """Synchronously retrieve saved API key, model, and base_url from SQLite user_settings table."""
+    p_id = (provider_id or "").lower().strip()
+    try:
+        import sqlite3
+        if not os.path.exists(db_path):
+            return None
+        with sqlite3.connect(db_path, timeout=5.0) as conn:
+            c = conn.cursor()
+            c.execute(
+                "SELECT provider_id, api_key, base_url, model FROM user_settings WHERE id = 'default' AND provider_id = ?",
+                (p_id,),
+            )
+            row = c.fetchone()
+            if row:
+                return {
+                    "provider_id": row[0],
+                    "api_key": row[1],
+                    "base_url": row[2],
+                    "model": row[3],
+                    "api_key_masked": mask_api_key(row[1]),
+                    "has_key": bool(row[1]),
+                }
+    except Exception as e:
+        logger.warning("[ProviderSettings] Failed synchronous SQLite settings read for '%s': %s", p_id, e)
+    return None
+
+
 async def get_saved_provider_config(provider_id: str) -> Optional[Dict[str, Any]]:
     """Retrieve saved API key, model, and base_url from SQLite user_settings table."""
     p_id = (provider_id or "").lower().strip()
@@ -46,7 +74,7 @@ async def get_saved_provider_config(provider_id: str) -> Optional[Dict[str, Any]
 
 
 DEFAULT_PROVIDER_MODELS = {
-    "gemini": "gemini-2.0-flash",
+    "gemini": "gemini-3.5-flash-lite",
     "groq": "qwen/qwen3.8-27b",
     "ollama": "phi4-mini",
     "vllm": "meta-llama/Llama-3.1-8B-Instruct",
@@ -214,5 +242,83 @@ async def resolve_provider_credentials(
         "api_key_masked": mask_api_key(resolved_key),
         "base_url": resolved_base_url,
         "model": resolved_model or DEFAULT_PROVIDER_MODELS.get(p_id),
+        "stored_in_db": bool(db_config.get("api_key") or db_config.get("base_url") or db_config.get("model")),
+    }
+
+
+def resolve_provider_credentials_sync(
+    provider_id: str,
+    explicit_key: Optional[str] = None,
+    explicit_model: Optional[str] = None,
+    explicit_base_url: Optional[str] = None,
+    db_path: str = "./data/research_copilot.db",
+) -> Dict[str, Any]:
+    """
+    Synchronously resolves credentials for a provider:
+    1. Explicit values passed in the immediate request
+    2. Stored persistent values in SQLite DB (user_settings table)
+    3. Environment variables / settings config
+    """
+    p_id = (provider_id or "gemini").lower().strip()
+    db_config = get_saved_provider_config_sync(p_id, db_path=db_path) or {}
+
+    # 1. Resolve API Key
+    resolved_key = (explicit_key or "").strip()
+    key_source = "request"
+    if not resolved_key and db_config.get("api_key"):
+        resolved_key = db_config["api_key"]
+        key_source = "sqlite"
+    if not resolved_key:
+        if p_id == "gemini":
+            resolved_key = settings.gemini_api_key or os.getenv("GEMINI_API_KEY", "")
+        elif p_id == "groq":
+            resolved_key = (
+                settings.groq_api_key
+                or os.getenv("GROQ_API_KEY", "")
+                or os.getenv("grok_API", "")
+                or os.getenv("GROK_API", "")
+            )
+        elif p_id == "openrouter":
+            resolved_key = settings.openrouter_api_key or os.getenv("OPENROUTER_API_KEY", "")
+        elif p_id == "openai":
+            resolved_key = settings.openai_api_key or os.getenv("OPENAI_API_KEY", "")
+        elif p_id == "nvidia":
+            resolved_key = getattr(settings, "nvidia_api_key", None) or os.getenv("NVIDIA_API_KEY", "")
+        elif p_id == "deepseek":
+            resolved_key = getattr(settings, "deepseek_api_key", None) or os.getenv("DEEPSEEK_API_KEY", "")
+        if resolved_key:
+            key_source = "env"
+
+    # 2. Resolve Base URL
+    resolved_base_url = (explicit_base_url or "").strip()
+    if not resolved_base_url and db_config.get("base_url"):
+        resolved_base_url = db_config["base_url"]
+    if not resolved_base_url:
+        if p_id == "ollama":
+            resolved_base_url = settings.ollama_base_url or "http://localhost:11434"
+        elif p_id == "openrouter":
+            resolved_base_url = "https://openrouter.ai/api/v1"
+        elif p_id == "openai":
+            resolved_base_url = "https://api.openai.com/v1"
+        elif p_id == "nvidia":
+            resolved_base_url = "https://integrate.api.nvidia.com/v1"
+        elif p_id == "deepseek":
+            resolved_base_url = getattr(settings, "deepseek_base_url", None) or "https://api.deepseek.com"
+
+    # 3. Resolve Model
+    resolved_model = (explicit_model or "").strip()
+    if not resolved_model and db_config.get("model"):
+        resolved_model = db_config["model"]
+    if not resolved_model:
+        resolved_model = DEFAULT_PROVIDER_MODELS.get(p_id, "default")
+
+    return {
+        "provider_id": p_id,
+        "api_key": resolved_key,
+        "key_source": key_source if resolved_key else "none",
+        "has_key": bool(resolved_key or (p_id == "ollama" and resolved_base_url)),
+        "api_key_masked": mask_api_key(resolved_key),
+        "base_url": resolved_base_url,
+        "model": resolved_model,
         "stored_in_db": bool(db_config.get("api_key") or db_config.get("base_url") or db_config.get("model")),
     }

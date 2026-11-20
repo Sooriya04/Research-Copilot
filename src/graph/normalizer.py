@@ -101,6 +101,9 @@ STOP_ENTITIES: Set[str] = {
     "approach", "approaches", "model", "models", "evaluation", "evaluations",
     "experiment", "experiments", "task", "tasks", "performance", "impact",
     "results", "paper", "papers", "algorithm", "algorithms", "training",
+    "http", "https", "url", "openalex", "arxiv", "doi",
+    "architectural methods", "empirical evaluation", "baseline", "baselines",
+    "proposed method", "proposed architecture",
 }
 
 # ── Regex patterns for Heuristic Extraction Fallback ───────────────────────────
@@ -176,6 +179,10 @@ def extract_heuristic_entities(text: str) -> Dict[str, List[str]]:
     if not text:
         return {"methods": [], "datasets": [], "tasks": [], "metrics": []}
 
+    first_line = text.split("\n")[0] if "\n" in text else text
+    if first_line.startswith(("http://", "https://", "ftp://", "doi:", "arxiv:", "s2:")) or "openalex.org" in first_line:
+        return {"methods": [], "datasets": [], "tasks": [], "metrics": []}
+
     methods: Set[str] = set()
     datasets: Set[str] = set()
     tasks: Set[str] = set()
@@ -193,7 +200,6 @@ def extract_heuristic_entities(text: str) -> Dict[str, List[str]]:
             tasks.add(canonical)
 
     # Dynamic extraction from Title syntax (e.g. 'Method: Subtitle' or 'X via Method' or 'X through Method')
-    first_line = text.split("\n")[0] if "\n" in text else text
     if first_line.upper().startswith("TITLE:"):
         first_line = first_line[6:].strip()
 
@@ -201,8 +207,9 @@ def extract_heuristic_entities(text: str) -> Dict[str, List[str]]:
     m_colon = re.match(r"^([A-Za-z0-9\-\s]{3,28}):", first_line)
     if m_colon:
         cand = m_colon.group(1).strip()
-        if not any(w in cand.lower() for w in ["survey", "overview", "towards", "on the", "analysis"]):
-            methods.add(cand)
+        if not any(w in cand.lower() for w in ["survey", "overview", "towards", "on the", "analysis", "http", "https", "url", "openalex", "arxiv", "doi"]):
+            if cand.lower() not in STOP_ENTITIES:
+                methods.add(cand)
 
     # Pattern B: Method indicated by prepositions 'via', 'through', 'using' (e.g. 'via Belief Tree Propagation')
     m_prep = re.search(r"\b(?:via|through|using)\s+([A-Za-z0-9\-\s]{3,45})(?:$|[\(\,\:])", first_line, re.I)

@@ -1,3 +1,4 @@
+import json
 import logging
 import re
 import uuid
@@ -295,17 +296,41 @@ async def ingest_paper_into_graph(req: IngestPaperRequest, db: AsyncSession = De
 @router.post("/build-workspace-graph", response_model=BuildWorkspaceGraphResponse)
 async def build_workspace_graph_endpoint(req: BuildWorkspaceGraphRequest):
     """Batch-synthesize knowledge graph for a workspace across added papers using Gemini & SQLite cache."""
-    papers_to_use = req.papers or []
+    papers_to_use = list(req.papers or [])
+
+    # If workspace_id is provided, index existing papers stored in workspace record
+    ws_papers_by_id = {}
+    if req.workspace_id:
+        try:
+            from src.core.database import AsyncSessionLocal
+            from sqlalchemy import text
+            clean_ws = req.workspace_id.replace("ws-", "").strip()
+            async with AsyncSessionLocal() as session:
+                row_res = await session.execute(
+                    text("SELECT state_json FROM workspaces WHERE id = :wid OR id = :pre"),
+                    {"wid": clean_ws, "pre": f"ws-{clean_ws}"}
+                )
+                row = row_res.first()
+                if row and row[0]:
+                    s_data = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+                    for p in (s_data.get("top_papers", []) or []) + (s_data.get("papers", []) or []):
+                        if isinstance(p, dict):
+                            for k in (p.get("id"), p.get("arxiv_id"), p.get("openalex_id")):
+                                if k:
+                                    ws_papers_by_id[str(k).strip()] = p
+        except Exception as e:
+            logger.warning("[routes_graph] Workspace DB lookup warning: %s", e)
 
     # If papers list is empty but paper_ids provided, resolve or fetch
     if not papers_to_use and req.paper_ids:
         for pid in req.paper_ids:
-            # Check if paper already exists in graph_store with a real title
+            if pid in ws_papers_by_id:
+                papers_to_use.append(ws_papers_by_id[pid])
+                continue
             n = await graph_store.get_node(pid) or await graph_store.get_node(slugify_id(pid))
             if n and n.title != pid and not (n.title.startswith("Cited Paper [") or n.title.startswith("s2:")):
                 papers_to_use.append(n.model_dump(mode="json"))
             elif req.cached_only:
-                # Fast path in cached_only mode: id stub is sufficient for SQLite cache lookup
                 papers_to_use.append({"id": pid, "title": pid})
             else:
                 try:
@@ -313,6 +338,17 @@ async def build_workspace_graph_endpoint(req: BuildWorkspaceGraphRequest):
                     papers_to_use.append(resolved)
                 except Exception:
                     papers_to_use.append({"id": pid, "title": pid})
+
+    # Upgrade any stub papers if workspace DB has full details
+    if ws_papers_by_id and papers_to_use:
+        upgraded = []
+        for p in papers_to_use:
+            pid = p.get("id") or p.get("arxiv_id")
+            if pid in ws_papers_by_id and (p.get("title") == pid or not p.get("abstract") or str(p.get("title", "")).startswith("http")):
+                upgraded.append(ws_papers_by_id[pid])
+            else:
+                upgraded.append(p)
+        papers_to_use = upgraded
 
     res = await graph_synthesizer.synthesize_workspace_graph(
         workspace_id=req.workspace_id,
