@@ -93,6 +93,7 @@ class ChecklistRubric(BaseModel):
     has_compute_budget: bool = False
     compute_details: Optional[str] = None
     has_limitations: bool = False
+    features_checklist: Dict[str, str] = Field(default_factory=dict)
     rubric_score: float = 0.0
     items: List[RubricItemAssessment] = Field(default_factory=list)
     rubric_gaps: int = 0

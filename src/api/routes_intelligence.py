@@ -97,6 +97,7 @@ class CompareMatrixItem(BaseModel):
     rubric_score: Optional[float] = None
     verdict: Optional[str] = None
     has_db_record: bool = False
+    features_checklist: Dict[str, str] = Field(default_factory=dict)
 
 class CrossPaperGap(BaseModel):
     title: str
@@ -532,6 +533,7 @@ async def compare_papers(req: CompareRequest, db: AsyncSession = Depends(get_db)
                 else "Promising empirical method with identified research boundaries."
             ),
             has_db_record=has_db_record,
+            features_checklist=rubric.features_checklist or {},
         ))
 
     # Cross-Paper combinatorial synthesis

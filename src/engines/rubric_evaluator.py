@@ -195,6 +195,23 @@ class RubricEvaluator:
 
         has_dataset = "dataset" in global_corpus.lower() or "data availability" in global_corpus.lower()
 
+        # Qualitative Taxonomy Features
+        is_multimodal = bool(re.search(r"\b(multimodal|cross-modal|audio-visual|vision-language|text-to-image|image-text|speech|video)\b", global_corpus, re.IGNORECASE))
+        is_zero_shot = bool(re.search(r"\b(zero-shot|few-shot|promptable|in-context\s+learning|without\s+(re)?training)\b", global_corpus, re.IGNORECASE))
+        is_training_free = bool(re.search(r"\b(training-free|frozen\s+(backbone|encoder|weights)|adapter(-only|\s+module)|parameter-efficient|lora|cached\s+memory|minimal\s+trainable)\b", global_corpus, re.IGNORECASE))
+        is_real_time = bool(re.search(r"\b(real-time|low-latency|\bfps\b|fast\s+inference|latency\s*(<|<=|of\s*\d+)|millisecond)\b", global_corpus, re.IGNORECASE))
+
+        features_checklist = {
+            "multimodal": "present" if is_multimodal else "missing",
+            "zero_shot": "present" if is_zero_shot else "missing",
+            "training_free": "present" if is_training_free else "missing",
+            "real_time": "present" if is_real_time else "missing",
+            "open_source": "present" if has_code else "missing",
+            "compute_disclosed": "present" if has_compute else "missing",
+            "ablation_verified": "present" if has_ablation else "missing",
+            "sota_benchmarked": "present" if has_baselines else "missing",
+        }
+
         return ChecklistRubric(
             has_ablation=has_ablation,
             has_baselines=has_baselines,
@@ -207,6 +224,7 @@ class RubricEvaluator:
             has_compute_budget=has_compute,
             compute_details=compute_details,
             has_limitations=has_limitations,
+            features_checklist=features_checklist,
             rubric_score=round(total_score, 1),
             items=item_assessments,
             rubric_gaps=gaps_count,
