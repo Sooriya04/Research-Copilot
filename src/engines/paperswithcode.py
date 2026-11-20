@@ -252,16 +252,19 @@ class PapersWithCodeClient:
             try:
                 url = f"{base}/papers/"
                 params = {"arxiv_id": clean_arxiv} if clean_arxiv else {"q": title}
-                async with httpx.AsyncClient(timeout=self.timeout, headers=self.headers, follow_redirects=False) as client:
+                async with httpx.AsyncClient(timeout=self.timeout, headers=self.headers, follow_redirects=True) as client:
                     resp = await client.get(url, params=params)
                     if resp.status_code == 200 and resp.headers.get("content-type", "").startswith("application/json"):
-                        results = resp.json().get("results", [])
+                        data = resp.json()
+                        results = data.get("results", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
                         if results:
                             pwc_paper_id = results[0].get("id")
                             repo_url = f"{base}/papers/{pwc_paper_id}/repositories/"
                             repo_resp = await client.get(repo_url)
                             if repo_resp.status_code == 200 and repo_resp.headers.get("content-type", "").startswith("application/json"):
-                                for r in repo_resp.json().get("results", []):
+                                repo_data = repo_resp.json()
+                                repo_items = repo_data.get("results", []) if isinstance(repo_data, dict) else (repo_data if isinstance(repo_data, list) else [])
+                                for r in repo_items:
                                     r_url = r.get("url")
                                     if r_url and r_url not in seen_urls:
                                         seen_urls.add(r_url)
@@ -269,7 +272,7 @@ class PapersWithCodeClient:
                                             url=r_url,
                                             is_official=r.get("is_official", True),
                                             framework=r.get("framework"),
-                                            stars=r.get("stars", 0)
+                                            stars=r.get("stars") or r.get("num_stars") or 0,
                                         ))
                                 if repos:
                                     break

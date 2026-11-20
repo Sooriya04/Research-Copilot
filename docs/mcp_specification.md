@@ -184,7 +184,7 @@ The platform provides **6 Service Domains** with **18 High-Impact Tools**:
 
 ### Domain 3: Code & Benchmark Intelligence Service (`mcp_code_benchmarks`)
 
-#### Tool 8: `get_paper_code_repositories`
+#### Tool 8: `get_paper_code_repositories` *(Implemented)*
 - **Description:** Queries PapersWithCode, GitHub, and Hugging Face to identify official and verified community implementations of a paper's method, extracting stars, active maintenance status, programming languages, and licenses.
 - **Input Parameters:**
   - `paper_id_or_title` (*string, required*): Paper title, arXiv ID, or URL.
@@ -192,7 +192,7 @@ The platform provides **6 Service Domains** with **18 High-Impact Tools**:
   - `official_repositories` (*array*): Repositories created by original paper authors.
   - `community_repositories` (*array*): Third-party reproduction repositories with star counts and last commit date.
   - `primary_framework` (*string*): Detected framework (`PyTorch`, `JAX`, `TensorFlow`, `Rust`, etc.).
-- **Underlying Engine:** `src/engines/paperswithcode.py`.
+- **Underlying Engine:** `src/engines/paperswithcode.py`, `src/mcp/tools/code_benchmarks.py`.
 
 #### Tool 9: `get_sota_leaderboard`
 - **Description:** Retrieves the latest state-of-the-art benchmark leaderboard for an ML/AI task or dataset, showing ranked methods, metric scores, paper citations, and evaluation code.

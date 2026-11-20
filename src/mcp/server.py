@@ -27,6 +27,31 @@ from src.mcp.tools.paper_reader import (
     PAPER_GROUNDED_QA_METADATA,
     handle_paper_grounded_qa,
 )
+from src.mcp.tools.code_benchmarks import (
+    GET_PAPER_CODE_REPOSITORIES_METADATA,
+    handle_get_paper_code_repositories,
+)
+from src.mcp.tools.novelty_studio import (
+    EXTRACT_RESEARCH_GAPS_METADATA,
+    handle_extract_research_gaps,
+    GENERATE_NOVEL_HYPOTHESES_METADATA,
+    handle_generate_novel_hypotheses,
+    SYNTHESIZE_CRITIQUE_METADATA,
+    handle_synthesize_critique,
+)
+from src.mcp.tools.knowledge_graph import (
+    QUERY_KNOWLEDGE_GRAPH_METADATA,
+    handle_query_knowledge_graph,
+    COMPARE_PAPERS_MATRIX_METADATA,
+    handle_compare_papers_matrix,
+)
+from src.mcp.tools.reproduction import (
+    GENERATE_REPRODUCTION_PLAN_METADATA,
+    handle_generate_reproduction_plan,
+    AUDIT_REPRODUCIBILITY_METADATA,
+    handle_audit_reproducibility,
+)
+
 
 
 def create_mcp_server() -> MCPProtocolHandler:
@@ -44,6 +69,22 @@ def create_mcp_server() -> MCPProtocolHandler:
     server.register_tool(EXTRACT_PAPER_ASSETS_METADATA, handle_extract_paper_assets)
     server.register_tool(VERIFY_PAPER_CLAIM_METADATA, handle_verify_paper_claim)
     server.register_tool(PAPER_GROUNDED_QA_METADATA, handle_paper_grounded_qa)
+
+    # Register Domain 3 Tools: Code & Benchmarks
+    server.register_tool(GET_PAPER_CODE_REPOSITORIES_METADATA, handle_get_paper_code_repositories)
+
+    # Register Domain 4 Tools: Gap Analysis & Novelty Studio
+    server.register_tool(EXTRACT_RESEARCH_GAPS_METADATA, handle_extract_research_gaps)
+    server.register_tool(GENERATE_NOVEL_HYPOTHESES_METADATA, handle_generate_novel_hypotheses)
+    server.register_tool(SYNTHESIZE_CRITIQUE_METADATA, handle_synthesize_critique)
+
+    # Register Domain 5 Tools: Reproduction & Experiment Planning
+    server.register_tool(GENERATE_REPRODUCTION_PLAN_METADATA, handle_generate_reproduction_plan)
+    server.register_tool(AUDIT_REPRODUCIBILITY_METADATA, handle_audit_reproducibility)
+
+    # Register Domain 6 Tools: Knowledge Graph & Synthesis
+    server.register_tool(QUERY_KNOWLEDGE_GRAPH_METADATA, handle_query_knowledge_graph)
+    server.register_tool(COMPARE_PAPERS_MATRIX_METADATA, handle_compare_papers_matrix)
 
     return server
 

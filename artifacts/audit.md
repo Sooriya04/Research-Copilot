@@ -102,19 +102,19 @@
   [x] verify_paper_claim         (Implemented, verbatim quote matching, benchmark check)
   [x] paper_grounded_qa          (Implemented, hybrid QA, citations with page coordinates)
 
-[ Domain 3: Code & Benchmarks ] — Up Next
-  [ ] get_paper_code_repositories
+[ Domain 3: Code & Benchmarks ] — In Progress (1 of 3 Tools)
+  [x] get_paper_code_repositories (Implemented, PapersWithCode/GitHub/HuggingFace repo extraction & live metadata enrichment)
   [ ] get_sota_leaderboard
   [ ] inspect_paper_datasets
 
-[ Domain 4: Gap Analysis & Novelty Studio ]
-  [ ] extract_research_gaps
-  [ ] generate_novel_hypotheses
-  [ ] synthesize_critique
+[ Domain 4: Gap Analysis & Novelty Studio ] — 100% Complete (3 of 3 Tools)
+  [x] extract_research_gaps      (Implemented, author limitations, structural gaps, combinatorial synthesis)
+  [x] generate_novel_hypotheses  (Implemented, grounded multi-paper hypotheses, falsifiability criteria, 4 mechanisms)
+  [x] synthesize_critique        (Implemented, peer-review methodology critique, validity threats, calibrated verdict score)
 
-[ Domain 5: Reproduction & Experiment Planning ]
-  [ ] generate_reproduction_plan
-  [ ] audit_reproducibility
+[ Domain 5: Reproduction & Experiment Planning ] — 100% Complete (2 of 2 Tools)
+  [x] generate_reproduction_plan (Implemented, multi-hardware budget, uv/pip env spec, 4 execution phases, early-abort checkpoints)
+  [x] audit_reproducibility      (Implemented, 8-point empirical reproducibility rubric, itemized breakdown, missing artifacts)
 
 [ Domain 6: Knowledge Graph & Synthesis ]
   [ ] query_knowledge_graph
