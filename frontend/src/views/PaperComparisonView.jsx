@@ -1951,7 +1951,7 @@ export default function PaperComparisonView() {
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           <span className="badge badge-blue" style={{ fontSize: 12, fontWeight: 700 }}>
-                            {p.score ? p.score.toFixed(1) : p.rubric_score ? p.rubric_score.toFixed(1) : '72.0'}/100
+                            {p.score ? `${p.score.toFixed(1)}/100` : p.citations ? `${p.citations.toLocaleString()} Cites` : 'Indexed'}
                           </span>
                           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                             {p.citations ? `${p.citations.toLocaleString()} Citations` : 'High Rigor'}

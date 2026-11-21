@@ -280,9 +280,9 @@ export default function PaperSynthesisTab({ paper }) {
       <div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
           <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)' }}>
-            NeurIPS / ICLR Rigor Checklist
+            Artifacts & Open Science Verification
           </span>
-          {checklist?.rubric_score != null && (
+          {checklist?.rubric_score > 0 && (
             <span style={{ fontSize: 11, fontWeight: 600, color: '#059669' }}>
               Rubric: {checklist.rubric_score}/100
             </span>
@@ -290,8 +290,69 @@ export default function PaperSynthesisTab({ paper }) {
         </div>
 
         {items.length === 0 ? (
-          <div style={{ padding: '10px 12px', background: 'var(--bg-subtle)', borderRadius: 6, fontSize: 11.5, color: 'var(--text-muted)' }}>
-            Evaluating paper full-text and methodology sections...
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <span
+              style={{
+                fontSize: 11,
+                padding: '3px 8px',
+                borderRadius: 4,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                background: checklist?.has_code_repo ? 'rgba(16,185,129,0.1)' : 'var(--bg-subtle)',
+                color: checklist?.has_code_repo ? '#059669' : 'var(--text-muted)',
+                border: `1px solid ${checklist?.has_code_repo ? 'rgba(16,185,129,0.25)' : 'var(--border-subtle)'}`,
+              }}
+            >
+              {checklist?.has_code_repo ? <CheckCircle2 size={12} /> : <AlertCircle size={12} />}
+              {checklist?.code_url ? (
+                <a
+                  href={checklist.code_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: '#059669', textDecoration: 'none', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 3 }}
+                >
+                  <span>Code Repository (GitHub)</span>
+                  <ExternalLink size={10} />
+                </a>
+              ) : (
+                <span>Code Repository {checklist?.has_code_repo ? 'Verified' : 'Unverified'}</span>
+              )}
+            </span>
+
+            <span
+              style={{
+                fontSize: 11,
+                padding: '3px 8px',
+                borderRadius: 4,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                background: checklist?.has_dataset_link ? 'rgba(16,185,129,0.1)' : 'var(--bg-subtle)',
+                color: checklist?.has_dataset_link ? '#059669' : 'var(--text-muted)',
+                border: `1px solid ${checklist?.has_dataset_link ? 'rgba(16,185,129,0.25)' : 'var(--border-subtle)'}`,
+              }}
+            >
+              {checklist?.has_dataset_link ? <CheckCircle2 size={12} /> : <AlertCircle size={12} />}
+              <span>Dataset Link {checklist?.has_dataset_link ? 'Verified' : 'Unverified'}</span>
+            </span>
+
+            <span
+              style={{
+                fontSize: 11,
+                padding: '3px 8px',
+                borderRadius: 4,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                background: checklist?.has_ablation ? 'rgba(99,102,241,0.1)' : 'var(--bg-subtle)',
+                color: checklist?.has_ablation ? 'var(--accent-primary)' : 'var(--text-muted)',
+                border: `1px solid ${checklist?.has_ablation ? 'rgba(99,102,241,0.25)' : 'var(--border-subtle)'}`,
+              }}
+            >
+              {checklist?.has_ablation ? <CheckCircle2 size={12} /> : <AlertCircle size={12} />}
+              <span>Ablation Studies</span>
+            </span>
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>

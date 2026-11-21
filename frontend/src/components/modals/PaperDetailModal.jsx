@@ -225,7 +225,19 @@ export default function PaperDetailModal() {
                   }}
                 >
                   {checklist.has_code_repo ? <CheckCircle2 size={11} /> : <AlertCircle size={11} />}
-                  <span>Code Repository {checklist.has_code_repo ? 'Verified' : 'Unverified'}</span>
+                  {checklist.code_url ? (
+                    <a
+                      href={checklist.code_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ color: '#059669', textDecoration: 'none', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 3 }}
+                    >
+                      <span>Code Repository</span>
+                      <ExternalLink size={10} />
+                    </a>
+                  ) : (
+                    <span>Code Repository {checklist.has_code_repo ? 'Verified' : 'Unverified'}</span>
+                  )}
                 </span>
 
                 <span
@@ -289,7 +301,7 @@ export default function PaperDetailModal() {
                     <Sparkles size={12} style={{ color: 'var(--accent-primary)' }} />
                     Paper Synthesis & NeurIPS Rigor Audit
                   </span>
-                  {checklist.rubric_score != null && (
+                  {checklist.rubric_score > 0 && (
                     <span style={{ fontSize: 10.5, fontWeight: 700, color: '#059669' }}>
                       Rubric: {checklist.rubric_score}/100
                     </span>
