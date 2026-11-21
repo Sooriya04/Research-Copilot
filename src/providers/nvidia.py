@@ -36,7 +36,7 @@ class NvidiaProvider(BaseLLMProvider):
         ).strip()
         raw_url = base_url or "https://integrate.api.nvidia.com/v1"
         self.base_url = raw_url.rstrip("/")
-        self.default_model = model or "meta/llama-3.3-70b-instruct"
+        self.default_model = (model or "").strip()
 
     def _get_headers(self) -> Dict[str, str]:
         headers = {
@@ -93,7 +93,14 @@ class NvidiaProvider(BaseLLMProvider):
     async def test_connection(self, model: Optional[str] = None) -> Dict[str, Any]:
         """Verify API key validity and probe the particular target model."""
         await self._ensure_credentials()
-        target_mdl = (model or self.default_model or "meta/llama-3.3-70b-instruct").strip()
+        target_mdl = (model or self.default_model or "").strip()
+        if not target_mdl:
+            return {
+                "success": False,
+                "latency_ms": 0.0,
+                "error": "No NVIDIA NIM model specified. Please configure a model name in Settings.",
+                "model": "",
+            }
         if not self.api_key:
             return {
                 "success": False,

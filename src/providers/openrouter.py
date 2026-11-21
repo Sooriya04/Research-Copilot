@@ -31,7 +31,7 @@ class OpenRouterProvider(BaseLLMProvider):
         self.api_key = (api_key or settings.openrouter_api_key or "").strip()
         raw_url = base_url or "https://openrouter.ai/api/v1"
         self.base_url = raw_url.rstrip("/")
-        self.default_model = model or "anthropic/claude-3.5-sonnet"
+        self.default_model = (model or "").strip()
 
     def _get_headers(self) -> Dict[str, str]:
         headers = {
@@ -126,7 +126,14 @@ class OpenRouterProvider(BaseLLMProvider):
 
     async def test_connection(self, model: Optional[str] = None) -> Dict[str, Any]:
         """Test API connectivity and validate the OpenRouter API key and specific target model."""
-        target_model = (model or self.default_model).strip()
+        target_model = (model or self.default_model or "").strip()
+        if not target_model:
+            return {
+                "success": False,
+                "latency_ms": 0.0,
+                "error": "No OpenRouter model specified. Please configure a model name in Settings.",
+                "model": "",
+            }
         if not self.api_key:
             return {
                 "success": False,

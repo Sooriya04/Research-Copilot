@@ -403,8 +403,8 @@ class GraphNoveltyEngine:
         """Resolves (provider_instance, normalized_name, model_name) using SQLite user_settings credentials."""
         print("DEBUG RESOLVE PROVIDER:", self.provider, provider_name, api_key, model, base_url)
         if self.provider and not api_key and not model and not base_url:
-            p_n = (provider_name or "gemini").lower().strip()
-            return self.provider, p_n, getattr(self.provider, "model", "gemini-3.5-flash-lite")
+            p_n = (provider_name or getattr(self.provider, "provider_name", "custom")).lower().strip()
+            return self.provider, p_n, getattr(self.provider, "model", "")
         p_name = (provider_name or "gemini").lower().strip()
         creds = await resolve_provider_credentials(
             provider_id=p_name,
@@ -413,29 +413,23 @@ class GraphNoveltyEngine:
             explicit_base_url=base_url,
         )
         resolved_key = creds.get("api_key")
-        resolved_model = creds.get("model")
-        resolved_base_url = creds.get("base_url")
+        resolved_model = (model or creds.get("model") or "").strip()
+        resolved_base_url = (base_url or creds.get("base_url") or "").strip()
 
         if p_name == "groq":
-            mdl = resolved_model or "qwen/qwen3.8-27b"
-            return GroqProvider(api_key=resolved_key, model=mdl), "groq", mdl
+            return GroqProvider(api_key=resolved_key, model=resolved_model or None), "groq", resolved_model
         elif p_name == "ollama":
-            mdl = resolved_model or getattr(settings, "ollama_model", "phi4-mini")
-            return LocalOllamaProvider(base_url=resolved_base_url, model=mdl), "ollama", mdl
+            return LocalOllamaProvider(base_url=resolved_base_url or None, model=resolved_model or None), "ollama", resolved_model
         elif p_name == "openrouter":
-            mdl = resolved_model or "anthropic/claude-3.5-sonnet"
-            return OpenRouterProvider(api_key=resolved_key, model=mdl, base_url=resolved_base_url), "openrouter", mdl
+            return OpenRouterProvider(api_key=resolved_key, model=resolved_model or None, base_url=resolved_base_url or None), "openrouter", resolved_model
         elif p_name == "nvidia":
-            mdl = resolved_model or "meta/llama-3.3-70b-instruct"
-            return NvidiaProvider(api_key=resolved_key, model=mdl, base_url=resolved_base_url), "nvidia", mdl
+            return NvidiaProvider(api_key=resolved_key, model=resolved_model or None, base_url=resolved_base_url or None), "nvidia", resolved_model
         elif p_name == "deepseek":
-            mdl = resolved_model or "deepseek-chat"
-            return DeepSeekProvider(api_key=resolved_key, model=mdl, base_url=resolved_base_url), "deepseek", mdl
+            return DeepSeekProvider(api_key=resolved_key, model=resolved_model or None, base_url=resolved_base_url or None), "deepseek", resolved_model
         else:
             if not api_key and not model and self.provider:
-                return self.provider, "gemini", getattr(self.provider, "model", "gemini-3.5-flash-lite")
-            mdl = resolved_model or "gemini-3.5-flash-lite"
-            return GeminiFlashLiteProvider(api_key=resolved_key, model=mdl), "gemini", mdl
+                return self.provider, "gemini", getattr(self.provider, "model", "")
+            return GeminiFlashLiteProvider(api_key=resolved_key, model=resolved_model or None), "gemini", resolved_model
 
     async def synthesize_novelties(
         self,

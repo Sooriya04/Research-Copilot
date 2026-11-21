@@ -117,10 +117,10 @@ async def get_providers_status():
                 "stored_in_db": gemini_creds["stored_in_db"],
                 "key_source": gemini_creds["key_source"],
                 "api_key_masked": gemini_creds["api_key_masked"],
-                "default_model": gemini_creds.get("model") or "gemini-3.5-flash-lite",
+                "default_model": gemini_creds.get("model") or "gemini-2.5-flash",
                 "supported_models": [
-                    "gemini-3.5-flash-lite",
-                    "gemini-2.5-flash-lite",
+                    "gemini-2.5-flash",
+                    "gemini-2.5-pro",
                     "gemini-1.5-flash",
                     "gemini-1.5-pro",
                 ],
@@ -226,8 +226,8 @@ async def save_provider_key_endpoint(req: SaveProviderKeyRequest):
             online = t_res.get("success", False)
             latency_ms = t_res.get("latency_ms")
         elif p_name == "gemini":
-            prov = GeminiFlashLiteProvider(api_key=req.api_key, model=req.model or "gemini-3.5-flash-lite")
-            t_res = await prov.test_connection()
+            prov = GeminiFlashLiteProvider(api_key=req.api_key, model=req.model)
+            t_res = await prov.test_connection(model=req.model)
             online = t_res.get("success", False)
             latency_ms = t_res.get("latency_ms")
         elif p_name == "ollama":
@@ -326,7 +326,7 @@ async def test_provider_connection(req: ProviderTestRequest):
         res["stored_in_db"] = creds["stored_in_db"]
         return res
     else:
-        provider = GeminiFlashLiteProvider(api_key=creds["api_key"], model=target_model or "gemini-3.5-flash-lite")
+        provider = GeminiFlashLiteProvider(api_key=creds["api_key"], model=target_model)
         res = await provider.test_connection(model=target_model)
         res["provider"] = "gemini"
         res["key_source"] = creds["key_source"]

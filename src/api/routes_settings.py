@@ -13,6 +13,7 @@ from sqlalchemy import select, delete
 from src.core.database import get_db
 from src.core.models import UserSettingsModel
 from src.core.logger import logger
+from src.core.config import settings
 from src.core.provider_settings import (
     resolve_provider_credentials,
     mask_api_key,
@@ -150,7 +151,9 @@ async def delete_provider(provider_id: str, db: AsyncSession = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 async def _test_openai(api_key: str, base_url: str = "", model: str = "") -> Dict[str, Any]:
-    target_model = (model or "gpt-4o").strip()
+    target_model = (model or "").strip()
+    if not target_model:
+        return {"success": False, "latency_ms": 0.0, "error": "No OpenAI model specified. Please configure a model name in Settings.", "model": ""}
     if not api_key:
         return {"success": False, "latency_ms": 0.0, "error": "OpenAI API key is missing.", "model": target_model}
     start = time.perf_counter()
@@ -197,7 +200,9 @@ async def _test_openai(api_key: str, base_url: str = "", model: str = "") -> Dic
 
 
 async def _test_nvidia(api_key: str, base_url: str = "", model: str = "") -> Dict[str, Any]:
-    target_model = (model or "meta/llama-3.3-70b-instruct").strip()
+    target_model = (model or "").strip()
+    if not target_model:
+        return {"success": False, "latency_ms": 0.0, "error": "No NVIDIA NIM model specified. Please configure a model name in Settings.", "model": ""}
     if not api_key:
         return {"success": False, "latency_ms": 0.0, "error": "NVIDIA API key is missing.", "model": target_model}
     start = time.perf_counter()
@@ -260,10 +265,10 @@ async def test_provider_connection_endpoint(req: TestConnectionRequest):
     model = (req.model or creds.get("model") or "").strip()
 
     if p_id == "gemini":
-        prov = GeminiFlashLiteProvider(api_key=api_key, model=model or "gemini-2.0-flash")
+        prov = GeminiFlashLiteProvider(api_key=api_key, model=model)
         res = await prov.test_connection(model=model)
     elif p_id == "groq":
-        prov = GroqProvider(api_key=api_key, model=model or "qwen/qwen3.8-27b")
+        prov = GroqProvider(api_key=api_key, model=model)
         res = await prov.test_connection(model=model)
     elif p_id == "ollama":
         prov = LocalOllamaProvider(base_url=base_url, model=model)
@@ -280,7 +285,7 @@ async def test_provider_connection_endpoint(req: TestConnectionRequest):
     elif p_id == "nvidia":
         res = await _test_nvidia(api_key=api_key, base_url=base_url, model=model)
     elif p_id == "deepseek":
-        prov = DeepSeekProvider(api_key=api_key, model=model or "deepseek-chat", base_url=base_url)
+        prov = DeepSeekProvider(api_key=api_key, model=model, base_url=base_url)
         res = await prov.test_connection(model=model)
     else:
         res = {

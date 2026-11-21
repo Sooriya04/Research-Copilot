@@ -24,13 +24,13 @@ class ResearchChatRequest(BaseModel):
     workspace_id: Optional[str] = None
     workspace_memories: Optional[List[Dict[str, Any]]] = None
     provider: Optional[str] = None
-    model: Optional[str] = "gemini-2.0-flash-lite"
+    model: Optional[str] = None
     mode: Optional[str] = "auto"  # "auto" | "paper" | "research"
 
 
 class ChatStreamRequest(BaseModel):
     messages: List[ChatMessage]
-    model: Optional[str] = "gemini-2.0-flash-lite"
+    model: Optional[str] = None
     provider: Optional[str] = None
 
 
@@ -124,7 +124,7 @@ async def chat_message_endpoint(req: ResearchChatRequest, db: AsyncSession = Dep
         augmented_messages.append(m)
 
     try:
-        reply = await provider.complete(augmented_messages, model=req.model or "gemini-2.0-flash-lite", json_mode=False)
+        reply = await provider.complete(augmented_messages, model=req.model or getattr(provider, "model", None), json_mode=False)
         # Clean JSON wrappers if LLM returned JSON formatted text
         if reply.strip().startswith("{"):
             try:
@@ -159,11 +159,11 @@ async def chat_stream_endpoint(
     """Stream LLM responses using Server-Sent Events (SSE). Accepts ChatStreamRequest JSON body or ChatMessage list."""
     if isinstance(req, list):
         messages = req
-        model_name = model or "gemini-2.0-flash-lite"
+        model_name = model or ""
         provider_name = None
     else:
         messages = req.messages
-        model_name = req.model or model or "gemini-2.0-flash-lite"
+        model_name = req.model or model or ""
         provider_name = req.provider
 
     from src.core.provider_settings import resolve_provider_credentials

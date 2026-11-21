@@ -38,12 +38,12 @@ def get_llm_provider(
 
     if name == "gemini":
         from src.providers.gemini import GeminiFlashLiteProvider
-        return GeminiFlashLiteProvider(api_key=resolved_key or None, model=resolved_model or "gemini-3.5-flash-lite")
+        return GeminiFlashLiteProvider(api_key=resolved_key or None, model=resolved_model or None)
     elif name == "ollama":
-        return LocalOllamaProvider(model=resolved_model or getattr(settings, "ollama_model", "phi4-mini"), base_url=resolved_base_url or None)
+        return LocalOllamaProvider(model=resolved_model or getattr(settings, "ollama_model", None), base_url=resolved_base_url or None)
     elif name in ("vllm", "lmstudio", "localai", "local-openai", "local"):
         from src.providers.llm import LocalOpenAIProvider
-        return LocalOpenAIProvider(api_key=resolved_key or "local", model=resolved_model or "local-model", base_url=resolved_base_url or None)
+        return LocalOpenAIProvider(api_key=resolved_key or "local", model=resolved_model or None, base_url=resolved_base_url or None)
     elif name == "nvidia":
         return NvidiaProvider(api_key=resolved_key or None, model=resolved_model or None, base_url=resolved_base_url or None)
     elif name == "groq":
@@ -54,5 +54,5 @@ def get_llm_provider(
         return OpenRouterProvider(api_key=resolved_key or None, model=resolved_model or None, base_url=resolved_base_url or None)
     elif name == "openai":
         from src.providers.openrouter import OpenRouterProvider
-        return OpenRouterProvider(api_key=resolved_key or None, model=resolved_model or "gpt-4o", base_url=resolved_base_url or "https://api.openai.com/v1")
-    return LocalOllamaProvider(model=resolved_model or getattr(settings, "ollama_model", "phi4-mini"), base_url=resolved_base_url or None)
+        return OpenRouterProvider(api_key=resolved_key or None, model=resolved_model or None, base_url=resolved_base_url or "https://api.openai.com/v1")
+    return LocalOllamaProvider(model=resolved_model or getattr(settings, "ollama_model", None), base_url=resolved_base_url or None)

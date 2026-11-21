@@ -30,7 +30,7 @@ class GroqProvider(BaseLLMProvider):
             or os.getenv("grok_API", "")
             or os.getenv("GROK_API", "")
         )
-        self.default_model = model or "qwen/qwen3.8-27b"
+        self.default_model = (model or "").strip()
         self.base_url = "https://api.groq.com/openai/v1"
 
     async def list_models(self) -> list:
@@ -55,7 +55,14 @@ class GroqProvider(BaseLLMProvider):
 
     async def test_connection(self, model: Optional[str] = None) -> Dict[str, Any]:
         """Verify API key validity and probe the particular target model."""
-        target_mdl = (model or self.default_model or "qwen/qwen3.8-27b").strip()
+        target_mdl = (model or self.default_model or "").strip()
+        if not target_mdl:
+            return {
+                "success": False,
+                "latency_ms": 0,
+                "error": "No Groq model specified. Please configure a model name in Settings.",
+                "model": "",
+            }
         if not self.api_key:
             return {
                 "success": False,

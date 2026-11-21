@@ -74,7 +74,7 @@ async def get_saved_provider_config(provider_id: str) -> Optional[Dict[str, Any]
 
 
 DEFAULT_PROVIDER_MODELS = {
-    "gemini": "gemini-3.5-flash-lite",
+    "gemini": "gemini-2.5-flash",
     "groq": "qwen/qwen3.8-27b",
     "ollama": "phi4-mini",
     "vllm": "meta-llama/Llama-3.1-8B-Instruct",
@@ -214,25 +214,10 @@ async def resolve_provider_credentials(
         elif p_id == "deepseek":
             resolved_base_url = getattr(settings, "deepseek_base_url", None) or "https://api.deepseek.com"
 
-    # 3. Resolve Model
+    # 3. Resolve Model: strictly respect user's explicit model or stored DB model
     resolved_model = (explicit_model or "").strip()
     if not resolved_model and db_config.get("model"):
         resolved_model = db_config["model"]
-    if not resolved_model:
-        if p_id == "gemini":
-            resolved_model = "gemini-3.5-flash-lite"
-        elif p_id == "groq":
-            resolved_model = "qwen/qwen3.8-27b"
-        elif p_id == "ollama":
-            resolved_model = getattr(settings, "ollama_model", "phi4-mini")
-        elif p_id == "openrouter":
-            resolved_model = "anthropic/claude-3.5-sonnet"
-        elif p_id == "openai":
-            resolved_model = "gpt-4o"
-        elif p_id == "nvidia":
-            resolved_model = "meta/llama-3.3-70b-instruct"
-        elif p_id == "deepseek":
-            resolved_model = getattr(settings, "deepseek_model", None) or "deepseek-chat"
 
     return {
         "provider_id": p_id,
@@ -241,7 +226,7 @@ async def resolve_provider_credentials(
         "has_key": bool(resolved_key or (p_id == "ollama" and resolved_base_url)),
         "api_key_masked": mask_api_key(resolved_key),
         "base_url": resolved_base_url,
-        "model": resolved_model or DEFAULT_PROVIDER_MODELS.get(p_id),
+        "model": resolved_model,
         "stored_in_db": bool(db_config.get("api_key") or db_config.get("base_url") or db_config.get("model")),
     }
 
@@ -305,12 +290,10 @@ def resolve_provider_credentials_sync(
         elif p_id == "deepseek":
             resolved_base_url = getattr(settings, "deepseek_base_url", None) or "https://api.deepseek.com"
 
-    # 3. Resolve Model
+    # 3. Resolve Model: strictly respect user's explicit model or stored DB model
     resolved_model = (explicit_model or "").strip()
     if not resolved_model and db_config.get("model"):
         resolved_model = db_config["model"]
-    if not resolved_model:
-        resolved_model = DEFAULT_PROVIDER_MODELS.get(p_id, "default")
 
     return {
         "provider_id": p_id,

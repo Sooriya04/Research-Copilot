@@ -15,7 +15,7 @@ class LocalOllamaProvider(BaseLLMProvider):
     def __init__(self, base_url: Optional[str] = None, model: Optional[str] = None, default_model: Optional[str] = None):
         raw_url = base_url or settings.ollama_base_url or "http://localhost:11434"
         self.base_url = raw_url.rstrip("/")
-        self.default_model = model or default_model or getattr(settings, "ollama_model", "phi4-mini")
+        self.default_model = (model or default_model or getattr(settings, "ollama_model", "") or "").strip()
         self._client: Optional[httpx.AsyncClient] = None
 
     def _get_client(self, timeout: float = 120.0) -> httpx.AsyncClient:
@@ -30,7 +30,14 @@ class LocalOllamaProvider(BaseLLMProvider):
 
     async def test_connection(self, model: Optional[str] = None) -> dict:
         """Probe local Ollama daemon for connectivity and verify the particular target model."""
-        target_model = (model or self.default_model or "phi4-mini").strip()
+        target_model = (model or self.default_model or "").strip()
+        if not target_model:
+            return {
+                "success": False,
+                "latency_ms": 0,
+                "error": "No Ollama model specified. Please configure a model name in Settings.",
+                "model": "",
+            }
         start = time.perf_counter()
         try:
             client = self._get_client()

@@ -178,8 +178,8 @@ class GraphSynthesizer:
                         "paper_ids": json.loads(row[3]) if row[3] else [],
                         "nodes_count": row[1],
                         "edges_count": row[2],
-                        "engine": synthesis_data.get("engine") or "gemini",
-                        "model": synthesis_data.get("model") or "gemini-3.5-flash-lite",
+                        "engine": synthesis_data.get("engine") or "custom",
+                        "model": synthesis_data.get("model") or "",
                         **synthesis_data,
                     }
         except Exception as e:
@@ -312,8 +312,8 @@ class GraphSynthesizer:
                     "workspace_id": clean_ws_id,
                     "cached": True,
                     "llm_called": False,
-                    "engine": cached_res.get("engine") or "gemini",
-                    "model": cached_res.get("model") or "gemini-3.5-flash-lite",
+                    "engine": cached_res.get("engine") or "custom",
+                    "model": cached_res.get("model") or "",
                     "papers_count": len(valid_papers),
                     "paper_ids": canonical_pids,
                     "cross_paper_relations_count": len(cached_res.get("cross_paper_relations", [])),
