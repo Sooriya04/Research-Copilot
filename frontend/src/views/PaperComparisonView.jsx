@@ -1,46 +1,13 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
-import {
-  Columns3,
-  Database,
-  Download,
-  Copy,
-  FileText,
-  RefreshCw,
-  X,
-  CheckCircle2,
-  Plus,
-  Loader2,
-  Sparkles,
-  ExternalLink,
-  Filter,
-  Search,
-  BookOpen,
-  Layers,
-  SlidersHorizontal,
-  ChevronRight,
-  GitBranch,
-  ShieldCheck,
-  Target,
-  Check,
-  Minus,
-  CheckSquare,
-  Tag,
-  Table,
-  Network,
-} from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Columns3, Loader2, CheckCircle2, Sparkles, X, Database } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
-// Helper to format clean display titles avoiding raw hash strings
-export function formatPaperDisplayTitle(paper) {
-  if (!paper) return 'Untitled Paper';
-  const t = (paper.title || paper.id || '').trim();
-  if (t.toLowerCase().startsWith('arxiv:s2:') || t.toLowerCase().startsWith('s2:')) {
-    const rawHash = t.replace(/^arxiv:s2:/i, '').replace(/^s2:/i, '');
-    return `Semantic Scholar: ${rawHash.slice(0, 14)}...`;
-  }
-  return t;
-}
+import MatrixHeader from '../components/matrix/MatrixHeader';
+import MatrixPaperTray, { formatPaperDisplayTitle } from '../components/matrix/MatrixPaperTray';
+import MatrixFilterBar from '../components/matrix/MatrixFilterBar';
+import TaxonomySection from '../components/matrix/TaxonomySection';
+import ScientificRows from '../components/matrix/ScientificRows';
 
 export default function PaperComparisonView() {
   const {
@@ -50,50 +17,47 @@ export default function PaperComparisonView() {
     clearComparisonPapers,
     setActiveReaderPaper,
     searchResults,
-    activeWorkspace,
   } = useApp();
   const navigate = useNavigate();
-  const location = useLocation();
 
   // Matrix states
   const [matrixData, setMatrixData] = useState(null);
   const [matrixLoading, setMatrixLoading] = useState(false);
   const [matrixError, setMatrixError] = useState(null);
-  const [activeDimension, setActiveDimension] = useState('all'); // 'all' | 'gaps' | 'methodology' | 'benchmarks' | 'code' | 'rigor'
-  const [focusGapsOnly, setFocusGapsOnly] = useState(false);
-  const [matrixSearchQuery, setMatrixSearchQuery] = useState('');
+  const [activeTab, setActiveTab] = useState('taxonomy'); // 'taxonomy' | 'all' | 'gaps' | 'methodology' | 'code' | 'benchmarks'
+  const [searchQuery, setSearchQuery] = useState('');
   const [customPaperInput, setCustomPaperInput] = useState('');
   const [addingCustomPaper, setAddingCustomPaper] = useState(false);
-  const [reanalyzingPaperId, setReanalyzingPaperId] = useState(null);
   const [copiedGapId, setCopiedGapId] = useState(null);
-  const [exportNotice, setExportNotice] = useState(null);
+  const [notice, setNotice] = useState(null);
 
-  // Taxonomy Feature Matrix states
+  // Taxonomy states
   const [includeOurs, setIncludeOurs] = useState(true);
   const [oursTitle, setOursTitle] = useState('Proposed Method (Ours)');
   const [customCriteria, setCustomCriteria] = useState([]);
   const [newCriterionInput, setNewCriterionInput] = useState('');
   const [featureOverrides, setFeatureOverrides] = useState({});
 
-  // Active papers to compare
+  // Active comparison papers
   const activePapers = useMemo(() => {
-    if (comparisonPapers && comparisonPapers.length > 0) {
-      return comparisonPapers;
-    }
-    if (searchResults && searchResults.length > 0) {
-      return searchResults.slice(0, 4);
-    }
+    if (comparisonPapers && comparisonPapers.length > 0) return comparisonPapers;
+    if (searchResults && searchResults.length > 0) return searchResults.slice(0, 4);
     return [];
   }, [comparisonPapers, searchResults]);
 
-  // Generate stable cache key for comparison
+  const showToast = (msg) => {
+    setNotice(msg);
+    setTimeout(() => setNotice(null), 3000);
+  };
+
+  // Cache key helper
   const getMatrixCacheKey = (papers) => {
     if (!papers || papers.length === 0) return '';
     const ids = papers.map((p) => p.canonical_id || p.id || p.title).sort();
     return `rc_compare_matrix_${ids.join('_')}`;
   };
 
-  // Fetch matrix from backend with instant 0ms sessionStorage cache on refresh
+  // Fetch comparison matrix
   const fetchComparisonMatrix = async (papersToCompare = activePapers, force = false) => {
     if (!papersToCompare || papersToCompare.length === 0) {
       setMatrixData(null);
@@ -101,28 +65,24 @@ export default function PaperComparisonView() {
     }
 
     const cacheKey = getMatrixCacheKey(papersToCompare);
-    let hasLoadedFromCache = false;
+    let loadedFromCache = false;
 
-    // Instant zero-delay display from sessionStorage on browser refresh
     if (!force && cacheKey) {
       try {
         const cachedStr = sessionStorage.getItem(cacheKey);
         if (cachedStr) {
-          const cachedData = JSON.parse(cachedStr);
-          if (cachedData && cachedData.matrix && cachedData.matrix.length > 0) {
-            setMatrixData(cachedData);
-            hasLoadedFromCache = true;
+          const cached = JSON.parse(cachedStr);
+          if (cached?.matrix?.length > 0) {
+            setMatrixData(cached);
+            loadedFromCache = true;
           }
         }
-      } catch (err) {
-        // ignore cache read failure
+      } catch (e) {
+        // ignore cache read error
       }
     }
 
-    // Only show full loading spinner if there is no cached matrix to display immediately
-    if (!hasLoadedFromCache) {
-      setMatrixLoading(true);
-    }
+    if (!loadedFromCache) setMatrixLoading(true);
     setMatrixError(null);
 
     try {
@@ -140,16 +100,14 @@ export default function PaperComparisonView() {
         if (cacheKey) {
           try {
             sessionStorage.setItem(cacheKey, JSON.stringify(data));
-          } catch (e) {
-            // ignore storage limit
-          }
+          } catch (e) {}
         }
       } else {
         const errText = await res.text();
         setMatrixError(`Comparison failed: ${errText}`);
       }
     } catch (err) {
-      setMatrixError(`Network error loading comparison matrix: ${err.message}`);
+      setMatrixError(`Error loading comparison: ${err.message}`);
     } finally {
       setMatrixLoading(false);
     }
@@ -161,31 +119,6 @@ export default function PaperComparisonView() {
     }
   }, [activePapers]);
 
-  // Force re-extract gaps on-demand and write to SQLite
-  const handleForceExtractGaps = async (paperId, title, abstract) => {
-    setReanalyzingPaperId(paperId);
-    try {
-      const res = await fetch('/api/v1/papers/extract-gaps', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          identifier: paperId,
-          title: title || paperId,
-          abstract: abstract || '',
-          force_refresh: true,
-        }),
-      });
-      if (res.ok) {
-        await fetchComparisonMatrix(activePapers, true);
-        showNotice('Research gaps successfully audited and saved to SQLite DB');
-      }
-    } catch (err) {
-      console.error('Failed to extract gaps:', err);
-    } finally {
-      setReanalyzingPaperId(null);
-    }
-  };
-
   // Add custom paper
   const handleAddCustomPaper = async (e) => {
     e?.preventDefault();
@@ -196,18 +129,16 @@ export default function PaperComparisonView() {
       const res = await fetch(`/api/v1/paper/${encodeURIComponent(query)}`);
       if (res.ok) {
         const data = await res.json();
-        if (data && data.paper) {
+        if (data?.paper) {
           addComparisonPaper(data.paper);
           setCustomPaperInput('');
           return;
         }
       }
-      const searchRes = await fetch(
-        `/api/v1/search/openalex?query=${encodeURIComponent(query)}&limit=1`
-      );
+      const searchRes = await fetch(`/api/v1/search/openalex?query=${encodeURIComponent(query)}&limit=1`);
       if (searchRes.ok) {
         const sData = await searchRes.json();
-        if (sData && sData.papers && sData.papers.length > 0) {
+        if (sData?.papers?.length > 0) {
           addComparisonPaper(sData.papers[0]);
           setCustomPaperInput('');
           return;
@@ -227,7 +158,7 @@ export default function PaperComparisonView() {
     }
   };
 
-  // Presets
+  // Quick presets
   const handleLoadPreset = (presetType) => {
     clearComparisonPapers();
     if (presetType === 'transformers') {
@@ -285,116 +216,16 @@ export default function PaperComparisonView() {
     }
   };
 
-  const showNotice = (msg) => {
-    setExportNotice(msg);
-    setTimeout(() => setExportNotice(null), 3000);
-  };
-
-  // Export CSV
-  const handleExportCSV = () => {
-    if (!matrixData || !matrixData.matrix || matrixData.matrix.length === 0) return;
-    const papers = matrixData.matrix;
-    const headers = ['Dimension', ...papers.map((p) => `"${p.title.replace(/"/g, '""')}"`)];
-    const rows = [
-      headers.join(','),
-      ['Source Platform', ...papers.map((p) => `"${p.primary_source || 'Open Access'}"`)].join(','),
-      ['Year', ...papers.map((p) => p.year || 'N/A')].join(','),
-      ['Citations', ...papers.map((p) => p.citations || 0)].join(','),
-      ['PaperRank Rigor Score', ...papers.map((p) => (p.score ? p.score.toFixed(1) : 'N/A'))].join(','),
-      ['Gaps Count', ...papers.map((p) => p.gaps_count || 0)].join(','),
-      ['Gaps Provenance', ...papers.map((p) => `"${p.gaps_source || 'N/A'}"`)].join(','),
-      [
-        'Identified Research Gaps',
-        ...papers.map(
-          (p) =>
-            `"${(p.research_gaps || [])
-              .map((g) => `[${g.category}] ${g.title}: ${g.description}`)
-              .join(' | ')
-              .replace(/"/g, '""')}"`
-        ),
-      ].join(','),
-      ['Methodological Limitations', ...papers.map((p) => `"${(p.limitations || []).join('; ').replace(/"/g, '""')}"`)].join(','),
-      ['Open Questions', ...papers.map((p) => `"${(p.open_questions || []).join('; ').replace(/"/g, '""')}"`)].join(','),
-      ['Ablation Study Present', ...papers.map((p) => (p.has_ablation ? 'Yes' : 'No'))].join(','),
-      ['Baselines Evaluated', ...papers.map((p) => (p.has_baselines ? 'Yes' : 'No'))].join(','),
-      ['Code Repository', ...papers.map((p) => p.code_url || (p.has_code_repo ? 'Available' : 'None'))].join(','),
-      ['Compute Budget', ...papers.map((p) => `"${p.compute_details || (p.has_compute_budget ? 'Disclosed' : 'Undisclosed')}"`)].join(','),
-      ['Scientific Verdict', ...papers.map((p) => `"${(p.verdict || '').replace(/"/g, '""')}"`)].join(','),
-    ];
-    const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `comparison_matrix_${Date.now()}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    showNotice('CSV table downloaded successfully');
-  };
-
-  // Export Markdown
-  const handleExportMarkdown = () => {
-    if (!matrixData || !matrixData.matrix || matrixData.matrix.length === 0) return;
-    const papers = matrixData.matrix;
-    const cols = ['| Comparison Dimension', ...papers.map((p) => `| **${p.title.slice(0, 32)}...**`)].join(' ') + ' |';
-    const sep = ['| :---', ...papers.map(() => '| :---')].join(' ') + ' |';
-    const lines = [
-      cols,
-      sep,
-      ['| **Source**', ...papers.map((p) => `| ${p.primary_source || 'Open Access'}`)].join(' ') + ' |',
-      ['| **Year**', ...papers.map((p) => `| ${p.year || 'N/A'}`)].join(' ') + ' |',
-      ['| **PaperRank**', ...papers.map((p) => `| ${p.score ? p.score.toFixed(1) : 'N/A'}`)].join(' ') + ' |',
-      ['| **Identified Gaps**', ...papers.map((p) => `| ${(p.research_gaps || []).map((g) => `*${g.title}*`).join(', ') || 'None'}`)].join(' ') + ' |',
-      ['| **Gaps Source**', ...papers.map((p) => `| \`${p.gaps_source}\``)].join(' ') + ' |',
-      ['| **Ablation Study**', ...papers.map((p) => `| ${p.has_ablation ? 'Yes' : 'No'}`)].join(' ') + ' |',
-      ['| **Code Repository**', ...papers.map((p) => `| ${p.code_url || (p.has_code_repo ? 'Available' : 'None')}`)].join(' ') + ' |',
-      ['| **Compute Budget**', ...papers.map((p) => `| ${p.has_compute_budget ? 'Disclosed' : 'Undisclosed'}`)].join(' ') + ' |',
-      ['| **Scientific Verdict**', ...papers.map((p) => `| ${p.verdict || 'N/A'}`)].join(' ') + ' |',
-    ];
-    navigator.clipboard.writeText(lines.join('\n'));
-    showNotice('Markdown table copied to clipboard');
-  };
-
-  // Export LaTeX
-  const handleExportLaTeX = () => {
-    if (!matrixData || !matrixData.matrix || matrixData.matrix.length === 0) return;
-    const papers = matrixData.matrix;
-    const colAlign = 'l' + 'p{4.2cm}'.repeat(papers.length);
-    const latex = [
-      '% --- Generated by Research Copilot Side-by-Side Comparison Matrix ---',
-      '\\begin{table*}[t]',
-      '\\centering',
-      '\\small',
-      `\\begin{tabular}{${colAlign}}`,
-      '\\toprule',
-      ['\\textbf{Dimension}', ...papers.map((p) => `\\textbf{${p.title.slice(0, 26).replace(/[&%$#_{}]/g, '')}...}`)].join(' & ') + ' \\\\',
-      '\\midrule',
-      ['Source Platform', ...papers.map((p) => p.primary_source || 'Open Access')].join(' & ') + ' \\\\',
-      ['Publication Year', ...papers.map((p) => String(p.year || 'N/A'))].join(' & ') + ' \\\\',
-      ['PaperRank Rigor Score', ...papers.map((p) => (p.score ? p.score.toFixed(1) : 'N/A'))].join(' & ') + ' \\\\',
-      ['Identified Gaps', ...papers.map((p) => `${p.gaps_count} (Source: ${p.gaps_source})`)].join(' & ') + ' \\\\',
-      ['Methodology Ablation', ...papers.map((p) => (p.has_ablation ? 'Yes' : 'No'))].join(' & ') + ' \\\\',
-      ['Reproducible Code', ...papers.map((p) => (p.has_code_repo ? 'Available' : 'Missing'))].join(' & ') + ' \\\\',
-      ['Compute Budget Disclosed', ...papers.map((p) => (p.has_compute_budget ? 'Yes' : 'No'))].join(' & ') + ' \\\\',
-      '\\bottomrule',
-      '\\end{tabular}',
-      '\\caption{Side-by-side methodology, compute budget, and ground-truthed research gap comparison matrix.}',
-      '\\label{tab:research_matrix}',
-      '\\end{table*}',
-    ].join('\n');
-    navigator.clipboard.writeText(latex);
-    showNotice('LaTeX table copied to clipboard');
-  };
-
-  // --- Taxonomy Feature Matrix Helpers & Exporters ---
+  // Criteria definition
   const allCriteria = useMemo(() => {
     const base = [
-      { id: 'multimodal', label: 'Multi-Modal', tooltip: 'Supports vision, audio, text, or video inputs' },
+      { id: 'multimodal', label: 'Multi-Modal', tooltip: 'Vision, audio, text, or multi-modal representations' },
       { id: 'zero_shot', label: 'Zero-Shot', tooltip: 'Evaluated on unseen zero-shot tasks' },
-      { id: 'training_free', label: 'Training-Free / Adapters', tooltip: 'Uses frozen backbones or lightweight adapters' },
-      { id: 'real_time', label: 'Real-Time Inference', tooltip: 'Low-latency / high-FPS execution' },
+      { id: 'training_free', label: 'Training-Free / Adapters', tooltip: 'Uses frozen backbones or lightweight parameter adapters' },
+      { id: 'real_time', label: 'Real-Time Inference', tooltip: 'Low-latency / linear complexity execution' },
       { id: 'open_source', label: 'Open-Source Code', tooltip: 'Verified public code and model checkpoints' },
-      { id: 'compute_disclosed', label: 'Compute Disclosed', tooltip: 'Discloses GPU/TPU hours and training resources' },
-      { id: 'ablation_verified', label: 'Ablation Verified', tooltip: 'Includes component ablation studies' },
+      { id: 'compute_disclosed', label: 'Compute Disclosed', tooltip: 'Discloses GPU/TPU hours and training compute budget' },
+      { id: 'ablation_verified', label: 'Ablation Verified', tooltip: 'Includes empirical component ablation studies' },
       { id: 'sota_benchmarked', label: 'SOTA Benchmarked', tooltip: 'Benchmarked against standard published baselines' },
     ];
     return [...base, ...customCriteria];
@@ -420,88 +251,43 @@ export default function PaperComparisonView() {
     setFeatureOverrides((prev) => ({ ...prev, [key]: next }));
   };
 
-  const handleAddCustomCriterion = (e) => {
+  const handleAddCriterion = (e) => {
     e.preventDefault();
-    if (!newCriterionInput.trim()) return;
     const cleanLabel = newCriterionInput.trim();
+    if (!cleanLabel) return;
     const cleanId = cleanLabel.toLowerCase().replace(/[^a-z0-9]+/g, '_');
     if (allCriteria.some((c) => c.id === cleanId)) {
-      showNotice('Criterion already exists');
+      showToast('Criterion already exists');
       return;
     }
-    setCustomCriteria((prev) => [...prev, { id: cleanId, label: cleanLabel, tooltip: `Custom criterion: ${cleanLabel}` }]);
+    setCustomCriteria((prev) => [
+      ...prev,
+      { id: cleanId, label: cleanLabel, tooltip: `Custom criterion: ${cleanLabel}`, isCustom: true },
+    ]);
     setNewCriterionInput('');
-    showNotice(`Added custom criterion: ${cleanLabel}`);
+    showToast(`Added criterion: ${cleanLabel}`);
   };
 
-  const handleExportTaxonomyLaTeX = () => {
-    const papersToInclude = [...displayedPapers];
-    if (includeOurs) {
-      papersToInclude.push({
-        id: 'ours_method',
-        title: oursTitle,
-        isOurs: true,
-        year: new Date().getFullYear(),
-        venue: 'Submission',
-      });
-    }
-    if (papersToInclude.length === 0) return;
-    const cols = 'l' + 'c'.repeat(allCriteria.length);
-    const lines = [
-      '% --- Generated by Research Copilot Feature Comparison Matrix (Taxonomy) ---',
-      '% Venue Target: CVPR / NeurIPS / ICLR Section 2 (Related Work)',
-      '% Requires: \\usepackage{booktabs}, \\usepackage{amssymb}',
-      '\\begin{table*}[t]',
-      '\\centering',
-      '\\small',
-      `\\begin{tabular}{${cols}}`,
-      '\\toprule',
-      ['\\textbf{Method}', ...allCriteria.map((c) => `\\textbf{${c.label.replace('&', '\\&')}}`)].join(' & ') + ' \\\\',
-      '\\midrule',
-    ];
-
-    papersToInclude.forEach((p) => {
-      const name = p.isOurs ? `\\textbf{${p.title}}` : p.title.slice(0, 24).replace(/[&%$#_{}]/g, '');
-      const cells = allCriteria.map((c) => {
-        const st = getFeatureStatus(p, c.id);
-        if (st === 'present') return p.isOurs ? '\\textbf{\\checkmark}' : '$\\checkmark$';
-        if (st === 'partial') return '$\\sim$';
-        return '$\\times$';
-      });
-      lines.push([name, ...cells].join(' & ') + ' \\\\');
-    });
-
-    lines.push(
-      '\\bottomrule',
-      '\\end{tabular}',
-      '\\caption{Qualitative architectural feature comparison against state-of-the-art baselines. ($\\checkmark$: Supported, $\\sim$: Partial / Limited, $\\times$: Not supported).}',
-      '\\label{tab:feature_comparison}',
-      '\\end{table*}'
-    );
-
-    navigator.clipboard.writeText(lines.join('\n'));
-    showNotice('Taxonomy LaTeX table copied to clipboard');
+  const handleDeleteCriterion = (id) => {
+    setCustomCriteria((prev) => prev.filter((c) => c.id !== id));
   };
 
-  // Filter matrix papers based on user search query if present
+  // Filter papers
   const displayedPapers = useMemo(() => {
     const list = matrixData?.matrix || activePapers;
-    if (!matrixSearchQuery.trim()) return list;
-    const q = matrixSearchQuery.toLowerCase();
+    if (!searchQuery.trim()) return list;
+    const q = searchQuery.toLowerCase();
     return list.filter((p) => {
       const matchTitle = (p.title || '').toLowerCase().includes(q);
       const matchMethod = (p.methodology || '').toLowerCase().includes(q);
       const matchGaps = (p.research_gaps || []).some(
         (g) => (g.title || '').toLowerCase().includes(q) || (g.description || '').toLowerCase().includes(q)
       );
-      const matchBenchmarks = (p.benchmarks || []).some(
-        (b) => (b.task || '').toLowerCase().includes(q) || (b.dataset || '').toLowerCase().includes(q)
-      );
-      return matchTitle || matchMethod || matchGaps || matchBenchmarks;
+      return matchTitle || matchMethod || matchGaps;
     });
-  }, [matrixData, activePapers, matrixSearchQuery]);
+  }, [matrixData, activePapers, searchQuery]);
 
-  // Combined papers list optionally staging "Ours (Proposed Method)"
+  // Combined papers with "Ours"
   const papersToDisplay = useMemo(() => {
     if (includeOurs) {
       return [
@@ -514,162 +300,118 @@ export default function PaperComparisonView() {
           year: new Date().getFullYear(),
           primary_source: 'Our Work',
           authors: ['Proposed Method'],
-          gaps_source: 'ours',
           research_gaps: [],
           has_ablation: true,
           has_baselines: true,
           has_code_repo: true,
           has_compute_budget: true,
           compute_details: 'Disclosed',
-          score: 9.8,
         },
       ];
     }
     return displayedPapers;
   }, [displayedPapers, includeOurs, oursTitle]);
 
-  // Dimension filter check
-  const showDimension = (dim) => {
-    if (focusGapsOnly) return dim === 'gaps';
-    if (activeDimension === 'all') return true;
-    return activeDimension === dim;
+  // Exporters
+  const handleExportCSV = () => {
+    if (!papersToDisplay.length) return;
+    const headers = ['Method', ...allCriteria.map((c) => `"${c.label}"`)];
+    const rows = [headers.join(',')];
+    papersToDisplay.forEach((p) => {
+      const row = [
+        `"${p.title.replace(/"/g, '""')}"`,
+        ...allCriteria.map((c) => {
+          const st = getFeatureStatus(p, c.id);
+          return st === 'present' ? 'Yes' : st === 'partial' ? 'Partial' : 'No';
+        }),
+      ];
+      rows.push(row.join(','));
+    });
+    const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `feature_matrix_${Date.now()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('CSV downloaded');
+  };
+
+  const handleExportMarkdown = () => {
+    if (!papersToDisplay.length) return;
+    const cols = ['| Method', ...allCriteria.map((c) => `| ${c.label}`)].join(' ') + ' |';
+    const sep = ['| :---', ...allCriteria.map(() => '| :---:')].join(' ') + ' |';
+    const lines = [cols, sep];
+    papersToDisplay.forEach((p) => {
+      const name = p.isOurs ? `**${p.title}**` : p.title.slice(0, 24);
+      const cells = allCriteria.map((c) => {
+        const st = getFeatureStatus(p, c.id);
+        return st === 'present' ? '✓' : st === 'partial' ? '~' : '✕';
+      });
+      lines.push([`| ${name}`, ...cells.map((c) => `| ${c}`)].join(' ') + ' |');
+    });
+    navigator.clipboard.writeText(lines.join('\n'));
+    showToast('Markdown table copied');
+  };
+
+  const handleExportTaxonomyLaTeX = () => {
+    if (!papersToDisplay.length) return;
+    const cols = 'l' + 'c'.repeat(allCriteria.length);
+    const lines = [
+      '% --- Qualitative Architectural Feature Comparison Matrix ---',
+      '% Standard survey table for Section 2 (Related Work)',
+      '\\begin{table*}[t]',
+      '\\centering',
+      '\\small',
+      `\\begin{tabular}{${cols}}`,
+      '\\toprule',
+      ['\\textbf{Method}', ...allCriteria.map((c) => `\\textbf{${c.label.replace('&', '\\&')}}`)].join(' & ') + ' \\\\',
+      '\\midrule',
+    ];
+    papersToDisplay.forEach((p) => {
+      const name = p.isOurs ? `\\textbf{${p.title}}` : p.title.slice(0, 24).replace(/[&%$#_{}]/g, '');
+      const cells = allCriteria.map((c) => {
+        const st = getFeatureStatus(p, c.id);
+        if (st === 'present') return p.isOurs ? '\\textbf{\\checkmark}' : '$\\checkmark$';
+        if (st === 'partial') return '$\\sim$';
+        return '$\\times$';
+      });
+      lines.push([name, ...cells].join(' & ') + ' \\\\');
+    });
+    lines.push(
+      '\\bottomrule',
+      '\\end{tabular}',
+      '\\caption{Architectural feature comparison against published baselines. ($\\checkmark$: Supported, $\\sim$: Partial, $\\times$: Not supported).}',
+      '\\label{tab:feature_matrix}',
+      '\\end{table*}'
+    );
+    navigator.clipboard.writeText(lines.join('\n'));
+    showToast('LaTeX table copied');
+  };
+
+  const handleCopyGap = (paper, gap, idx) => {
+    navigator.clipboard.writeText(`[${gap.title}] in ${paper.title}:\n${gap.description}`);
+    setCopiedGapId(`${paper.id}-${idx}`);
+    setTimeout(() => setCopiedGapId(null), 2000);
   };
 
   return (
     <div className="view-container" style={{ padding: '20px 24px', maxWidth: 1600, margin: '0 auto' }}>
-      {/* ── 1. Top Focused Header ── */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-          flexWrap: 'wrap',
-          gap: 16,
-          marginBottom: 18,
-          paddingBottom: 16,
-          borderBottom: '1px solid var(--border-subtle)',
-        }}
-      >
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-            <div
-              style={{
-                width: 32,
-                height: 32,
-                borderRadius: 'var(--radius-sm)',
-                background: 'var(--accent-blue-subtle, rgba(59, 130, 246, 0.12))',
-                color: 'var(--accent-blue, #2563eb)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <Columns3 size={18} />
-            </div>
-            <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0, color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>
-              Side-by-Side Multi-Paper Comparison Matrix
-            </h2>
-            <span className="badge badge-blue" style={{ fontSize: 11, fontWeight: 600 }}>
-              {activePapers.length} Papers Selected
-            </span>
-            {matrixData && (
-              <span className="badge badge-emerald" style={{ fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                <Database size={11} />
-                <span>SQLite Verified</span>
-              </span>
-            )}
-          </div>
-          <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', margin: 0, maxWidth: 820, lineHeight: 1.45 }}>
-            Direct comparative analysis grounded in canonical SQLite records, empirical benchmarks from Papers with Code, and verified research gaps with provenance tracking.
-          </p>
-        </div>
+      {/* ── 1. Top Header ── */}
+      <MatrixHeader
+        activePapersCount={activePapers.length}
+        hasMatrixData={!!matrixData}
+        matrixLoading={matrixLoading}
+        onExportCSV={handleExportCSV}
+        onExportMarkdown={handleExportMarkdown}
+        onExportTaxonomyLaTeX={handleExportTaxonomyLaTeX}
+        onRefresh={() => fetchComparisonMatrix(activePapers, true)}
+        onClear={clearComparisonPapers}
+        canClear={comparisonPapers.length > 0}
+      />
 
-        {/* Global Matrix Actions & Twin View Switcher */}
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', gap: 4, background: 'var(--bg-subtle)', padding: 3, borderRadius: 'var(--radius-sm, 6px)', border: '1px solid var(--border-subtle)', marginRight: 4 }}>
-            <button
-              className="btn btn-primary btn-sm"
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5 }}
-            >
-              <Columns3 size={13} />
-              <span>Feature Matrix</span>
-            </button>
-            <button
-              className="btn btn-secondary btn-sm"
-              onClick={() => navigate('/knowledge-graph')}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5 }}
-              title="Switch to Interactive Knowledge Graph"
-            >
-              <Network size={13} />
-              <span>Knowledge Graph</span>
-            </button>
-          </div>
-
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={handleExportCSV}
-            disabled={!matrixData}
-            title="Download CSV table"
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5 }}
-          >
-            <Download size={13} />
-            <span>CSV</span>
-          </button>
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={handleExportMarkdown}
-            disabled={!matrixData}
-            title="Copy Markdown table to clipboard"
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5 }}
-          >
-            <Copy size={13} />
-            <span>Markdown</span>
-          </button>
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={handleExportLaTeX}
-            disabled={!matrixData}
-            title="Copy LaTeX table code to clipboard"
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5 }}
-          >
-            <FileText size={13} />
-            <span>LaTeX</span>
-          </button>
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={handleExportTaxonomyLaTeX}
-            title="Copy Academic Taxonomy LaTeX Table (\checkmark & \times)"
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5, borderColor: 'var(--accent-primary)' }}
-          >
-            <CheckSquare size={13} style={{ color: 'var(--accent-primary)' }} />
-            <span>Taxonomy LaTeX</span>
-          </button>
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={() => fetchComparisonMatrix(activePapers, true)}
-            disabled={matrixLoading}
-            title="Re-audit comparison matrix against database"
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5 }}
-          >
-            <RefreshCw size={13} className={matrixLoading ? 'spin-anim' : ''} />
-            <span>{matrixLoading ? 'Auditing...' : 'Refresh'}</span>
-          </button>
-          {comparisonPapers.length > 0 && (
-            <button
-              className="btn btn-secondary btn-sm"
-              onClick={clearComparisonPapers}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5 }}
-              title="Clear all compared papers"
-            >
-              <X size={13} />
-              <span>Clear</span>
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Notification Toast */}
-      {exportNotice && (
+      {/* Toast Notification */}
+      {notice && (
         <div
           style={{
             padding: '8px 14px',
@@ -684,7 +426,7 @@ export default function PaperComparisonView() {
           }}
         >
           <CheckCircle2 size={14} />
-          <span>{exportNotice}</span>
+          <span>{notice}</span>
         </div>
       )}
 
@@ -705,1319 +447,181 @@ export default function PaperComparisonView() {
         </div>
       )}
 
-      {/* ── 2. Active Paper Pill Tray & Quick Add ── */}
-      <div
-        style={{
-          background: 'var(--bg-secondary)',
-          border: '1px solid var(--border-subtle)',
-          borderRadius: 'var(--radius-sm)',
-          padding: '12px 14px',
-          marginBottom: 16,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 12,
-        }}
-      >
-        {/* Active Paper Chips */}
-        {activePapers.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              Staged Papers ({activePapers.length}):
-            </span>
-            {activePapers.map((paper, idx) => (
-              <div
-                key={paper.id || idx}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  padding: '4px 10px',
-                  background: 'var(--bg-card)',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: 16,
-                  fontSize: 11.5,
-                  color: 'var(--text-primary)',
-                  boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
-                }}
-              >
-                <span
-                  style={{
-                    maxWidth: 220,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                    fontWeight: 500,
-                  }}
-                  title={paper.title}
-                >
-                  {formatPaperDisplayTitle(paper)}
-                </span>
-                {paper.year && (
-                  <span style={{ fontSize: 10, color: 'var(--text-muted)', paddingLeft: 2 }}>
-                    ({paper.year})
-                  </span>
-                )}
-                <button
-                  type="button"
-                  onClick={() => removeComparisonPaper(paper.id)}
-                  style={{
-                    border: 'none',
-                    background: 'none',
-                    padding: 0,
-                    cursor: 'pointer',
-                    color: 'var(--text-muted)',
-                    display: 'flex',
-                    alignItems: 'center',
-                  }}
-                  title="Remove from comparison"
-                >
-                  <X size={12} />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
+      {/* ── 2. Paper Tray & Presets ── */}
+      <MatrixPaperTray
+        activePapers={activePapers}
+        onRemovePaper={removeComparisonPaper}
+        customPaperInput={customPaperInput}
+        setCustomPaperInput={setCustomPaperInput}
+        onAddCustomPaper={handleAddCustomPaper}
+        addingCustomPaper={addingCustomPaper}
+        onLoadPreset={handleLoadPreset}
+      />
 
-        {/* Input Bar & Presets */}
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <form onSubmit={handleAddCustomPaper} style={{ display: 'flex', gap: 6, flex: 1, minWidth: 280 }}>
-            <input
-              type="text"
-              value={customPaperInput}
-              onChange={(e) => setCustomPaperInput(e.target.value)}
-              placeholder="Add paper by arXiv ID (e.g. 2312.00752), DOI, or title..."
-              style={{
-                flex: 1,
-                fontSize: 12,
-                padding: '6px 12px',
-                borderRadius: 'var(--radius-sm)',
-                border: '1px solid var(--border-subtle)',
-                background: 'var(--bg-card)',
-                color: 'var(--text-primary)',
-              }}
-            />
-            <button
-              type="submit"
-              disabled={addingCustomPaper || !customPaperInput.trim()}
-              className="btn btn-primary btn-sm"
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5 }}
-            >
-              {addingCustomPaper ? <Loader2 size={12} className="spin-anim" /> : <Plus size={13} />}
-              <span>Add Paper</span>
-            </button>
-          </form>
+      {/* ── 3. Filter & Dimension Bar ── */}
+      <MatrixFilterBar
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        searchQuery={searchQuery}
+        setSearchQuery={setSearchQuery}
+        includeOurs={includeOurs}
+        setIncludeOurs={setIncludeOurs}
+      />
 
-          {/* Quick Presets */}
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Presets:</span>
-            <button
-              type="button"
-              onClick={() => handleLoadPreset('transformers')}
-              className="btn btn-secondary btn-sm"
-              style={{ fontSize: 11, padding: '4px 9px' }}
-              title="Compare Attention vs Mamba vs LoRA"
-            >
-              Attention vs Mamba vs LoRA
-            </button>
-            <button
-              type="button"
-              onClick={() => handleLoadPreset('hallucination')}
-              className="btn btn-secondary btn-sm"
-              style={{ fontSize: 11, padding: '4px 9px' }}
-              title="Compare Hallucination Detection Baselines"
-            >
-              Hallucination Detection
-            </button>
-            <button
-              type="button"
-              onClick={() => handleLoadPreset('flashattention')}
-              className="btn btn-secondary btn-sm"
-              style={{ fontSize: 11, padding: '4px 9px' }}
-              title="Compare FlashAttention 1 vs 2"
-            >
-              FlashAttention 1 vs 2
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* ── 3. Focused Dimension Navigation & Matrix Controls Strip ── */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: 12,
-          marginBottom: 16,
-          background: 'var(--bg-card)',
-          border: '1px solid var(--border-subtle)',
-          borderRadius: 'var(--radius-sm)',
-          padding: '8px 12px',
-        }}
-      >
-        {/* Dimension Filter Tabs */}
-        <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
-          {[
-            { id: 'all', label: 'All Dimensions' },
-            { id: 'taxonomy', label: 'Feature Matrix (Taxonomy)' },
-            { id: 'gaps', label: 'Research Gaps & Gaps Synthesis' },
-            { id: 'methodology', label: 'Methodology & Problem' },
-            { id: 'benchmarks', label: 'Benchmarks & Metrics' },
-            { id: 'code', label: 'Code & Repositories' },
-            { id: 'rigor', label: 'Rigor & PaperRank' },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => {
-                setActiveDimension(tab.id);
-                if (tab.id !== 'gaps') setFocusGapsOnly(false);
-              }}
-              style={{
-                fontSize: 11.5,
-                padding: '5px 11px',
-                borderRadius: 'var(--radius-xs)',
-                border: 'none',
-                background: activeDimension === tab.id && !focusGapsOnly ? 'var(--accent-primary, #2563eb)' : 'transparent',
-                color: activeDimension === tab.id && !focusGapsOnly ? '#fff' : 'var(--text-secondary)',
-                fontWeight: activeDimension === tab.id && !focusGapsOnly ? 600 : 400,
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-              }}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Focus Mode & Filter Controls */}
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          {/* Focus Gaps Only Toggle */}
-          <button
-            type="button"
-            onClick={() => setFocusGapsOnly(!focusGapsOnly)}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 5,
-              fontSize: 11.5,
-              padding: '4px 10px',
-              borderRadius: 'var(--radius-xs)',
-              border: `1px solid ${focusGapsOnly ? 'var(--accent-purple, #9333ea)' : 'var(--border-subtle)'}`,
-              background: focusGapsOnly ? 'rgba(147, 51, 234, 0.12)' : 'var(--bg-card)',
-              color: focusGapsOnly ? 'var(--accent-purple, #9333ea)' : 'var(--text-secondary)',
-              fontWeight: focusGapsOnly ? 600 : 500,
-              cursor: 'pointer',
-            }}
-            title="Isolate research gaps and cross-paper synthesis"
-          >
-            <Target size={13} />
-            <span>Focus on Gaps</span>
-          </button>
-
-          {/* In-Matrix Search */}
-          <div style={{ position: 'relative', width: 220 }}>
-            <Search
-              size={12}
-              style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}
-            />
-            <input
-              type="text"
-              value={matrixSearchQuery}
-              onChange={(e) => setMatrixSearchQuery(e.target.value)}
-              placeholder="Search across matrix..."
-              style={{
-                width: '100%',
-                fontSize: 11.5,
-                padding: '4px 8px 4px 26px',
-                borderRadius: 'var(--radius-xs)',
-                border: '1px solid var(--border-subtle)',
-                background: 'var(--bg-secondary)',
-                color: 'var(--text-primary)',
-              }}
-            />
-            {matrixSearchQuery && (
-              <button
-                type="button"
-                onClick={() => setMatrixSearchQuery('')}
-                style={{
-                  position: 'absolute',
-                  right: 6,
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  border: 'none',
-                  background: 'none',
-                  padding: 0,
-                  cursor: 'pointer',
-                  color: 'var(--text-muted)',
-                }}
-              >
-                <X size={11} />
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* ── 4. Cross-Paper Combinatorial Gaps Callout ── */}
-      {showDimension('gaps') && matrixData?.cross_paper_gaps?.length > 0 && (
-        <div
-          style={{
-            background: 'var(--bg-card)',
-            border: '1px solid var(--border-subtle)',
-            borderLeft: '4px solid var(--accent-purple, #9333ea)',
-            borderRadius: 'var(--radius-sm)',
-            padding: '14px 18px',
-            marginBottom: 16,
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <GitBranch size={16} style={{ color: 'var(--accent-purple, #9333ea)' }} />
-              <h4 style={{ fontSize: 13.5, fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
-                Cross-Paper Combinatorial Research Gaps ({matrixData.cross_paper_gaps.length} Intersections)
-              </h4>
-            </div>
-            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-              Synthesized by Research Copilot Gap Engine
-            </span>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 10 }}>
-            {matrixData.cross_paper_gaps.map((cg, cIdx) => (
-              <div
-                key={cIdx}
-                style={{
-                  background: 'var(--bg-secondary)',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: 'var(--radius-xs)',
-                  padding: '10px 12px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 6,
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <strong style={{ fontSize: 12, color: 'var(--text-primary)' }}>{cg.title}</strong>
-                  <span className="badge badge-purple" style={{ fontSize: 9.5 }}>
-                    Combinatorial Opportunity
-                  </span>
-                </div>
-                <p style={{ fontSize: 11.5, color: 'var(--text-secondary)', margin: 0, lineHeight: 1.4 }}>
-                  {cg.description}
-                </p>
-                {cg.shared_bottleneck && (
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                    <strong style={{ color: 'var(--text-secondary)' }}>Shared Bottleneck:</strong> {cg.shared_bottleneck}
-                  </div>
-                )}
-                {cg.suggested_novelty_direction && (
-                  <div
-                    style={{
-                      fontSize: 11,
-                      color: 'var(--accent-primary, #2563eb)',
-                      background: 'var(--accent-primary-subtle, rgba(37,99,235,0.06))',
-                      padding: '5px 8px',
-                      borderRadius: 4,
-                      marginTop: 2,
-                    }}
-                  >
-                    <strong>Novelty Direction:</strong> {cg.suggested_novelty_direction}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* ── 5. Main Side-by-Side Matrix Table ── */}
+      {/* ── 4. Main Matrix Table ── */}
       {matrixLoading && !matrixData ? (
         <div style={{ padding: 60, textAlign: 'center', background: 'var(--bg-card)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
           <Loader2 size={30} className="spin-anim" style={{ margin: '0 auto 12px auto', color: 'var(--accent-primary)' }} />
           <h4 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 6px 0' }}>
-            Auditing Multi-Paper Literature & Research Gaps...
+            Building Feature Comparison Matrix...
           </h4>
           <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
-            Querying canonical SQLite database records, verifying ablation baselines, and extracting ground-truthed gaps.
+            Grounding literature metadata, verifying open source repositories, and preparing taxonomy.
           </p>
         </div>
       ) : papersToDisplay.length > 0 ? (
-        <>
-          {/* ── Taxonomy Configuration Strip ── */}
-          {showDimension('taxonomy') && (
-            <div
-              style={{
-                background: 'var(--bg-card)',
-                border: '1px solid var(--border-subtle)',
-                borderLeft: '4px solid var(--accent-primary, #2563eb)',
-                borderRadius: 'var(--radius-sm)',
-                padding: '12px 16px',
-                marginBottom: 16,
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 12,
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-                <div>
-                  <h4 style={{ fontSize: 13.5, fontWeight: 700, margin: '0 0 3px 0', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <Table size={15} style={{ color: 'var(--accent-primary, #2563eb)' }} />
-                    <span>Qualitative Architectural Feature Matrix (Taxonomy)</span>
-                  </h4>
-                  <p style={{ fontSize: 11.5, color: 'var(--text-secondary)', margin: 0 }}>
-                    Standard survey table for Section 2 (Related Work). Click any cell badge to toggle (Supported &#10003; &#10142; Limited ~ &#10142; No &#10005;).
-                  </p>
-                </div>
-
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                  <button
-                    type="button"
-                    onClick={() => setIncludeOurs(!includeOurs)}
-                    className={`btn btn-sm ${includeOurs ? 'btn-primary' : 'btn-secondary'}`}
-                    style={{ fontSize: 11.5, display: 'inline-flex', alignItems: 'center', gap: 5 }}
-                    title="Toggle 'Ours (Proposed Method)' column"
-                  >
-                    <Sparkles size={12} />
-                    <span>{includeOurs ? "Ours Included (Active)" : "+ Stage 'Ours' Column"}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleExportTaxonomyLaTeX}
-                    className="btn btn-secondary btn-sm"
-                    style={{ fontSize: 11.5, display: 'inline-flex', alignItems: 'center', gap: 5 }}
-                    title="Copy LaTeX Table with \\checkmark and \\times"
-                  >
-                    <CheckSquare size={13} style={{ color: 'var(--accent-primary, #2563eb)' }} />
-                    <span>Copy Taxonomy LaTeX</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Add Custom Criterion Row */}
-              <form onSubmit={handleAddCustomCriterion} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)' }}>Custom Criterion:</span>
-                <input
-                  type="text"
-                  value={newCriterionInput}
-                  onChange={(e) => setNewCriterionInput(e.target.value)}
-                  placeholder="e.g. Video Understanding, FlashAttention-2, Quantized <8-bit, Training-Free..."
+        <div
+          style={{
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-sm)',
+            overflowX: 'auto',
+          }}
+        >
+          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: 840 }}>
+            <thead>
+              <tr style={{ background: 'var(--bg-secondary)', borderBottom: '2px solid var(--border-subtle)' }}>
+                <th
                   style={{
-                    flex: 1,
-                    minWidth: 260,
-                    maxWidth: 460,
-                    fontSize: 11.5,
-                    padding: '5px 10px',
-                    borderRadius: 'var(--radius-xs)',
-                    border: '1px solid var(--border-subtle)',
+                    position: 'sticky',
+                    left: 0,
                     background: 'var(--bg-secondary)',
+                    zIndex: 2,
+                    width: 220,
+                    padding: '14px 16px',
+                    fontSize: 12,
+                    fontWeight: 700,
                     color: 'var(--text-primary)',
+                    borderRight: '1px solid var(--border-subtle)',
                   }}
-                />
-                <button
-                  type="submit"
-                  disabled={!newCriterionInput.trim()}
-                  className="btn btn-secondary btn-sm"
-                  style={{ fontSize: 11, padding: '5px 12px', display: 'inline-flex', alignItems: 'center', gap: 4 }}
                 >
-                  <Plus size={12} />
-                  <span>Add Criterion Column</span>
-                </button>
-              </form>
-            </div>
-          )}
+                  COMPARISON DIMENSION
+                </th>
 
-          <div
-            style={{
-              background: 'var(--bg-card)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: 'var(--radius-sm)',
-              overflowX: 'auto',
-            }}
-          >
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: 840 }}>
-              <thead>
-                <tr style={{ background: 'var(--bg-secondary)', borderBottom: '2px solid var(--border-subtle)' }}>
-                  {/* Sticky Left Dimension Label */}
+                {papersToDisplay.map((paper, idx) => (
                   <th
+                    key={idx}
                     style={{
-                      position: 'sticky',
-                      left: 0,
-                      background: 'var(--bg-secondary)',
-                      zIndex: 2,
-                      width: 220,
                       padding: '14px 16px',
-                      fontSize: 12,
-                      fontWeight: 700,
-                      color: 'var(--text-primary)',
+                      verticalAlign: 'top',
+                      minWidth: 260,
                       borderRight: '1px solid var(--border-subtle)',
+                      background: paper.isOurs ? 'rgba(37, 99, 235, 0.04)' : 'transparent',
+                      borderTop: paper.isOurs ? '3px solid var(--accent-primary, #2563eb)' : 'none',
                     }}
                   >
-                    COMPARISON DIMENSION
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                        <span className={paper.isOurs ? 'badge badge-blue' : 'badge badge-neutral'} style={{ fontSize: 10, textTransform: 'uppercase' }}>
+                          {paper.isOurs ? 'OUR PROPOSED METHOD' : (paper.primary_source || 'Open Access')} {paper.year ? `· ${paper.year}` : ''}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => (paper.isOurs ? setIncludeOurs(false) : removeComparisonPaper(paper.id))}
+                          style={{
+                            border: 'none',
+                            background: 'none',
+                            padding: 0,
+                            cursor: 'pointer',
+                            color: 'var(--text-muted)',
+                          }}
+                          title={paper.isOurs ? 'Hide proposed method column' : 'Remove paper'}
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+
+                      {paper.isOurs ? (
+                        <input
+                          type="text"
+                          value={oursTitle}
+                          onChange={(e) => setOursTitle(e.target.value)}
+                          style={{
+                            fontSize: 12.5,
+                            fontWeight: 700,
+                            color: 'var(--accent-primary, #2563eb)',
+                            border: '1px solid var(--accent-primary)',
+                            borderRadius: 'var(--radius-xs)',
+                            padding: '3px 8px',
+                            background: '#fff',
+                          }}
+                          title="Rename your method"
+                        />
+                      ) : (
+                        <a
+                          href={`#/pdf-inspector?paper=${encodeURIComponent(paper.canonical_id || paper.id)}`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            setActiveReaderPaper(paper);
+                            navigate(`/pdf-inspector?paper=${encodeURIComponent(paper.canonical_id || paper.id)}`);
+                          }}
+                          style={{
+                            fontSize: 13,
+                            fontWeight: 700,
+                            color: 'var(--text-primary)',
+                            lineHeight: 1.35,
+                            textDecoration: 'none',
+                          }}
+                          title="Open in PDF Reader"
+                        >
+                          {formatPaperDisplayTitle(paper)}
+                        </a>
+                      )}
+
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                        {paper.isOurs
+                          ? 'Your Project / Submission Authors'
+                          : (paper.authors || [])
+                              .map((a) => (typeof a === 'string' ? a : a.name))
+                              .slice(0, 2)
+                              .join(', ') || 'Academic Authors'}
+                        {!paper.isOurs && (paper.authors || []).length > 2 ? ' et al.' : ''}
+                      </div>
+                    </div>
                   </th>
+                ))}
+              </tr>
+            </thead>
 
-                  {/* Paper Column Headers */}
-                  {papersToDisplay.map((paper, idx) => {
-                    const paperId = paper.canonical_id || paper.id;
-                    const isAuditing = reanalyzingPaperId === paperId;
-                    const isVerifiedDB = paper.gaps_source === 'database_verified' || paper.gaps_source === 'graph_nodes';
-                    return (
-                      <th
-                        key={idx}
-                        style={{
-                          padding: '14px 16px',
-                          verticalAlign: 'top',
-                          minWidth: 260,
-                          borderRight: '1px solid var(--border-subtle)',
-                          background: paper.isOurs ? 'rgba(37, 99, 235, 0.04)' : 'transparent',
-                          borderTop: paper.isOurs ? '3px solid var(--accent-primary, #2563eb)' : 'none',
-                        }}
-                      >
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-                            <span className={paper.isOurs ? 'badge badge-blue' : 'badge badge-neutral'} style={{ fontSize: 10, textTransform: 'uppercase' }}>
-                              {paper.isOurs ? 'OUR PROPOSED METHOD' : (paper.primary_source || 'Open Access')} {paper.year ? `· ${paper.year}` : ''}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => (paper.isOurs ? setIncludeOurs(false) : removeComparisonPaper(paper.id))}
-                              style={{
-                                border: 'none',
-                                background: 'none',
-                                padding: 0,
-                                cursor: 'pointer',
-                                color: 'var(--text-muted)',
-                              }}
-                              title={paper.isOurs ? 'Hide proposed method column' : 'Remove paper'}
-                            >
-                              <X size={12} />
-                            </button>
-                          </div>
-
-                          {/* Title with Reader Link or editable Ours */}
-                          {paper.isOurs ? (
-                            <input
-                              type="text"
-                              value={oursTitle}
-                              onChange={(e) => setOursTitle(e.target.value)}
-                              style={{
-                                fontSize: 12.5,
-                                fontWeight: 700,
-                                color: 'var(--accent-primary, #2563eb)',
-                                border: '1px solid var(--accent-primary)',
-                                borderRadius: 'var(--radius-xs)',
-                                padding: '3px 8px',
-                                background: '#fff',
-                              }}
-                              title="Click to rename your method"
-                            />
-                          ) : (
-                            <a
-                              href={`#/pdf-inspector?paper=${encodeURIComponent(paperId)}`}
-                              onClick={(e) => {
-                                e.preventDefault();
-                                setActiveReaderPaper(paper);
-                                navigate(`/pdf-inspector?paper=${encodeURIComponent(paperId)}`);
-                              }}
-                              style={{
-                                fontSize: 13,
-                                fontWeight: 700,
-                                color: 'var(--text-primary)',
-                                lineHeight: 1.35,
-                                textDecoration: 'none',
-                              }}
-                              title="Open in PDF Reader"
-                            >
-                              {formatPaperDisplayTitle(paper)}
-                            </a>
-                          )}
-
-                          {/* Authors */}
-                          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                            {paper.isOurs
-                              ? 'Your Lab / Project Authors'
-                              : (paper.authors || [])
-                                  .map((a) => (typeof a === 'string' ? a : a.name))
-                                  .slice(0, 2)
-                                  .join(', ') || 'Academic Authors'}
-                            {!paper.isOurs && (paper.authors || []).length > 2 ? ' et al.' : ''}
-                          </div>
-
-                          {/* Provenance & Audit Buttons */}
-                          {!paper.isOurs && (
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
-                              <span
-                                className={isVerifiedDB ? 'badge badge-emerald' : 'badge badge-blue'}
-                                style={{ fontSize: 10, display: 'inline-flex', alignItems: 'center', gap: 4 }}
-                                title={isVerifiedDB ? 'Gaps loaded directly from SQLite database records' : 'Gaps extracted via scientific NLP fallback engine'}
-                              >
-                                <Database size={10} />
-                                <span>{isVerifiedDB ? 'DB Grounded' : 'AI Extracted'}</span>
-                              </span>
-
-                              <button
-                                type="button"
-                                onClick={() => handleForceExtractGaps(paperId, paper.title, paper.abstract)}
-                                disabled={isAuditing}
-                                className="btn btn-secondary btn-sm"
-                                style={{ fontSize: 10, padding: '2px 6px', display: 'inline-flex', alignItems: 'center', gap: 3 }}
-                                title="Force refresh and write research gaps to SQLite DB"
-                              >
-                                <RefreshCw size={10} className={isAuditing ? 'spin-anim' : ''} />
-                                <span>{isAuditing ? 'Auditing...' : 'Audit Gaps'}</span>
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </th>
-                    );
-                  })}
-                </tr>
-              </thead>
-
-              <tbody>
-                {/* ============================================================ */}
-                {/* DIMENSION 0: QUALITATIVE FEATURE COMPARISON (TAXONOMY MATRIX) */}
-                {/* ============================================================ */}
-                {showDimension('taxonomy') && (
-                  <>
-                    <tr style={{ background: 'var(--bg-secondary)', borderTop: '2px solid var(--border-subtle)' }}>
-                      <td
-                        colSpan={papersToDisplay.length + 1}
-                        style={{ padding: '8px 16px', fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}
-                      >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <CheckSquare size={14} style={{ color: 'var(--accent-primary, #2563eb)' }} />
-                            <span>QUALITATIVE ARCHITECTURAL FEATURE MATRIX (TAXONOMY)</span>
-                            <span className="badge badge-blue" style={{ fontSize: 10 }}>Section 2 Related Work</span>
-                          </div>
-                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                            Click any badge to toggle: Supported (&#10003;) &#10142; Limited (~) &#10142; No (&#10005;)
-                          </span>
-                        </div>
-                      </td>
-                    </tr>
-
-                    {allCriteria.map((criterion) => (
-                      <tr key={criterion.id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                        <td
-                          style={{
-                            position: 'sticky',
-                            left: 0,
-                            background: 'var(--bg-card)',
-                            zIndex: 1,
-                            borderRight: '1px solid var(--border-subtle)',
-                            verticalAlign: 'middle',
-                            padding: '10px 16px',
-                          }}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                            <strong style={{ fontSize: 12, color: 'var(--text-primary)' }}>{criterion.label}</strong>
-                            {criterion.id.startsWith('custom_') || !['multimodal', 'zero_shot', 'training_free', 'real_time', 'open_source', 'compute_disclosed', 'ablation_verified', 'sota_benchmarked'].includes(criterion.id) ? (
-                              <button
-                                type="button"
-                                onClick={() => setCustomCriteria((prev) => prev.filter((c) => c.id !== criterion.id))}
-                                style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 0 }}
-                                title="Delete criterion"
-                              >
-                                <X size={12} />
-                              </button>
-                            ) : null}
-                          </div>
-                          <p style={{ fontSize: 10.5, color: 'var(--text-muted)', margin: '2px 0 0 0' }}>
-                            {criterion.tooltip}
-                          </p>
-                        </td>
-
-                        {papersToDisplay.map((p, i) => {
-                          const status = getFeatureStatus(p, criterion.id);
-                          return (
-                            <td
-                              key={i}
-                              style={{
-                                verticalAlign: 'middle',
-                                textAlign: 'center',
-                                padding: '10px 16px',
-                                borderRight: '1px solid var(--border-subtle)',
-                                background: p.isOurs ? 'rgba(37, 99, 235, 0.03)' : 'transparent',
-                              }}
-                            >
-                              <button
-                                type="button"
-                                onClick={() => toggleFeatureStatus(p, criterion.id)}
-                                style={{
-                                  border: 'none',
-                                  background: 'transparent',
-                                  cursor: 'pointer',
-                                  padding: 0,
-                                }}
-                                title="Click to cycle status"
-                              >
-                                {status === 'present' ? (
-                                  <span
-                                    className="badge badge-emerald"
-                                    style={{
-                                      fontSize: 11,
-                                      fontWeight: p.isOurs ? 700 : 600,
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      gap: 4,
-                                      padding: '4px 10px',
-                                    }}
-                                  >
-                                    <Check size={12} strokeWidth={2.5} />
-                                    <span>Supported</span>
-                                  </span>
-                                ) : status === 'partial' ? (
-                                  <span
-                                    className="badge badge-amber"
-                                    style={{
-                                      fontSize: 11,
-                                      fontWeight: 500,
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      gap: 4,
-                                      padding: '4px 10px',
-                                    }}
-                                  >
-                                    <Minus size={12} strokeWidth={2.5} />
-                                    <span>Limited</span>
-                                  </span>
-                                ) : (
-                                  <span
-                                    className="badge badge-gray"
-                                    style={{
-                                      fontSize: 11,
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      gap: 4,
-                                      padding: '4px 10px',
-                                    }}
-                                  >
-                                    <X size={12} />
-                                    <span>No</span>
-                                  </span>
-                                )}
-                              </button>
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
-                  </>
-                )}
-              {/* ============================================================ */}
-              {/* DIMENSION 1: GROUNDED RESEARCH GAPS                          */}
-              {/* ============================================================ */}
-              {showDimension('gaps') && (
-                <>
-                  <tr style={{ background: 'var(--bg-secondary)', borderTop: '1px solid var(--border-subtle)' }}>
-                    <td
-                      colSpan={papersToDisplay.length + 1}
-                      style={{ padding: '7px 16px', fontSize: 11.5, fontWeight: 700, color: 'var(--text-primary)' }}
-                    >
-                      GROUNDED RESEARCH GAPS & LIMITATIONS
-                    </td>
-                  </tr>
-
-                  {/* Identified Gaps Row */}
-                  <tr>
-                    <td
-                      style={{
-                        position: 'sticky',
-                        left: 0,
-                        background: 'var(--bg-card)',
-                        zIndex: 1,
-                        borderRight: '1px solid var(--border-subtle)',
-                        verticalAlign: 'top',
-                        padding: '12px 16px',
-                      }}
-                    >
-                      <strong style={{ fontSize: 12 }}>Identified Research Gaps</strong>
-                      <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '3px 0 0 0' }}>
-                        Methodological bottlenecks & bounds
-                      </p>
-                    </td>
-
-                    {papersToDisplay.map((p, i) => {
-                      const gaps = p.research_gaps || [];
-                      return (
-                        <td
-                          key={i}
-                          style={{
-                            verticalAlign: 'top',
-                            padding: '12px 16px',
-                            borderRight: '1px solid var(--border-subtle)',
-                          }}
-                        >
-                          {gaps.length > 0 ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                              {gaps.map((gap, gIdx) => (
-                                <div
-                                  key={gIdx}
-                                  style={{
-                                    background: 'var(--bg-secondary)',
-                                    border: '1px solid var(--border-subtle)',
-                                    borderRadius: 'var(--radius-xs)',
-                                    padding: '8px 10px',
-                                    fontSize: 11.5,
-                                  }}
-                                >
-                                  <div
-                                    style={{
-                                      display: 'flex',
-                                      justifyContent: 'space-between',
-                                      alignItems: 'center',
-                                      marginBottom: 4,
-                                    }}
-                                  >
-                                    <strong style={{ color: 'var(--text-primary)', fontSize: 11.5 }}>
-                                      {gap.title}
-                                    </strong>
-                                    <span
-                                      className={`badge badge-${
-                                        gap.category === 'compute_bottleneck'
-                                          ? 'amber'
-                                          : gap.category === 'ood_generalization'
-                                          ? 'red'
-                                          : gap.category === 'theoretical_bound'
-                                          ? 'blue'
-                                          : 'purple'
-                                      }`}
-                                      style={{ fontSize: 9.5 }}
-                                    >
-                                      {gap.category ? gap.category.replace(/_/g, ' ') : 'Gap'}
-                                    </span>
-                                  </div>
-
-                                  <p style={{ margin: '0 0 5px 0', color: 'var(--text-secondary)', lineHeight: 1.35 }}>
-                                    {gap.description}
-                                  </p>
-
-                                  {gap.proposed_direction && (
-                                    <div
-                                      style={{
-                                        fontSize: 11,
-                                        color: 'var(--accent-primary, #2563eb)',
-                                        borderTop: '1px dashed var(--border-subtle)',
-                                        paddingTop: 4,
-                                        marginTop: 4,
-                                      }}
-                                    >
-                                      <strong>Direction:</strong> {gap.proposed_direction}
-                                    </div>
-                                  )}
-
-                                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        navigator.clipboard.writeText(
-                                          `Research Gap in ${p.title}:\nTitle: ${gap.title}\nCategory: ${gap.category}\nDescription: ${gap.description}\nProposed Direction: ${gap.proposed_direction || 'N/A'}`
-                                        );
-                                        setCopiedGapId(`${p.id}-${gIdx}`);
-                                        setTimeout(() => setCopiedGapId(null), 2000);
-                                      }}
-                                      className="btn btn-secondary btn-sm"
-                                      style={{ fontSize: 10, padding: '1px 5px', display: 'inline-flex', alignItems: 'center', gap: 3 }}
-                                    >
-                                      {copiedGapId === `${p.id}-${gIdx}` ? <CheckCircle2 size={10} /> : <Copy size={10} />}
-                                      <span>{copiedGapId === `${p.id}-${gIdx}` ? 'Copied' : 'Copy'}</span>
-                                    </button>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <div style={{ color: 'var(--text-muted)', fontSize: 11.5, fontStyle: 'italic' }}>
-                              No formal gaps flagged. Click "Audit Gaps" above to extract.
-                            </div>
-                          )}
-                        </td>
-                      );
-                    })}
-                  </tr>
-
-                  {/* Methodological Limitations Row */}
-                  <tr>
-                    <td
-                      style={{
-                        position: 'sticky',
-                        left: 0,
-                        background: 'var(--bg-card)',
-                        zIndex: 1,
-                        borderRight: '1px solid var(--border-subtle)',
-                        verticalAlign: 'top',
-                        padding: '10px 16px',
-                      }}
-                    >
-                      <strong style={{ fontSize: 12 }}>Author Limitations</strong>
-                      <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '3px 0 0 0' }}>
-                        From paper text
-                      </p>
-                    </td>
-                    {papersToDisplay.map((p, i) => (
-                      <td
-                        key={i}
-                        style={{
-                          verticalAlign: 'top',
-                          padding: '10px 16px',
-                          borderRight: '1px solid var(--border-subtle)',
-                          fontSize: 11.5,
-                          color: 'var(--text-secondary)',
-                          lineHeight: 1.4,
-                        }}
-                      >
-                        {(p.limitations && p.limitations.length > 0) ? (
-                          <ul style={{ margin: 0, paddingLeft: 16 }}>
-                            {p.limitations.map((lim, lIdx) => (
-                              <li key={lIdx} style={{ marginBottom: 4 }}>{lim}</li>
-                            ))}
-                          </ul>
-                        ) : (
-                          <span style={{ color: 'var(--text-muted)' }}>Extracted from canonical literature.</span>
-                        )}
-                      </td>
-                    ))}
-                  </tr>
-
-                  {/* Open Questions Row */}
-                  <tr>
-                    <td
-                      style={{
-                        position: 'sticky',
-                        left: 0,
-                        background: 'var(--bg-card)',
-                        zIndex: 1,
-                        borderRight: '1px solid var(--border-subtle)',
-                        verticalAlign: 'top',
-                        padding: '10px 16px',
-                      }}
-                    >
-                      <strong style={{ fontSize: 12 }}>Open Questions</strong>
-                      <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '3px 0 0 0' }}>
-                        Unresolved problems
-                      </p>
-                    </td>
-                    {papersToDisplay.map((p, i) => (
-                      <td
-                        key={i}
-                        style={{
-                          verticalAlign: 'top',
-                          padding: '10px 16px',
-                          borderRight: '1px solid var(--border-subtle)',
-                          fontSize: 11.5,
-                          color: 'var(--text-secondary)',
-                          lineHeight: 1.4,
-                        }}
-                      >
-                        {(p.open_questions && p.open_questions.length > 0) ? (
-                          <ul style={{ margin: 0, paddingLeft: 16 }}>
-                            {p.open_questions.map((oq, oIdx) => (
-                              <li key={oIdx} style={{ marginBottom: 4 }}>{oq}</li>
-                            ))}
-                          </ul>
-                        ) : (
-                          <span style={{ color: 'var(--text-muted)' }}>No unresolved questions recorded.</span>
-                        )}
-                      </td>
-                    ))}
-                  </tr>
-                </>
+            <tbody>
+              {/* Feature Matrix / Taxonomy Section */}
+              {(activeTab === 'taxonomy' || activeTab === 'all') && (
+                <TaxonomySection
+                  criteria={allCriteria}
+                  papers={papersToDisplay}
+                  getFeatureStatus={getFeatureStatus}
+                  toggleFeatureStatus={toggleFeatureStatus}
+                  onAddCriterion={handleAddCriterion}
+                  newCriterionInput={newCriterionInput}
+                  setNewCriterionInput={setNewCriterionInput}
+                  onDeleteCriterion={handleDeleteCriterion}
+                />
               )}
 
-              {/* ============================================================ */}
-              {/* DIMENSION 2: METHODOLOGY & PROBLEM                           */}
-              {/* ============================================================ */}
-              {showDimension('methodology') && (
-                <>
-                  <tr style={{ background: 'var(--bg-secondary)', borderTop: '1px solid var(--border-subtle)' }}>
-                    <td
-                      colSpan={papersToDisplay.length + 1}
-                      style={{ padding: '7px 16px', fontSize: 11.5, fontWeight: 700, color: 'var(--text-primary)' }}
-                    >
-                      METHODOLOGY & ARCHITECTURE
-                    </td>
-                  </tr>
-                  <tr>
-                    <td
-                      style={{
-                        position: 'sticky',
-                        left: 0,
-                        background: 'var(--bg-card)',
-                        zIndex: 1,
-                        borderRight: '1px solid var(--border-subtle)',
-                        verticalAlign: 'top',
-                        padding: '10px 16px',
-                      }}
-                    >
-                      <strong style={{ fontSize: 12 }}>Core Mechanics</strong>
-                    </td>
-                    {papersToDisplay.map((p, i) => (
-                      <td
-                        key={i}
-                        style={{
-                          verticalAlign: 'top',
-                          padding: '10px 16px',
-                          borderRight: '1px solid var(--border-subtle)',
-                          fontSize: 11.5,
-                          lineHeight: 1.4,
-                          color: 'var(--text-secondary)',
-                        }}
-                      >
-                        {p.methodology
-                          ? p.methodology.slice(0, 220) + '...'
-                          : p.abstract
-                          ? p.abstract.slice(0, 180) + '...'
-                          : 'Extracted from canonical literature.'}
-                      </td>
-                    ))}
-                  </tr>
-                  <tr>
-                    <td
-                      style={{
-                        position: 'sticky',
-                        left: 0,
-                        background: 'var(--bg-card)',
-                        zIndex: 1,
-                        borderRight: '1px solid var(--border-subtle)',
-                        verticalAlign: 'middle',
-                        padding: '10px 16px',
-                      }}
-                    >
-                      <strong style={{ fontSize: 12 }}>Ablation Studies</strong>
-                    </td>
-                    {papersToDisplay.map((p, i) => (
-                      <td
-                        key={i}
-                        style={{
-                          verticalAlign: 'middle',
-                          padding: '10px 16px',
-                          borderRight: '1px solid var(--border-subtle)',
-                        }}
-                      >
-                        {p.has_ablation ? (
-                          <span className="badge badge-emerald" style={{ fontSize: 11 }}>
-                            Verified Ablations Included
-                          </span>
-                        ) : (
-                          <span className="badge badge-amber" style={{ fontSize: 11 }}>
-                            No Formal Ablation
-                          </span>
-                        )}
-                      </td>
-                    ))}
-                  </tr>
-                  <tr>
-                    <td
-                      style={{
-                        position: 'sticky',
-                        left: 0,
-                        background: 'var(--bg-card)',
-                        zIndex: 1,
-                        borderRight: '1px solid var(--border-subtle)',
-                        verticalAlign: 'middle',
-                        padding: '10px 16px',
-                      }}
-                    >
-                      <strong style={{ fontSize: 12 }}>Baseline Comparison</strong>
-                    </td>
-                    {papersToDisplay.map((p, i) => (
-                      <td
-                        key={i}
-                        style={{
-                          verticalAlign: 'middle',
-                          padding: '10px 16px',
-                          borderRight: '1px solid var(--border-subtle)',
-                        }}
-                      >
-                        {p.has_baselines ? (
-                          <span className="badge badge-emerald" style={{ fontSize: 11 }}>
-                            Evaluated vs Baselines
-                          </span>
-                        ) : (
-                          <span className="badge badge-gray" style={{ fontSize: 11 }}>
-                            Limited Baselines
-                          </span>
-                        )}
-                      </td>
-                    ))}
-                  </tr>
-                </>
-              )}
-
-              {/* ============================================================ */}
-              {/* DIMENSION 3: EMPIRICAL BENCHMARKS                            */}
-              {/* ============================================================ */}
-              {showDimension('benchmarks') && (
-                <>
-                  <tr style={{ background: 'var(--bg-secondary)', borderTop: '1px solid var(--border-subtle)' }}>
-                    <td
-                      colSpan={papersToDisplay.length + 1}
-                      style={{ padding: '7px 16px', fontSize: 11.5, fontWeight: 700, color: 'var(--text-primary)' }}
-                    >
-                      EMPIRICAL BENCHMARKS (Papers with Code)
-                    </td>
-                  </tr>
-                  <tr>
-                    <td
-                      style={{
-                        position: 'sticky',
-                        left: 0,
-                        background: 'var(--bg-card)',
-                        zIndex: 1,
-                        borderRight: '1px solid var(--border-subtle)',
-                        verticalAlign: 'top',
-                        padding: '10px 16px',
-                      }}
-                    >
-                      <strong style={{ fontSize: 12 }}>Evaluated Tasks</strong>
-                      <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '3px 0 0 0' }}>
-                        Empirical metrics & test suites
-                      </p>
-                    </td>
-                    {papersToDisplay.map((p, i) => {
-                      const bmList = p.benchmarks || [];
-                      return (
-                        <td
-                          key={i}
-                          style={{
-                            verticalAlign: 'top',
-                            padding: '10px 16px',
-                            borderRight: '1px solid var(--border-subtle)',
-                          }}
-                        >
-                          {bmList.length > 0 ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                              {bmList.slice(0, 4).map((bm, bIdx) => (
-                                <div
-                                  key={bIdx}
-                                  style={{
-                                    background: 'var(--bg-secondary)',
-                                    border: '1px solid var(--border-subtle)',
-                                    borderRadius: 'var(--radius-xs)',
-                                    padding: '5px 8px',
-                                    fontSize: 11,
-                                  }}
-                                >
-                                  <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-                                    {bm.task || 'Evaluation Task'}
-                                  </div>
-                                  <div style={{ color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between' }}>
-                                    <span>{bm.dataset}</span>
-                                    <strong style={{ color: 'var(--accent-primary, #2563eb)' }}>
-                                      {bm.metric} = {bm.value}
-                                    </strong>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                              Standard empirical datasets.
-                            </span>
-                          )}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                  <tr>
-                    <td
-                      style={{
-                        position: 'sticky',
-                        left: 0,
-                        background: 'var(--bg-card)',
-                        zIndex: 1,
-                        borderRight: '1px solid var(--border-subtle)',
-                        verticalAlign: 'middle',
-                        padding: '10px 16px',
-                      }}
-                    >
-                      <strong style={{ fontSize: 12 }}>Hardware & Compute</strong>
-                    </td>
-                    {papersToDisplay.map((p, i) => (
-                      <td
-                        key={i}
-                        style={{
-                          verticalAlign: 'middle',
-                          padding: '10px 16px',
-                          borderRight: '1px solid var(--border-subtle)',
-                        }}
-                      >
-                        {p.has_compute_budget ? (
-                          <span className="badge badge-emerald" style={{ fontSize: 10.5 }}>
-                            {p.compute_details || 'Hardware Disclosed'}
-                          </span>
-                        ) : (
-                          <span className="badge badge-amber" style={{ fontSize: 10.5 }}>
-                            Undisclosed GPU/TPU hours
-                          </span>
-                        )}
-                      </td>
-                    ))}
-                  </tr>
-                </>
-              )}
-
-              {/* ============================================================ */}
-              {/* DIMENSION 4: CODE & REPRODUCIBILITY                           */}
-              {/* ============================================================ */}
-              {showDimension('code') && (
-                <>
-                  <tr style={{ background: 'var(--bg-secondary)', borderTop: '1px solid var(--border-subtle)' }}>
-                    <td
-                      colSpan={papersToDisplay.length + 1}
-                      style={{ padding: '7px 16px', fontSize: 11.5, fontWeight: 700, color: 'var(--text-primary)' }}
-                    >
-                      CODE & REPRODUCIBILITY
-                    </td>
-                  </tr>
-                  <tr>
-                    <td
-                      style={{
-                        position: 'sticky',
-                        left: 0,
-                        background: 'var(--bg-card)',
-                        zIndex: 1,
-                        borderRight: '1px solid var(--border-subtle)',
-                        verticalAlign: 'middle',
-                        padding: '10px 16px',
-                      }}
-                    >
-                      <strong style={{ fontSize: 12 }}>Repository</strong>
-                    </td>
-                    {papersToDisplay.map((p, i) => {
-                      const repoUrl = p.code_url || (p.code_repositories && p.code_repositories[0]?.url);
-                      const stars = p.code_repositories && p.code_repositories[0]?.stars;
-                      const framework = p.code_repositories && p.code_repositories[0]?.framework;
-                      return (
-                        <td
-                          key={i}
-                          style={{
-                            verticalAlign: 'middle',
-                            padding: '10px 16px',
-                            borderRight: '1px solid var(--border-subtle)',
-                          }}
-                        >
-                          {repoUrl ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                              <a
-                                href={repoUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="btn btn-secondary btn-sm"
-                                style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, width: 'fit-content' }}
-                              >
-                                <ExternalLink size={11} />
-                                <span>GitHub Repo</span>
-                              </a>
-                              <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>
-                                {stars ? `${stars.toLocaleString()} stars` : ''} {framework ? `• ${framework}` : ''}
-                              </div>
-                            </div>
-                          ) : (
-                            <span className="badge badge-gray" style={{ fontSize: 10.5 }}>
-                              No public code detected
-                            </span>
-                          )}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                </>
-              )}
-
-              {/* ============================================================ */}
-              {/* DIMENSION 5: RIGOR & PAPERRANK                               */}
-              {/* ============================================================ */}
-              {showDimension('rigor') && (
-                <>
-                  <tr style={{ background: 'var(--bg-secondary)', borderTop: '1px solid var(--border-subtle)' }}>
-                    <td
-                      colSpan={papersToDisplay.length + 1}
-                      style={{ padding: '7px 16px', fontSize: 11.5, fontWeight: 700, color: 'var(--text-primary)' }}
-                    >
-                      RIGOR & SCIENTIFIC PAPERRANK
-                    </td>
-                  </tr>
-                  <tr>
-                    <td
-                      style={{
-                        position: 'sticky',
-                        left: 0,
-                        background: 'var(--bg-card)',
-                        zIndex: 1,
-                        borderRight: '1px solid var(--border-subtle)',
-                        verticalAlign: 'middle',
-                        padding: '10px 16px',
-                      }}
-                    >
-                      <strong style={{ fontSize: 12 }}>PaperRank Score</strong>
-                      <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '3px 0 0 0' }}>
-                        6-factor rigor evaluation
-                      </p>
-                    </td>
-                    {papersToDisplay.map((p, i) => (
-                      <td
-                        key={i}
-                        style={{
-                          verticalAlign: 'middle',
-                          padding: '10px 16px',
-                          borderRight: '1px solid var(--border-subtle)',
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span className="badge badge-blue" style={{ fontSize: 12, fontWeight: 700 }}>
-                            {p.score ? `${p.score.toFixed(1)}/100` : p.citations ? `${p.citations.toLocaleString()} Cites` : 'Indexed'}
-                          </span>
-                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                            {p.citations ? `${p.citations.toLocaleString()} Citations` : 'High Rigor'}
-                          </span>
-                        </div>
-                      </td>
-                    ))}
-                  </tr>
-                  <tr>
-                    <td
-                      style={{
-                        position: 'sticky',
-                        left: 0,
-                        background: 'var(--bg-card)',
-                        zIndex: 1,
-                        borderRight: '1px solid var(--border-subtle)',
-                        verticalAlign: 'top',
-                        padding: '10px 16px',
-                      }}
-                    >
-                      <strong style={{ fontSize: 12 }}>Methodological Verdict</strong>
-                    </td>
-                    {papersToDisplay.map((p, i) => (
-                      <td
-                        key={i}
-                        style={{
-                          verticalAlign: 'top',
-                          padding: '10px 16px',
-                          borderRight: '1px solid var(--border-subtle)',
-                          fontSize: 11.5,
-                          color: 'var(--text-secondary)',
-                          lineHeight: 1.35,
-                        }}
-                      >
-                        {p.verdict || 'Promising research direction with empirical validation against established baselines.'}
-                      </td>
-                    ))}
-                  </tr>
-                </>
+              {/* Scientific Rows: Methodology, Code, Gaps, Benchmarks */}
+              {activeTab !== 'taxonomy' && (
+                <ScientificRows
+                  showTab={activeTab}
+                  papers={papersToDisplay}
+                  copiedGapId={copiedGapId}
+                  onCopyGap={handleCopyGap}
+                />
               )}
             </tbody>
           </table>
         </div>
-        </>
       ) : (
-        /* Empty State */
+        /* Clean Empty State */
         <div
           style={{
             padding: 56,
@@ -2033,7 +637,7 @@ export default function PaperComparisonView() {
             No Papers Selected for Comparison
           </h3>
           <p style={{ fontSize: 12.5, margin: '0 auto 20px auto', maxWidth: 460, lineHeight: 1.5 }}>
-            Stage papers using the input box above, pick papers from search results, or load a quick preset baseline to immediately inspect side-by-side research gaps.
+            Stage papers using the input box above, pick papers from search results, or load a quick preset baseline to immediately inspect side-by-side features.
           </p>
           <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
             <button
