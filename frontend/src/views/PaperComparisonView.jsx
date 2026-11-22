@@ -27,6 +27,7 @@ import {
   CheckSquare,
   Tag,
   Table,
+  Network,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
@@ -583,8 +584,27 @@ export default function PaperComparisonView() {
           </p>
         </div>
 
-        {/* Global Matrix Actions */}
+        {/* Global Matrix Actions & Twin View Switcher */}
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 4, background: 'var(--bg-subtle)', padding: 3, borderRadius: 'var(--radius-sm, 6px)', border: '1px solid var(--border-subtle)', marginRight: 4 }}>
+            <button
+              className="btn btn-primary btn-sm"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5 }}
+            >
+              <Columns3 size={13} />
+              <span>Feature Matrix</span>
+            </button>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => navigate('/knowledge-graph')}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5 }}
+              title="Switch to Interactive Knowledge Graph"
+            >
+              <Network size={13} />
+              <span>Knowledge Graph</span>
+            </button>
+          </div>
+
           <button
             className="btn btn-secondary btn-sm"
             onClick={handleExportCSV}

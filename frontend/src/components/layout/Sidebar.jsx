@@ -138,29 +138,29 @@ export default function Sidebar() {
           </div>
         </NavLink>
 
-        {/* 5. Knowledge Graph */}
+        {/* 5. Feature Comparison Matrix (Primary Table) */}
+        <NavLink
+          to="/compare"
+          className={({ isActive }) => `nav-item ${isActive || location.pathname === '/compare' || location.pathname === '/matrix' ? 'active' : ''}`}
+          title="Side-by-Side Multi-Paper Feature Comparison Matrix"
+          onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
+        >
+          <div className="nav-item-left">
+            <Columns3 size={15} />
+            <span>Feature Matrix</span>
+          </div>
+        </NavLink>
+
+        {/* 6. Knowledge Graph (Visual Network) */}
         <NavLink
           to="/knowledge-graph"
           className={({ isActive }) => `nav-item ${isActive && location.pathname === '/knowledge-graph' ? 'active' : ''}`}
-          title="Knowledge Graph"
+          title="Interactive Knowledge Graph"
           onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
         >
           <div className="nav-item-left">
             <Network size={15} />
             <span>Knowledge Graph</span>
-          </div>
-        </NavLink>
-
-        {/* 5b. Side-by-Side Multi-Paper Comparison Matrix */}
-        <NavLink
-          to="/compare"
-          className={({ isActive }) => `nav-item ${isActive || location.pathname === '/compare' || location.pathname === '/matrix' ? 'active' : ''}`}
-          title="Side-by-Side Multi-Paper Comparison Matrix"
-          onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
-        >
-          <div className="nav-item-left">
-            <Columns3 size={15} />
-            <span>Comparison Matrix</span>
           </div>
         </NavLink>
 

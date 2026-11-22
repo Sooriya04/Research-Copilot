@@ -1892,23 +1892,26 @@ export default function KnowledgeGraphView() {
             )}
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button
-            className={`btn btn-secondary btn-sm ${graphMode === 'graph' ? 'btn-primary' : ''}`}
-            onClick={() => setGraphMode('graph')}
-            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
-          >
-            <NetworkIcon size={13} />
-            <span>Graph Canvas</span>
-          </button>
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={() => navigate('/compare')}
-            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
-          >
-            <Columns3 size={13} />
-            <span>Comparison Matrix ({activeComparisonPapers.length})</span>
-          </button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 4, background: 'var(--bg-subtle)', padding: 3, borderRadius: 'var(--radius-sm, 6px)', border: '1px solid var(--border-subtle)', marginRight: 4 }}>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => navigate('/compare')}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5 }}
+              title="Open Default Feature Comparison Table"
+            >
+              <Columns3 size={13} />
+              <span>Feature Matrix {activeComparisonPapers.length > 0 ? `(${activeComparisonPapers.length})` : ''}</span>
+            </button>
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={() => setGraphMode('graph')}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5 }}
+            >
+              <NetworkIcon size={13} />
+              <span>Knowledge Graph</span>
+            </button>
+          </div>
           {graphMode === 'graph' && (
             <>
               <select
