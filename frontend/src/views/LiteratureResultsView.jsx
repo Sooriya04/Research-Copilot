@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
   Search,
   ArrowLeft,
@@ -9,15 +9,12 @@ import {
   FileText,
   Network,
   ExternalLink,
-  Sparkles,
-  Info,
-  X,
-  SlidersHorizontal,
   Plus,
+  Columns3,
+  X,
   Code,
-  Database,
-  Layers,
-  Award,
+  FolderKanban,
+  CheckCircle2,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
@@ -28,30 +25,111 @@ export default function LiteratureResultsView() {
     searchResults: results,
     searchLoading,
     searchError,
+    sourceCounts,
     addedToGraphPaperIds,
     setAddedToGraphPaperIds,
     setActiveReaderPaper,
     addComparisonPaper,
     comparisonPapers,
-    openPaperModal,
     activeWorkspace,
   } = useApp();
 
+  // Filters & sorting
   const [filterTerm, setFilterTerm] = useState('');
   const [sourceFilter, setSourceFilter] = useState('all');
   const [onlyOpenAccess, setOnlyOpenAccess] = useState(false);
-  const [onlyInGraph, setOnlyInGraph] = useState(false);
-  const [sortBy, setSortBy] = useState('rank'); // 'rank' | 'relevance' | 'citations' | 'year'
-  const [expandedAbstracts, setExpandedAbstracts] = useState({});
+  const [onlyCode, setOnlyCode] = useState(false);
+  const [yearFilter, setYearFilter] = useState('all');
+  const [sortBy, setSortBy] = useState('relevance'); // 'relevance' | 'citations' | 'year'
+
+  // Pagination
+  const [visibleCount, setVisibleCount] = useState(15);
   const [copiedBibId, setCopiedBibId] = useState(null);
+  const [workspaceNotice, setWorkspaceNotice] = useState(null);
   const [ingestedMap, setIngestedMap] = useState({});
 
-  const toggleAbstract = (pId) => {
-    setExpandedAbstracts(prev => ({ ...prev, [pId]: !prev[pId] }));
+  const showToast = (msg) => {
+    setWorkspaceNotice(msg);
+    setTimeout(() => setWorkspaceNotice(null), 3000);
   };
 
+  // Distinct sources among results
+  const availableSources = useMemo(() => {
+    const s = new Set();
+    results.forEach((p) => {
+      if (p.primary_source) s.add(p.primary_source.toLowerCase());
+    });
+    return Array.from(s);
+  }, [results]);
+
+  // Distinct years among results
+  const availableYears = useMemo(() => {
+    const y = new Set();
+    results.forEach((p) => {
+      if (p.year) y.add(p.year);
+    });
+    return Array.from(y).sort((a, b) => b - a);
+  }, [results]);
+
+  // Filtered & sorted papers
+  const filteredPapers = useMemo(() => {
+    let list = [...results];
+
+    // Source filter
+    if (sourceFilter !== 'all') {
+      list = list.filter((p) => (p.primary_source || '').toLowerCase() === sourceFilter.toLowerCase());
+    }
+
+    // Open Access filter
+    if (onlyOpenAccess) {
+      list = list.filter((p) => p.is_open_access || !!p.pdf_url);
+    }
+
+    // Code available filter
+    if (onlyCode) {
+      list = list.filter((p) => p.code_url || (p.code_repositories && p.code_repositories.length > 0) || p.checklist?.has_code_repo);
+    }
+
+    // Year filter
+    if (yearFilter !== 'all') {
+      list = list.filter((p) => String(p.year) === String(yearFilter));
+    }
+
+    // Text search filter
+    if (filterTerm.trim()) {
+      const q = filterTerm.toLowerCase().trim();
+      list = list.filter((p) => {
+        const titleMatch = (p.title || '').toLowerCase().includes(q);
+        const absMatch = (p.abstract || '').toLowerCase().includes(q);
+        const authorMatch = (p.authors || []).some((a) => {
+          const name = typeof a === 'string' ? a : a.name || '';
+          return name.toLowerCase().includes(q);
+        });
+        return titleMatch || absMatch || authorMatch;
+      });
+    }
+
+    // Sorting
+    if (sortBy === 'citations') {
+      list.sort((a, b) => (b.citation_count || 0) - (a.citation_count || 0));
+    } else if (sortBy === 'year') {
+      list.sort((a, b) => (b.year || 0) - (a.year || 0));
+    } else {
+      // Relevance (default)
+      list.sort((a, b) => (b.score || 0) - (a.score || 0));
+    }
+
+    return list;
+  }, [results, sourceFilter, onlyOpenAccess, onlyCode, yearFilter, filterTerm, sortBy]);
+
+  // Paginated slice
+  const displayedPapers = useMemo(() => {
+    return filteredPapers.slice(0, visibleCount);
+  }, [filteredPapers, visibleCount]);
+
+  // Copy BibTeX
   const copyBibTeX = (paper) => {
-    const paperId = paper.id || paper.arxiv_id || 'paper2024';
+    const paperId = paper.id || paper.arxiv_id || 'paper';
     const cleanKey = paperId.replace(/[^a-zA-Z0-9]/g, '');
     const firstAuthor = paper.authors && paper.authors.length > 0
       ? (typeof paper.authors[0] === 'string' ? paper.authors[0] : paper.authors[0].name || 'Author')
@@ -60,188 +138,153 @@ export default function LiteratureResultsView() {
   title={${paper.title}},
   author={${firstAuthor} and others},
   journal={Research Copilot Knowledge Base},
-  year={${paper.year || 2024}}
+  year={${paper.year || new Date().getFullYear()}}
 }`;
     navigator.clipboard.writeText(bibtex);
     setCopiedBibId(paperId);
     setTimeout(() => setCopiedBibId(null), 2000);
   };
 
-  const openInReader = (paper) => {
-    setActiveReaderPaper(paper);
-    navigate('/pdf-inspector');
-  };
-
+  // Toggle Knowledge Graph Ingestion
   const handleToggleGraph = async (paper) => {
     const pId = paper.id || paper.arxiv_id || paper.canonical_id || `paper-${paper.title?.slice(0, 15)}`;
-    const currentTopic = searchQuery || 'General Research Literature';
     const isAdded = addedToGraphPaperIds.includes(pId);
-
-    setIngestedMap(prev => ({ ...prev, [pId]: 'loading' }));
+    setIngestedMap((prev) => ({ ...prev, [pId]: 'loading' }));
 
     if (isAdded) {
-      // Un-add / remove paper from knowledge graph
       try {
         await fetch('/api/v1/graph/remove-paper', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ paper_id: pId }),
         });
-        setAddedToGraphPaperIds(prev => prev.filter(id => id !== pId));
-        setIngestedMap(prev => {
+        setAddedToGraphPaperIds((prev) => prev.filter((id) => id !== pId));
+        setIngestedMap((prev) => {
           const next = { ...prev };
           delete next[pId];
           return next;
         });
       } catch {
-        setIngestedMap(prev => ({ ...prev, [pId]: 'error' }));
+        setIngestedMap((prev) => ({ ...prev, [pId]: 'error' }));
       }
     } else {
-      // Ingest / add paper into knowledge graph
       try {
         const res = await fetch('/api/v1/graph/ingest-paper', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            topic: currentTopic,
+            topic: searchQuery || 'Scientific Literature',
             workspace_id: activeWorkspace?.id || null,
             paper_data: {
               id: pId,
               title: paper.title,
               year: paper.year,
-              authors: (paper.authors || []).map(a => (typeof a === 'string' ? a : a.name || String(a))),
+              authors: (paper.authors || []).map((a) => (typeof a === 'string' ? a : a.name || String(a))),
               abstract: paper.abstract || '',
-              topics: paper.topics || [],
               arxiv_id: paper.arxiv_id || (pId.startsWith('arxiv:') ? pId.replace('arxiv:', '') : null),
               doi: paper.doi || null,
               url: paper.url || null,
               primary_source: paper.primary_source || 'unknown',
-              methods: paper.methods || [],
-              datasets: paper.datasets || [],
-              benchmarks: paper.benchmarks || [],
-              openalex_id: paper.openalex_id || null,
               citation_count: paper.citation_count || 0,
-              metrics: paper.citation_count ? { citations: String(paper.citation_count) } : {},
-              claims: [],
-              limitations: [],
-              cited_papers: paper.referenced_works || paper.cited_papers || [],
-              referenced_works: paper.referenced_works || paper.cited_papers || [],
             },
           }),
         });
-
         if (res.ok) {
-          setIngestedMap(prev => ({ ...prev, [pId]: 'done' }));
-          setAddedToGraphPaperIds(prev => (prev.includes(pId) ? prev : [...prev, pId]));
-        } else {
-          setIngestedMap(prev => ({ ...prev, [pId]: 'error' }));
+          setIngestedMap((prev) => ({ ...prev, [pId]: 'done' }));
+          setAddedToGraphPaperIds((prev) => (prev.includes(pId) ? prev : [...prev, pId]));
         }
       } catch {
-        setIngestedMap(prev => ({ ...prev, [pId]: 'error' }));
+        setIngestedMap((prev) => ({ ...prev, [pId]: 'error' }));
       }
     }
   };
 
-  // Distinct sources among results
-  const availableSources = useMemo(() => {
-    const s = new Set();
-    results.forEach(p => {
-      if (p.primary_source) s.add(p.primary_source.toLowerCase());
-    });
-    return Array.from(s);
-  }, [results]);
-
-  // Filtered & sorted papers
-  const filteredPapers = useMemo(() => {
-    let list = [...results];
-
-    if (sourceFilter !== 'all') {
-      list = list.filter(p => (p.primary_source || '').toLowerCase() === sourceFilter.toLowerCase());
+  // Add paper to current workspace
+  const handleAddToWorkspace = (paper) => {
+    if (!activeWorkspace) {
+      showToast('No active workspace selected. Switch workspace from sidebar.');
+      return;
     }
-
-    if (onlyOpenAccess) {
-      list = list.filter(p => p.is_open_access || !!p.pdf_url);
+    const wsKey = `rc_ws_${activeWorkspace.id}_search_results`;
+    try {
+      const existing = JSON.parse(localStorage.getItem(wsKey) || '[]');
+      const pId = paper.id || paper.canonical_id;
+      if (!existing.some((p) => (p.id || p.canonical_id) === pId)) {
+        existing.push(paper);
+        localStorage.setItem(wsKey, JSON.stringify(existing));
+        showToast(`Saved "${paper.title.slice(0, 30)}..." to workspace ${activeWorkspace.title}`);
+      } else {
+        showToast(`Paper already in workspace ${activeWorkspace.title}`);
+      }
+    } catch (e) {
+      showToast('Error saving to workspace');
     }
-
-    if (onlyInGraph) {
-      list = list.filter(p => {
-        const pId = p.id || p.arxiv_id || p.canonical_id;
-        return addedToGraphPaperIds.includes(pId);
-      });
-    }
-
-    if (filterTerm.trim()) {
-      const term = filterTerm.toLowerCase().trim();
-      list = list.filter(p => {
-        const titleMatch = (p.title || '').toLowerCase().includes(term);
-        const abstractMatch = (p.abstract || '').toLowerCase().includes(term);
-        const authorsMatch = (p.authors || []).some(a => {
-          const name = typeof a === 'string' ? a : a.name || '';
-          return name.toLowerCase().includes(term);
-        });
-        const yearMatch = String(p.year || '').includes(term);
-        const sourceMatch = (p.primary_source || '').toLowerCase().includes(term);
-        return titleMatch || abstractMatch || authorsMatch || yearMatch || sourceMatch;
-      });
-    }
-
-    if (sortBy === 'rank') {
-      list.sort((a, b) => (b.score || 0) - (a.score || 0));
-    } else if (sortBy === 'citations') {
-      list.sort((a, b) => (b.citation_count || 0) - (a.citation_count || 0));
-    } else if (sortBy === 'year') {
-      list.sort((a, b) => (b.year || 0) - (a.year || 0));
-    }
-
-    return list;
-  }, [results, filterTerm, sourceFilter, onlyOpenAccess, onlyInGraph, sortBy, addedToGraphPaperIds]);
-
-  const openAccessCount = useMemo(() => {
-    return results.filter(p => p.is_open_access || !!p.pdf_url).length;
-  }, [results]);
-
-  const inGraphCount = useMemo(() => {
-    return results.filter(p => {
-      const pId = p.id || p.arxiv_id || p.canonical_id;
-      return addedToGraphPaperIds.includes(pId);
-    }).length;
-  }, [results, addedToGraphPaperIds]);
+  };
 
   return (
-    <section id="view-search-results" className="view-panel active">
-      {/* Top 2-Page Segmented Navigation */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, borderBottom: '1px solid var(--border-subtle)', paddingBottom: 10 }}>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={() => navigate('/search')}
-            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
-          >
-            <Search size={13} />
-            <span>Search Page</span>
-          </button>
-          <button
-            className="btn btn-primary btn-sm"
-            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
-          >
-            <FileText size={13} />
-            <span>View Founded Papers</span>
-          </button>
+    <div className="view-container" style={{ padding: '24px 32px', maxWidth: 1400, margin: '0 auto' }}>
+      {/* ── 1. Top Header ── */}
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: 16,
+          marginBottom: 18,
+          paddingBottom: 14,
+          borderBottom: '1px solid var(--border-subtle)',
+        }}
+      >
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => navigate('/search')}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px', fontSize: 11.5 }}
+              title="Return to Literature Search"
+            >
+              <ArrowLeft size={13} />
+              <span>Modify Query</span>
+            </button>
+            <h1 style={{ fontSize: 18, fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
+              Search Results
+            </h1>
+            {searchQuery && (
+              <span className="badge badge-neutral" style={{ fontSize: 11 }}>
+                Query: "{searchQuery}"
+              </span>
+            )}
+            <span className="badge badge-blue" style={{ fontSize: 11, fontWeight: 600 }}>
+              {filteredPapers.length} {filteredPapers.length === 1 ? 'Paper' : 'Papers'}
+            </span>
+          </div>
+          <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', margin: 0 }}>
+            {results.length > 0
+              ? `Displaying deduplicated scientific results across ${Object.keys(sourceCounts || {}).length || 'connected'} database sources.`
+              : 'Execute a search to view retrieved scientific literature.'}
+          </p>
         </div>
 
-        <div style={{ display: 'flex', gap: 8 }}>
+        {/* Header Actions */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <button
+            type="button"
             className="btn btn-secondary btn-sm"
-            onClick={() => navigate('/search')}
-            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+            onClick={() => navigate('/compare')}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5 }}
+            title="Open Comparison Matrix"
           >
-            <ArrowLeft size={13} />
-            <span>New Search</span>
+            <Columns3 size={13} />
+            <span>Comparison Matrix ({comparisonPapers.length})</span>
           </button>
           <button
+            type="button"
             className="btn btn-secondary btn-sm"
             onClick={() => navigate('/knowledge-graph')}
-            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5 }}
+            title="Open Knowledge Graph"
           >
             <Network size={13} />
             <span>Knowledge Graph</span>
@@ -249,405 +292,353 @@ export default function LiteratureResultsView() {
         </div>
       </div>
 
-      {/* Main Header */}
-      <div className="panel-header" style={{ marginBottom: 14 }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 4 }}>
-            <h1 style={{ margin: 0, fontSize: 20 }}>Founded Research Papers</h1>
-            {searchQuery && (
-              <span className="badge badge-neutral" style={{ fontSize: 12 }}>
-                Topic: {searchQuery}
-              </span>
-            )}
-            <span className="badge badge-blue" style={{ fontSize: 12 }}>
-              {filteredPapers.length} of {results.length} papers
-            </span>
-          </div>
-          <p className="panel-subtitle">
-            Browse and filter papers retrieved across arXiv, OpenAlex, Semantic Scholar, Crossref, and PubMed.
-          </p>
+      {/* Toast Notice */}
+      {workspaceNotice && (
+        <div
+          style={{
+            padding: '8px 14px',
+            background: 'var(--accent-emerald, #10b981)',
+            color: '#fff',
+            borderRadius: 'var(--radius-sm, 6px)',
+            marginBottom: 14,
+            fontSize: 12,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+          }}
+        >
+          <CheckCircle2 size={13} />
+          <span>{workspaceNotice}</span>
         </div>
-      </div>
+      )}
 
-      {/* IN-PAGE SEARCH & FILTER TOOLBAR (Appears only once papers are found) */}
+      {/* ── 2. Filters & Toolbar ── */}
       {!searchLoading && results.length > 0 && (
-        <div className="card" style={{ marginBottom: 18, padding: '14px 16px' }}>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            {/* Search Input with Search Icon */}
-            <div
-              style={{
-                flex: 1,
-                minWidth: 280,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                background: 'var(--bg-input)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: 'var(--radius-sm)',
-                padding: '0 12px',
-              }}
-            >
-              <Search size={15} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+        <div
+          style={{
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-sm, 6px)',
+            padding: '12px 16px',
+            marginBottom: 18,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12,
+          }}
+        >
+          {/* Top row: search filter & sort */}
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+            <div style={{ position: 'relative', flex: 1, minWidth: 260 }}>
+              <Search
+                size={13}
+                style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}
+              />
               <input
                 type="text"
-                id="filter-founded-papers-input"
                 value={filterTerm}
                 onChange={(e) => setFilterTerm(e.target.value)}
-                placeholder="Search within founded research papers (filter by title, author, keyword, abstract)..."
+                placeholder="Filter results by keyword, title, or author..."
                 style={{
-                  flex: 1,
-                  background: 'transparent',
-                  border: 'none',
-                  outline: 'none',
+                  width: '100%',
+                  fontSize: 12,
+                  padding: '6px 8px 6px 28px',
+                  borderRadius: 'var(--radius-xs, 4px)',
+                  border: '1px solid var(--border-subtle)',
+                  background: 'var(--bg-secondary)',
                   color: 'var(--text-primary)',
-                  fontSize: 13,
-                  padding: '8px 0',
                 }}
               />
               {filterTerm && (
                 <button
+                  type="button"
                   onClick={() => setFilterTerm('')}
-                  style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 0 }}
-                  title="Clear filter"
+                  style={{
+                    position: 'absolute',
+                    right: 8,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    border: 'none',
+                    background: 'none',
+                    padding: 0,
+                    cursor: 'pointer',
+                    color: 'var(--text-muted)',
+                  }}
                 >
-                  <X size={14} />
+                  <X size={12} />
                 </button>
               )}
             </div>
 
             {/* Sort Selector */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Sort:</span>
+              <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>Sort by:</span>
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value)}
                 style={{
-                  padding: '6px 10px',
+                  fontSize: 11.5,
+                  padding: '5px 8px',
+                  borderRadius: 'var(--radius-xs, 4px)',
                   border: '1px solid var(--border-subtle)',
-                  borderRadius: 'var(--radius-sm)',
-                  background: 'var(--bg-input)',
+                  background: 'var(--bg-secondary)',
                   color: 'var(--text-primary)',
-                  fontSize: 12.5,
-                  fontWeight: 600,
+                  cursor: 'pointer',
                 }}
               >
-                <option value="rank">PaperRank Score (Highest)</option>
                 <option value="relevance">Topical Relevance</option>
-                <option value="citations">Citations (High to Low)</option>
+                <option value="citations">Citation Count (High to Low)</option>
                 <option value="year">Publication Year (Newest)</option>
               </select>
             </div>
           </div>
 
-          {/* Filter Chips Row */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--border-subtle)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 11.5, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', marginRight: 4 }}>
-                Filter:
-              </span>
+          {/* Bottom row: Filter Chips */}
+          <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, paddingTop: 10, borderTop: '1px solid var(--border-subtle)' }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+              Filters:
+            </span>
 
+            {/* Source dropdown */}
+            <select
+              value={sourceFilter}
+              onChange={(e) => setSourceFilter(e.target.value)}
+              style={{
+                fontSize: 11,
+                padding: '3px 8px',
+                borderRadius: 'var(--radius-xs, 4px)',
+                border: '1px solid var(--border-subtle)',
+                background: sourceFilter !== 'all' ? 'rgba(37, 99, 235, 0.08)' : 'var(--bg-secondary)',
+                color: sourceFilter !== 'all' ? 'var(--accent-primary, #2563eb)' : 'var(--text-secondary)',
+                fontWeight: sourceFilter !== 'all' ? 600 : 400,
+                cursor: 'pointer',
+              }}
+            >
+              <option value="all">All Sources</option>
+              {availableSources.map((s) => (
+                <option key={s} value={s}>{s.toUpperCase()}</option>
+              ))}
+            </select>
+
+            {/* Year dropdown */}
+            {availableYears.length > 0 && (
+              <select
+                value={yearFilter}
+                onChange={(e) => setYearFilter(e.target.value)}
+                style={{
+                  fontSize: 11,
+                  padding: '3px 8px',
+                  borderRadius: 'var(--radius-xs, 4px)',
+                  border: '1px solid var(--border-subtle)',
+                  background: yearFilter !== 'all' ? 'rgba(37, 99, 235, 0.08)' : 'var(--bg-secondary)',
+                  color: yearFilter !== 'all' ? 'var(--accent-primary, #2563eb)' : 'var(--text-secondary)',
+                  fontWeight: yearFilter !== 'all' ? 600 : 400,
+                  cursor: 'pointer',
+                }}
+              >
+                <option value="all">All Years</option>
+                {availableYears.map((y) => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+            )}
+
+            {/* Open Access Toggle */}
+            <button
+              type="button"
+              onClick={() => setOnlyOpenAccess(!onlyOpenAccess)}
+              style={{
+                fontSize: 11,
+                padding: '3px 10px',
+                borderRadius: 'var(--radius-xs, 4px)',
+                border: `1px solid ${onlyOpenAccess ? 'var(--accent-emerald, #10b981)' : 'var(--border-subtle)'}`,
+                background: onlyOpenAccess ? 'rgba(16, 185, 129, 0.1)' : 'var(--bg-secondary)',
+                color: onlyOpenAccess ? 'var(--accent-emerald, #10b981)' : 'var(--text-secondary)',
+                fontWeight: onlyOpenAccess ? 600 : 400,
+                cursor: 'pointer',
+              }}
+            >
+              {onlyOpenAccess ? '✓ Open Access Only' : 'Open Access'}
+            </button>
+
+            {/* Code Available Toggle */}
+            <button
+              type="button"
+              onClick={() => setOnlyCode(!onlyCode)}
+              style={{
+                fontSize: 11,
+                padding: '3px 10px',
+                borderRadius: 'var(--radius-xs, 4px)',
+                border: `1px solid ${onlyCode ? 'var(--accent-primary, #2563eb)' : 'var(--border-subtle)'}`,
+                background: onlyCode ? 'rgba(37, 99, 235, 0.1)' : 'var(--bg-secondary)',
+                color: onlyCode ? 'var(--accent-primary, #2563eb)' : 'var(--text-secondary)',
+                fontWeight: onlyCode ? 600 : 400,
+                cursor: 'pointer',
+              }}
+            >
+              {onlyCode ? '✓ Public Code Only' : 'Has Code'}
+            </button>
+
+            {(sourceFilter !== 'all' || onlyOpenAccess || onlyCode || yearFilter !== 'all' || filterTerm) && (
               <button
-                className={`btn btn-sm ${sourceFilter === 'all' && !onlyOpenAccess && !onlyInGraph ? 'btn-primary' : 'btn-secondary'}`}
+                type="button"
                 onClick={() => {
                   setSourceFilter('all');
                   setOnlyOpenAccess(false);
-                  setOnlyInGraph(false);
+                  setOnlyCode(false);
+                  setYearFilter('all');
+                  setFilterTerm('');
                 }}
-                style={{ padding: '3px 10px', fontSize: 11.5 }}
+                style={{
+                  border: 'none',
+                  background: 'none',
+                  fontSize: 11,
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer',
+                  padding: '2px 4px',
+                  textDecoration: 'underline',
+                }}
               >
-                All ({results.length})
+                Reset filters
               </button>
-
-              <button
-                className={`btn btn-sm ${onlyOpenAccess ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => setOnlyOpenAccess(prev => !prev)}
-                style={{ padding: '3px 10px', fontSize: 11.5 }}
-              >
-                Open Access ({openAccessCount})
-              </button>
-
-              <button
-                className={`btn btn-sm ${onlyInGraph ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => setOnlyInGraph(prev => !prev)}
-                style={{ padding: '3px 10px', fontSize: 11.5 }}
-              >
-                Added to Graph ({inGraphCount})
-              </button>
-
-              {inGraphCount > 0 && (
-                <button
-                  className="btn btn-primary btn-sm"
-                  onClick={() => navigate('/graph')}
-                  style={{ padding: '3px 10px', fontSize: 11.5, display: 'flex', alignItems: 'center', gap: 4, background: 'var(--accent-primary)', color: '#fff', fontWeight: 600 }}
-                  title="Open Knowledge Graph to build cross-paper relationships with Gemini"
-                >
-                  <Sparkles size={11} />
-                  <span>Build / View AI Graph ({inGraphCount}) &rarr;</span>
-                </button>
-              )}
-
-              {availableSources.map(src => (
-                <button
-                  key={src}
-                  className={`btn btn-sm ${sourceFilter === src ? 'btn-primary' : 'btn-secondary'}`}
-                  onClick={() => setSourceFilter(prev => (prev === src ? 'all' : src))}
-                  style={{ padding: '3px 10px', fontSize: 11.5, textTransform: 'uppercase' }}
-                >
-                  {src}
-                </button>
-              ))}
-            </div>
-
-            {filterTerm && (
-              <span style={{ fontSize: 12, color: 'var(--accent-blue)' }}>
-                Filtering by "{filterTerm}" ({filteredPapers.length} matches)
-              </span>
             )}
           </div>
         </div>
       )}
 
-      {/* Modern Animated Loading Indicator */}
+      {/* ── 3. Loading State ── */}
       {searchLoading && (
-        <div
-          className="card"
-          style={{
-            padding: '52px 32px',
-            textAlign: 'center',
-            color: 'var(--text-muted)',
-            marginBottom: 20,
-            background: 'linear-gradient(135deg, var(--bg-card) 0%, var(--bg-subtle) 100%)',
-            border: '1px solid var(--border-subtle)',
-          }}
-        >
-          <div
-            style={{
-              width: 56,
-              height: 56,
-              borderRadius: '50%',
-              backgroundColor: 'rgba(99, 102, 241, 0.1)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              margin: '0 auto 16px',
-            }}
-          >
-            <Loader2 size={30} className="animate-spin" style={{ color: 'var(--accent-primary)' }} />
-          </div>
-          <h3 style={{ fontSize: 17, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 6 }}>
-            Searching Scientific Literature...
-          </h3>
-          <p style={{ fontSize: 13.5, color: 'var(--text-secondary)', maxWidth: 520, margin: '0 auto 14px', lineHeight: 1.5 }}>
+        <div style={{ padding: 60, textAlign: 'center', background: 'var(--bg-card)', borderRadius: 'var(--radius-sm, 6px)', border: '1px solid var(--border-subtle)' }}>
+          <Loader2 size={32} className="spin-anim" style={{ margin: '0 auto 12px auto', color: 'var(--accent-primary, #2563eb)' }} />
+          <h3 style={{ fontSize: 15, fontWeight: 700, margin: '0 0 6px' }}>Searching Scientific Repositories...</h3>
+          <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: 0 }}>
             Querying arXiv, OpenAlex, Semantic Scholar, Crossref, and PubMed in parallel with automated deduplication.
           </p>
-          <div
-            className="animate-pulse"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 8,
-              fontSize: 12,
-              color: 'var(--accent-primary)',
-              fontWeight: 600,
-              padding: '4px 14px',
-              borderRadius: 'var(--radius-pill)',
-              backgroundColor: 'rgba(99, 102, 241, 0.08)',
-            }}
-          >
-            <span style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: 'currentColor' }} />
-            <span>Fetching real-time records & resolving open-access PDFs...</span>
-          </div>
         </div>
       )}
 
-      {/* Error Notice */}
-      {searchError && (
-        <div className="card" style={{ borderColor: 'var(--accent-rose)', background: 'rgba(244, 63, 94, 0.05)', marginBottom: 16 }}>
-          <p style={{ margin: 0, fontSize: 13, color: 'var(--accent-rose)' }}>
-            {searchError}
-          </p>
+      {/* ── 4. Error State ── */}
+      {searchError && !searchLoading && (
+        <div style={{ padding: '12px 16px', background: 'rgba(239, 68, 68, 0.08)', border: '1px solid var(--accent-red, #ef4444)', color: 'var(--accent-red, #ef4444)', borderRadius: 'var(--radius-sm, 6px)', marginBottom: 16, fontSize: 12.5 }}>
+          {searchError}
         </div>
       )}
 
-      {/* Empty State when no results in session */}
+      {/* ── 5. Empty State (No Search Yet) ── */}
       {!searchLoading && results.length === 0 && (
-        <div className="card" style={{ padding: 60, textAlign: 'center', color: 'var(--text-muted)' }}>
-          <Search size={40} style={{ margin: '0 auto 14px', display: 'block', color: 'var(--border-hover)' }} />
-          <h3 style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6 }}>
-            No Research Papers Loaded Yet
+        <div style={{ padding: 60, textAlign: 'center', background: 'var(--bg-card)', borderRadius: 'var(--radius-sm, 6px)', border: '1px solid var(--border-subtle)', color: 'var(--text-muted)' }}>
+          <Search size={36} style={{ margin: '0 auto 12px auto', color: 'var(--text-muted)' }} />
+          <h3 style={{ fontSize: 15, fontWeight: 700, margin: '0 0 6px', color: 'var(--text-primary)' }}>
+            No Research Papers Loaded
           </h3>
-          <p style={{ fontSize: 13, maxWidth: 440, margin: '0 auto 18px' }}>
-            Run a search on the Literature Search page to discover research papers and import them into this view.
+          <p style={{ fontSize: 12.5, margin: '0 auto 18px', maxWidth: 420, lineHeight: 1.5 }}>
+            Submit a query on the Literature Search page to discover multi-source scientific papers.
           </p>
           <button
-            className="btn btn-primary"
+            type="button"
+            className="btn btn-primary btn-sm"
             onClick={() => navigate('/search')}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}
           >
-            <Search size={14} />
+            <Search size={13} />
             <span>Go to Search Page</span>
           </button>
         </div>
       )}
 
-      {/* Filter Yielded Zero Matches */}
-      {!searchLoading && results.length > 0 && filteredPapers.length === 0 && (
-        <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>
-          <Search size={32} style={{ margin: '0 auto 10px', display: 'block', color: 'var(--text-muted)' }} />
-          <h4 style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
-            No Papers Match Your In-Page Search
-          </h4>
-          <p style={{ fontSize: 12.5, marginBottom: 12 }}>
-            No founded papers matched "{filterTerm}". Try clearing or changing your search terms.
-          </p>
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={() => {
-              setFilterTerm('');
-              setSourceFilter('all');
-              setOnlyOpenAccess(false);
-              setOnlyInGraph(false);
-            }}
-          >
-            Clear In-Page Search Filters
-          </button>
-        </div>
-      )}
-
-      {/* LINEAR RESEARCH PAPERS FEED */}
-      {!searchLoading && filteredPapers.length > 0 && (
-        <div className="papers-linear-list">
-          {filteredPapers.map((paper, idx) => {
+      {/* ── 6. Results Feed (Clean Linear Rows) ── */}
+      {!searchLoading && displayedPapers.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {displayedPapers.map((paper, idx) => {
             const pId = paper.id || paper.arxiv_id || paper.canonical_id || `paper-${idx}`;
             const authorsStr = (paper.authors || [])
-              .map(a => (typeof a === 'string' ? a : a.name || 'Author'))
+              .map((a) => (typeof a === 'string' ? a : a.name || 'Author'))
               .join(', ');
             const isAddedToGraph = addedToGraphPaperIds.includes(pId);
-            const isAbstractExpanded = !!expandedAbstracts[pId];
-            const isInComparison = comparisonPapers.some(cp => (cp.id || cp.canonical_id) === pId);
+            const isInCompare = comparisonPapers.some((cp) => (cp.id || cp.canonical_id) === pId);
+            const codeUrl = paper.code_url || (paper.code_repositories && paper.code_repositories[0]?.url);
 
             return (
               <div
                 key={pId}
-                className={`paper-linear-card ${isAddedToGraph ? 'in-graph' : ''}`}
-                id={`paper-card-${idx}`}
+                style={{
+                  background: 'var(--bg-card)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-sm, 6px)',
+                  padding: '16px 18px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 8,
+                  transition: 'border-color 0.15s ease',
+                }}
               >
-                {/* Header row: badges & citation count */}
-                <div className="paper-linear-header">
-                  <div className="paper-linear-badges">
-                    <span className="badge badge-neutral" style={{ textTransform: 'uppercase', fontWeight: 600 }}>
-                      {paper.primary_source || 'ARXIV'}
+                {/* Meta Badges Row */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <span className="badge badge-neutral" style={{ fontSize: 10, textTransform: 'uppercase', fontWeight: 600 }}>
+                      {paper.primary_source || 'Paper'}
                     </span>
                     {paper.year && (
-                      <span className="badge badge-neutral">{paper.year}</span>
+                      <span className="badge badge-neutral" style={{ fontSize: 10 }}>{paper.year}</span>
                     )}
                     {(paper.is_open_access || paper.pdf_url) && (
-                      <span className="badge badge-emerald">Open Access</span>
+                      <span className="badge badge-emerald" style={{ fontSize: 10 }}>Open Access</span>
                     )}
-                    {isAddedToGraph && (
-                      <span className="badge badge-emerald" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                        <Check size={11} />
-                        <span>In Knowledge Graph</span>
-                      </span>
-                    )}
-                    {paper.checklist?.has_code_repo && (
-                      <span className="badge badge-blue" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                        <Code size={11} />
+                    {codeUrl && (
+                      <span className="badge badge-blue" style={{ fontSize: 10, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                        <Code size={10} />
                         <span>Code</span>
                       </span>
                     )}
-                    {paper.checklist?.has_dataset_link && (
-                      <span className="badge badge-purple" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                        <Database size={11} />
-                        <span>Dataset</span>
-                      </span>
-                    )}
-                    {paper.checklist?.has_ablation && (
-                      <span className="badge badge-neutral" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                        <Layers size={11} />
-                        <span>Ablations</span>
-                      </span>
+                    {isAddedToGraph && (
+                      <span className="badge badge-purple" style={{ fontSize: 10 }}>In Graph</span>
                     )}
                   </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    {paper.score !== null && paper.score !== undefined && (
-                      <div
-                        className="paperrank-pill"
-                        onClick={() => openPaperModal(paper)}
-                        title={`PaperRank: ${paper.score}/100\n• Topical Relevance: ${paper.score_breakdown?.topical_relevance ?? 'N/A'}\n• Citation Impact: ${paper.score_breakdown?.citation_impact ?? 'N/A'}\n• Graph Prestige: ${paper.score_breakdown?.graph_prestige ?? 'N/A'}\n• Citation Velocity: ${paper.score_breakdown?.citation_velocity ?? 'N/A'}\n• Methodology: ${paper.score_breakdown?.methodology_quality ?? 'N/A'}\n• Reproducibility: ${paper.score_breakdown?.reproducibility ?? 'N/A'}\nClick to view full scientific breakdown.`}
-                        style={{
-                          fontSize: 11.5,
-                          fontWeight: 700,
-                          padding: '2px 8px',
-                          borderRadius: 6,
-                          background: paper.score >= 70 ? 'rgba(16, 185, 129, 0.12)' : (paper.score >= 45 ? 'rgba(99, 102, 241, 0.12)' : 'var(--bg-subtle)'),
-                          color: paper.score >= 70 ? '#059669' : (paper.score >= 45 ? 'var(--accent-primary)' : 'var(--text-muted)'),
-                          border: `1px solid ${paper.score >= 70 ? 'rgba(16, 185, 129, 0.3)' : (paper.score >= 45 ? 'rgba(99, 102, 241, 0.3)' : 'var(--border-subtle)')}`,
-                          cursor: 'pointer',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 4,
-                        }}
-                      >
-                        <Award size={11} />
-                        <span>PaperRank {paper.score}</span>
-                      </div>
-                    )}
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                      {paper.citation_count ? `${paper.citation_count} Citations` : 'Citation tracked'}
-                    </div>
+                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                    {paper.citation_count ? `${paper.citation_count.toLocaleString()} Citations` : 'Indexed'}
                   </div>
                 </div>
 
-                {/* Title */}
+                {/* Paper Title */}
                 <h3
-                  className="paper-linear-title"
-                  onClick={() => openInReader(paper)}
-                  title="Click to view in Paper Reader"
+                  onClick={() => {
+                    setActiveReaderPaper(paper);
+                    navigate(`/pdf-inspector?paper=${encodeURIComponent(pId)}`);
+                  }}
+                  style={{
+                    fontSize: 14.5,
+                    fontWeight: 700,
+                    margin: 0,
+                    color: 'var(--text-primary)',
+                    cursor: 'pointer',
+                    lineHeight: 1.35,
+                  }}
+                  title="Open in Paper Reader"
                 >
                   {paper.title}
                 </h3>
 
                 {/* Authors */}
-                <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', margin: 0 }}>
-                  {authorsStr || 'Authors listed in source metadata'}
-                </p>
+                <div style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>
+                  {authorsStr || 'Authors listed in source record'}
+                </div>
 
                 {/* Abstract Preview */}
                 {paper.abstract && (
-                  <div style={{ marginTop: 2 }}>
-                    <p
-                      style={{
-                        fontSize: 12.5,
-                        color: 'var(--text-muted)',
-                        lineHeight: 1.5,
-                        margin: 0,
-                        display: isAbstractExpanded ? 'block' : '-webkit-box',
-                        WebkitLineClamp: isAbstractExpanded ? 'unset' : 3,
-                        WebkitBoxOrient: 'vertical',
-                        overflow: 'hidden',
-                      }}
-                    >
-                      {paper.abstract}
-                    </p>
-                    {paper.abstract.length > 200 && (
-                      <button
-                        onClick={() => toggleAbstract(pId)}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          color: 'var(--accent-blue)',
-                          fontSize: 11.5,
-                          cursor: 'pointer',
-                          padding: '2px 0 0',
-                          fontWeight: 500,
-                        }}
-                      >
-                        {isAbstractExpanded ? 'Show less' : 'Read full abstract...'}
-                      </button>
-                    )}
-                  </div>
+                  <p
+                    style={{
+                      fontSize: 12,
+                      color: 'var(--text-muted)',
+                      lineHeight: 1.45,
+                      margin: 0,
+                      display: '-webkit-box',
+                      WebkitLineClamp: 3,
+                      WebkitBoxOrient: 'vertical',
+                      overflow: 'hidden',
+                    }}
+                  >
+                    {paper.abstract}
+                  </p>
                 )}
 
                 {/* Actions Footer */}
@@ -658,90 +649,110 @@ export default function LiteratureResultsView() {
                     justifyContent: 'space-between',
                     flexWrap: 'wrap',
                     gap: 8,
-                    marginTop: 6,
+                    marginTop: 4,
                     paddingTop: 10,
                     borderTop: '1px solid var(--border-subtle)',
                   }}
                 >
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                    {/* Read Paper */}
                     <button
-                      className={`btn btn-sm ${isAddedToGraph ? 'btn-secondary' : 'btn-primary'}`}
-                      onClick={() => handleToggleGraph(paper)}
-                      disabled={ingestedMap[pId] === 'loading'}
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 5,
-                        borderColor: isAddedToGraph ? 'var(--accent-blue, #2563eb)' : undefined,
-                        color: isAddedToGraph ? 'var(--accent-blue, #2563eb)' : undefined,
-                      }}
-                      title={isAddedToGraph ? 'Click to remove from knowledge graph' : 'Click to add to knowledge graph'}
-                    >
-                      {ingestedMap[pId] === 'loading' ? (
-                        <>
-                          <Loader2 size={12} className="animate-spin" />
-                          <span>{isAddedToGraph ? 'Removing...' : 'Adding...'}</span>
-                        </>
-                      ) : isAddedToGraph ? (
-                        <>
-                          <Check size={12} />
-                          <span>In Graph (Remove)</span>
-                        </>
-                      ) : (
-                        <>
-                          <Plus size={12} />
-                          <span>Add to Graph</span>
-                        </>
-                      )}
-                    </button>
-
-                    <button
+                      type="button"
                       className="btn btn-secondary btn-sm"
-                      onClick={() => openInReader(paper)}
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}
+                      onClick={() => {
+                        setActiveReaderPaper(paper);
+                        navigate(`/pdf-inspector?paper=${encodeURIComponent(pId)}`);
+                      }}
+                      style={{ fontSize: 11, padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }}
                     >
                       <FileText size={12} />
-                      <span>Reader</span>
+                      <span>Read Paper</span>
                     </button>
 
+                    {/* Cite */}
                     <button
+                      type="button"
                       className="btn btn-secondary btn-sm"
                       onClick={() => copyBibTeX(paper)}
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}
+                      style={{ fontSize: 11, padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }}
                     >
-                      {copiedBibId === (paper.id || paper.arxiv_id) ? <Check size={12} /> : <Copy size={12} />}
+                      {copiedBibId === (paper.id || paper.arxiv_id) ? <Check size={11} style={{ color: 'var(--accent-emerald)' }} /> : <Copy size={11} />}
                       <span>{copiedBibId === (paper.id || paper.arxiv_id) ? 'Copied' : 'Cite'}</span>
                     </button>
 
+                    {/* Add to Workspace */}
                     <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => handleAddToWorkspace(paper)}
+                      style={{ fontSize: 11, padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                    >
+                      <FolderKanban size={11} />
+                      <span>Add to Workspace</span>
+                    </button>
+
+                    {/* Add to Knowledge Graph */}
+                    <button
+                      type="button"
+                      className={`btn btn-sm ${isAddedToGraph ? 'btn-primary' : 'btn-secondary'}`}
+                      onClick={() => handleToggleGraph(paper)}
+                      disabled={ingestedMap[pId] === 'loading'}
+                      style={{ fontSize: 11, padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                    >
+                      {ingestedMap[pId] === 'loading' ? (
+                        <Loader2 size={11} className="spin-anim" />
+                      ) : isAddedToGraph ? (
+                        <Check size={11} />
+                      ) : (
+                        <Plus size={11} />
+                      )}
+                      <span>{isAddedToGraph ? 'In Graph' : 'Add to Graph'}</span>
+                    </button>
+
+                    {/* Compare */}
+                    <button
+                      type="button"
                       className="btn btn-secondary btn-sm"
                       onClick={() => addComparisonPaper(paper)}
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}
+                      style={{ fontSize: 11, padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }}
                     >
-                      <span>{isInComparison ? 'In Compare' : 'Compare'}</span>
+                      <span>{isInCompare ? '✓ In Compare' : 'Compare'}</span>
                     </button>
                   </div>
 
-                  <div>
-                    {paper.url && (
-                      <a
-                        href={paper.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="btn btn-secondary btn-sm"
-                        style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5 }}
-                      >
-                        <ExternalLink size={12} />
-                        <span>Source Link</span>
-                      </a>
-                    )}
-                  </div>
+                  {/* View Source external link */}
+                  {paper.url && (
+                    <a
+                      href={paper.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="btn btn-secondary btn-sm"
+                      style={{ fontSize: 11, padding: '4px 10px', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                    >
+                      <span>View Source</span>
+                      <ExternalLink size={11} />
+                    </a>
+                  )}
                 </div>
               </div>
             );
           })}
+
+          {/* Load More Button */}
+          {visibleCount < filteredPapers.length && (
+            <div style={{ textAlign: 'center', marginTop: 12 }}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setVisibleCount((prev) => prev + 15)}
+                style={{ padding: '6px 20px', fontSize: 12 }}
+              >
+                Load More Papers ({filteredPapers.length - visibleCount} remaining)
+              </button>
+            </div>
+          )}
         </div>
       )}
-    </section>
+    </div>
   );
 }
