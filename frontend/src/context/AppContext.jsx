@@ -94,6 +94,9 @@ export function AppProvider({ children }) {
   // Responsive Sidebar States
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
+      if (new URLSearchParams(window.location.search).get('collapsed') === 'true') {
+        return true;
+      }
       return localStorage.getItem('rc_sidebar_collapsed') === 'true';
     } catch {
       return false;

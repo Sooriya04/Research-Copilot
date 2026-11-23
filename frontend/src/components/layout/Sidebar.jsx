@@ -5,19 +5,111 @@ import {
   FolderKanban,
   Search,
   BookOpen,
-  Network,
+  Upload,
   Columns3,
+  Network,
   Lightbulb,
-  Compass,
   Workflow,
   FileText,
   MessageSquare,
-  Upload,
   Settings,
   Sparkles,
   PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+
+const NAV_GROUPS = [
+  {
+    key: 'workspace',
+    label: 'WORKSPACE',
+    items: [
+      {
+        to: '/',
+        label: 'Overview',
+        icon: LayoutDashboard,
+        end: true,
+      },
+      {
+        to: '/workspaces',
+        label: 'Workspaces',
+        icon: FolderKanban,
+      },
+    ],
+  },
+  {
+    key: 'research',
+    label: 'RESEARCH',
+    items: [
+      {
+        to: '/search',
+        label: 'Literature Search',
+        icon: Search,
+      },
+      {
+        to: '/search-results',
+        label: 'Discovered Papers',
+        icon: BookOpen,
+      },
+      {
+        to: '/create',
+        label: 'Import Papers',
+        icon: Upload,
+      },
+    ],
+  },
+  {
+    key: 'analysis',
+    label: 'ANALYSIS',
+    items: [
+      {
+        to: '/compare',
+        label: 'Feature Matrix',
+        icon: Columns3,
+        isActive: (loc) => loc.pathname === '/compare' || loc.pathname === '/matrix',
+      },
+      {
+        to: '/knowledge-graph',
+        label: 'Knowledge Graph',
+        icon: Network,
+        isActive: (loc) => loc.pathname === '/knowledge-graph',
+      },
+      {
+        to: '/novelty',
+        label: 'Novelty & Gaps',
+        icon: Lightbulb,
+        isActive: (loc) =>
+          loc.pathname === '/novelty' ||
+          loc.pathname === '/novelty-studio' ||
+          loc.pathname === '/research-gaps',
+      },
+      {
+        to: '/litgraph',
+        label: 'LitGraph',
+        icon: Workflow,
+      },
+    ],
+  },
+  {
+    key: 'tools',
+    label: 'TOOLS',
+    items: [
+      {
+        to: '/pdf-inspector',
+        label: 'Paper Reader',
+        icon: FileText,
+        isActive: (loc) =>
+          loc.pathname === '/pdf-inspector' ||
+          loc.pathname.startsWith('/pdf-inspector/'),
+      },
+      {
+        to: '/chat',
+        label: 'Research Chat',
+        icon: MessageSquare,
+      },
+    ],
+  },
+];
 
 export default function Sidebar() {
   const location = useLocation();
@@ -30,8 +122,6 @@ export default function Sidebar() {
     setMobileSidebarOpen,
   } = useApp();
 
-  const isPaperReaderActive = location.pathname === '/pdf-inspector' || location.pathname.startsWith('/pdf-inspector/');
-
   return (
     <aside
       className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''} ${mobileSidebarOpen ? 'mobile-open' : ''}`}
@@ -42,20 +132,16 @@ export default function Sidebar() {
         {!sidebarCollapsed ? (
           <>
             <div
-              style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0, cursor: 'pointer' }}
+              className="sidebar-brand-content"
               onClick={() => navigate('/')}
               title="Research Copilot Home"
             >
               <div className="sidebar-brand-logo">
-                <Sparkles size={15} style={{ color: '#fff' }} />
+                <Sparkles size={14} style={{ color: '#fff' }} />
               </div>
               <div className="sidebar-brand-text">
-                <h2 style={{ fontSize: '0.9rem', fontWeight: 700, margin: 0, color: 'var(--text-primary)', letterSpacing: '-0.01em', lineHeight: 1.2 }}>
-                  Research Copilot
-                </h2>
-                <span style={{ fontSize: '0.67rem', color: 'var(--text-muted)', fontWeight: 500 }}>
-                  AI Research Engineer
-                </span>
+                <h2 className="sidebar-brand-title">Research Copilot</h2>
+                <span className="sidebar-brand-subtitle">AI Research Engineer</span>
               </div>
             </div>
             <button
@@ -85,157 +171,37 @@ export default function Sidebar() {
 
       {/* ── Scrollable Navigation Body ── */}
       <nav className="sidebar-nav">
-        {/* 1. Overview */}
-        <NavLink
-          to="/"
-          end
-          className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-          title="Overview"
-          onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
-        >
-          <div className="nav-item-left">
-            <LayoutDashboard size={15} />
-            <span>Overview</span>
-          </div>
-        </NavLink>
+        {NAV_GROUPS.map((group) => (
+          <div key={group.key} className="sidebar-nav-group">
+            <span className="sidebar-group-label">{group.label}</span>
+            {group.items.map((item) => {
+              const active = item.isActive
+                ? item.isActive(location)
+                : item.end
+                ? location.pathname === item.to
+                : location.pathname === item.to || location.pathname.startsWith(`${item.to}/`);
 
-        {/* 2. Workspaces */}
-        <NavLink
-          to="/workspaces"
-          className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-          title="Research Workspaces"
-          onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
-        >
-          <div className="nav-item-left">
-            <FolderKanban size={15} />
-            <span>Workspaces</span>
+              return (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.end}
+                  className={`nav-item ${active ? 'active' : ''}`}
+                  title={item.label}
+                  onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
+                >
+                  <div className="nav-item-left">
+                    <item.icon size={15} strokeWidth={1.8} className="nav-item-icon" />
+                    <span className="nav-item-label">{item.label}</span>
+                  </div>
+                </NavLink>
+              );
+            })}
           </div>
-        </NavLink>
-
-        {/* 3. Literature Search */}
-        <NavLink
-          to="/search"
-          className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-          title="Literature Search"
-          onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
-        >
-          <div className="nav-item-left">
-            <Search size={15} />
-            <span>Literature Search</span>
-          </div>
-        </NavLink>
-
-        {/* 4. Discovered Papers */}
-        <NavLink
-          to="/search-results"
-          className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-          title="Discovered Papers"
-          onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
-        >
-          <div className="nav-item-left">
-            <BookOpen size={15} />
-            <span>Discovered Papers</span>
-          </div>
-        </NavLink>
-
-        {/* 5. Feature Comparison Matrix (Primary Table) */}
-        <NavLink
-          to="/compare"
-          className={({ isActive }) => `nav-item ${isActive || location.pathname === '/compare' || location.pathname === '/matrix' ? 'active' : ''}`}
-          title="Side-by-Side Multi-Paper Feature Comparison Matrix"
-          onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
-        >
-          <div className="nav-item-left">
-            <Columns3 size={15} />
-            <span>Feature Matrix</span>
-          </div>
-        </NavLink>
-
-        {/* 6. Knowledge Graph (Visual Network) */}
-        <NavLink
-          to="/knowledge-graph"
-          className={({ isActive }) => `nav-item ${isActive && location.pathname === '/knowledge-graph' ? 'active' : ''}`}
-          title="Interactive Knowledge Graph"
-          onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
-        >
-          <div className="nav-item-left">
-            <Network size={15} />
-            <span>Knowledge Graph</span>
-          </div>
-        </NavLink>
-
-        {/* 6. Novelty & Gap Studio */}
-        <NavLink
-          to="/novelty"
-          className={({ isActive }) =>
-            `nav-item ${isActive || location.pathname === '/novelty-studio' || location.pathname === '/research-gaps' ? 'active' : ''}`
-          }
-          title="Novelty & Research Gap Studio"
-          onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
-        >
-          <div className="nav-item-left">
-            <Lightbulb size={15} />
-            <span>Novelty & Gaps</span>
-          </div>
-        </NavLink>
-
-        {/* 8. LitGraph */}
-        <NavLink
-          to="/litgraph"
-          className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-          title="LitGraph"
-          onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
-        >
-          <div className="nav-item-left">
-            <Workflow size={15} />
-            <span>LitGraph</span>
-          </div>
-        </NavLink>
-
-        {/* 9. Paper Reader (Active Highlight) */}
-        <NavLink
-          to="/pdf-inspector"
-          className={`nav-item ${isPaperReaderActive ? 'active paper-reader-active' : ''}`}
-          title="Paper Reader"
-          onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
-        >
-          <div className="nav-item-left">
-            <FileText size={15} />
-            <span>Paper Reader</span>
-          </div>
-          {isPaperReaderActive && !sidebarCollapsed && (
-            <span className="reader-active-indicator" title="Active Paper Reader" />
-          )}
-        </NavLink>
-
-        {/* 10. Research Chat */}
-        <NavLink
-          to="/chat"
-          className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-          title="Research Chat Assistant"
-          onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
-        >
-          <div className="nav-item-left">
-            <MessageSquare size={15} />
-            <span>Research Chat</span>
-          </div>
-        </NavLink>
-
-        {/* 11. Import Papers */}
-        <NavLink
-          to="/create"
-          className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-          title="Import Papers Catalog"
-          onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
-        >
-          <div className="nav-item-left">
-            <Upload size={15} />
-            <span>Import Papers</span>
-          </div>
-        </NavLink>
+        ))}
       </nav>
 
-      {/* ── Sidebar Footer ── */}
+      {/* ── Sidebar Footer / Bottom Section ── */}
       <div className="sidebar-footer">
         <NavLink
           to="/settings"
@@ -244,20 +210,22 @@ export default function Sidebar() {
           onClick={() => mobileSidebarOpen && setMobileSidebarOpen(false)}
         >
           <div className="nav-item-left">
-            <Settings size={15} />
-            <span>Settings</span>
+            <Settings size={15} strokeWidth={1.8} className="nav-item-icon" />
+            <span className="nav-item-label">Settings</span>
           </div>
         </NavLink>
 
-        {/* System connection indicator */}
-        <div className="sidebar-status-container">
-          <div className="system-status-indicator" title={systemConnected ? 'Backend & SQLite connected' : 'Connecting to API...'}>
-            <div
-              className="status-dot"
-              style={{ backgroundColor: systemConnected ? '#10b981' : '#ef4444' }}
+        {/* Database and API connection status */}
+        <div
+          className="sidebar-status-container"
+          title={systemConnected ? 'Database & API Connected (SQLite)' : 'Connecting to API...'}
+        >
+          <div className="system-status-indicator">
+            <span
+              className={`status-dot ${systemConnected ? 'connected' : 'disconnected'}`}
             />
             {!sidebarCollapsed && (
-              <span id="mini-status-text">
+              <span className="system-status-text">
                 {systemConnected ? 'SQLite & API Connected' : 'API Connecting...'}
               </span>
             )}
