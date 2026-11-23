@@ -1,7 +1,6 @@
 import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
-  PanelLeft,
   Layers,
   ChevronRight,
   ChevronDown,
@@ -45,18 +44,7 @@ export default function TopHeader() {
     activeWorkspace,
     openWorkspaceModal,
     deactivateWorkspace,
-    sidebarCollapsed,
-    toggleSidebar,
-    setMobileSidebarOpen,
   } = useApp();
-
-  const handleSidebarToggle = () => {
-    if (window.innerWidth <= 768) {
-      setMobileSidebarOpen((v) => !v);
-    } else {
-      toggleSidebar();
-    }
-  };
 
   // Determine current page breadcrumb
   let currentTitle = VIEW_TITLES[location.pathname];
@@ -73,19 +61,8 @@ export default function TopHeader() {
 
   return (
     <header className="top-header">
-      {/* ── LEFT: Toggle, Persistent Workspace Selector & Breadcrumb ── */}
+      {/* ── LEFT: Persistent Workspace Selector & Breadcrumb ── */}
       <div className="header-left">
-        <button
-          type="button"
-          className="header-icon-btn sidebar-toggle-btn"
-          onClick={handleSidebarToggle}
-          title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          id="btn-sidebar-toggle"
-        >
-          <PanelLeft size={15} strokeWidth={1.8} />
-        </button>
-
         <div className="header-breadcrumbs">
           {/* Persistent Workspace Selector */}
           <div

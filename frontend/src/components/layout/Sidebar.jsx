@@ -14,6 +14,7 @@ import {
   MessageSquare,
   Settings,
   Sparkles,
+  PanelLeft,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 
@@ -125,33 +126,43 @@ export default function Sidebar() {
       className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''} ${mobileSidebarOpen ? 'mobile-open' : ''}`}
       id="main-sidebar"
     >
-      {/* ── Brand Header (Clean, no redundant toggle; toggle sits in top header) ── */}
+      {/* ── Brand Header with inside toggle bar ── */}
       <div className="sidebar-brand-header">
         {!sidebarCollapsed ? (
-          <div
-            className="sidebar-brand-content"
-            onClick={() => navigate('/')}
-            title="Research Copilot Home"
-          >
-            <div className="sidebar-brand-logo">
-              <Sparkles size={14} style={{ color: '#fff' }} />
+          <>
+            <div
+              className="sidebar-brand-content"
+              onClick={() => navigate('/')}
+              title="Research Copilot Home"
+            >
+              <div className="sidebar-brand-logo">
+                <Sparkles size={13} style={{ color: '#fff' }} />
+              </div>
+              <div className="sidebar-brand-text">
+                <h2 className="sidebar-brand-title">Research Copilot</h2>
+                <span className="sidebar-brand-subtitle">AI Research Engineer</span>
+              </div>
             </div>
-            <div className="sidebar-brand-text">
-              <h2 className="sidebar-brand-title">Research Copilot</h2>
-              <span className="sidebar-brand-subtitle">AI Research Engineer</span>
-            </div>
-          </div>
+            <button
+              type="button"
+              className="sidebar-toggle-icon-btn"
+              onClick={toggleSidebar}
+              title="Collapse sidebar"
+              aria-label="Collapse sidebar"
+            >
+              <PanelLeft size={16} strokeWidth={1.8} />
+            </button>
+          </>
         ) : (
+          /* When closed: ONLY sidebar icon is visible */
           <button
             type="button"
-            className="sidebar-brand-logo-btn"
+            className="sidebar-toggle-icon-btn collapsed-toggle"
             onClick={toggleSidebar}
             title="Expand sidebar"
             aria-label="Expand sidebar"
           >
-            <div className="sidebar-brand-logo mini">
-              <Sparkles size={14} style={{ color: '#fff' }} />
-            </div>
+            <PanelLeft size={17} strokeWidth={1.8} />
           </button>
         )}
       </div>

@@ -180,15 +180,16 @@ body {
   border-top: 1px solid var(--border-subtle);
 }
 
-/* Brand Header */
+/* Brand Header with toggle */
 .sidebar-brand-header {
-  height: 54px;
-  padding: 0 12px 0 14px;
+  height: 50px;
+  padding: 0 10px 0 14px;
   border-bottom: 1px solid var(--border-subtle);
   display: flex;
   align-items: center;
   justify-content: space-between;
   flex-shrink: 0;
+  box-sizing: border-box;
 }
 
 .sidebar-brand-content {
@@ -210,11 +211,6 @@ body {
   justify-content: center;
   flex-shrink: 0;
   box-shadow: 0 1px 4px rgba(59, 130, 246, 0.2);
-}
-
-.sidebar-brand-logo.mini {
-  width: 32px;
-  height: 32px;
 }
 
 .sidebar-brand-text {
@@ -239,16 +235,36 @@ body {
   line-height: 1.2;
 }
 
-.sidebar-brand-logo-btn {
-  background: none;
+.sidebar-toggle-icon-btn {
+  background: transparent;
   border: none;
-  width: 100%;
-  height: 100%;
-  padding: 0;
-  display: flex;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm, 6px);
+  color: var(--text-muted);
+  cursor: pointer;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
+  transition: all 0.12s ease;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.sidebar-toggle-icon-btn:hover {
+  background: var(--bg-subtle);
+  color: var(--text-primary);
+}
+
+.sidebar-toggle-icon-btn.collapsed-toggle {
+  width: 38px;
+  height: 38px;
+  color: var(--text-secondary);
+}
+
+.sidebar-toggle-icon-btn.collapsed-toggle:hover {
+  background: var(--bg-subtle);
+  color: var(--text-primary);
 }
 
 /* Scrollable Navigation Body */
@@ -404,8 +420,16 @@ body {
   white-space: nowrap;
 }
 
+.mobile-sidebar-toggle {
+  display: none;
+}
+
 /* Mobile responsive drawer */
 @media (max-width: 768px) {
+  .mobile-sidebar-toggle {
+    display: inline-flex;
+  }
+
   .sidebar {
     position: fixed;
     top: 0;
