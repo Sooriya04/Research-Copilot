@@ -14,8 +14,6 @@ import {
   MessageSquare,
   Settings,
   Sparkles,
-  PanelLeftClose,
-  PanelLeftOpen,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 
@@ -127,37 +125,26 @@ export default function Sidebar() {
       className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''} ${mobileSidebarOpen ? 'mobile-open' : ''}`}
       id="main-sidebar"
     >
-      {/* ── Brand Header ── */}
+      {/* ── Brand Header (Clean, no redundant toggle; toggle sits in top header) ── */}
       <div className="sidebar-brand-header">
         {!sidebarCollapsed ? (
-          <>
-            <div
-              className="sidebar-brand-content"
-              onClick={() => navigate('/')}
-              title="Research Copilot Home"
-            >
-              <div className="sidebar-brand-logo">
-                <Sparkles size={14} style={{ color: '#fff' }} />
-              </div>
-              <div className="sidebar-brand-text">
-                <h2 className="sidebar-brand-title">Research Copilot</h2>
-                <span className="sidebar-brand-subtitle">AI Research Engineer</span>
-              </div>
+          <div
+            className="sidebar-brand-content"
+            onClick={() => navigate('/')}
+            title="Research Copilot Home"
+          >
+            <div className="sidebar-brand-logo">
+              <Sparkles size={14} style={{ color: '#fff' }} />
             </div>
-            <button
-              type="button"
-              className="sidebar-collapse-toggle"
-              onClick={toggleSidebar}
-              title="Collapse sidebar"
-              aria-label="Collapse sidebar"
-            >
-              <PanelLeftClose size={15} />
-            </button>
-          </>
+            <div className="sidebar-brand-text">
+              <h2 className="sidebar-brand-title">Research Copilot</h2>
+              <span className="sidebar-brand-subtitle">AI Research Engineer</span>
+            </div>
+          </div>
         ) : (
           <button
             type="button"
-            className="sidebar-collapse-toggle collapsed-logo-btn"
+            className="sidebar-brand-logo-btn"
             onClick={toggleSidebar}
             title="Expand sidebar"
             aria-label="Expand sidebar"
@@ -218,7 +205,7 @@ export default function Sidebar() {
         {/* Database and API connection status */}
         <div
           className="sidebar-status-container"
-          title={systemConnected ? 'Database & API Connected (SQLite)' : 'Connecting to API...'}
+          title={systemConnected ? 'Database & API Connected (SQLite)' : 'API Connecting...'}
         >
           <div className="system-status-indicator">
             <span
