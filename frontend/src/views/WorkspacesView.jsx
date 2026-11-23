@@ -6,24 +6,14 @@ import {
   Search,
   Check,
   Trash2,
+  Edit2,
+  Archive,
   ArrowRight,
   BookOpen,
   Network,
-  FileText,
-  Calendar,
-  Layers,
+  X,
   Sparkles,
-  ExternalLink,
-  Cpu,
-  Activity,
-  Compass,
-  SlidersHorizontal,
-  Bookmark,
-  Share2,
-  Lightbulb,
-  XCircle,
-  Workflow,
-  Brain,
+  AlertTriangle,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
@@ -31,602 +21,818 @@ export default function WorkspacesView() {
   const navigate = useNavigate();
   const {
     workspaces,
+    setWorkspaces,
     activeWorkspace,
     switchWorkspace,
-    deactivateWorkspace,
     deleteWorkspace,
     createWorkspace,
-    openWorkspaceModal,
-    searchResults,
-    addedToGraphPaperIds,
-    activeReaderPaper,
-    workspaceMemories,
-    addWorkspaceMemory,
-    deleteWorkspaceMemory,
   } = useApp();
 
-  const [filterTerm, setFilterTerm] = useState('');
-  const [filterType, setFilterType] = useState('all'); // 'all', 'active'
-  const [sortBy, setSortBy] = useState('recent'); // 'recent', 'name'
+  // Toolbar & filter state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'active' | 'archived'
+  const [sortBy, setSortBy] = useState('recent'); // 'recent' | 'created' | 'name'
 
-  // Research Memory Ledger state
-  const [memoryFilter, setMemoryFilter] = useState('all');
-  const [isAddingMemory, setIsAddingMemory] = useState(false);
-  const [newCategory, setNewCategory] = useState('decision');
+  // Modal states
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [createMode, setCreateMode] = useState('blank'); // 'blank' | 'template'
   const [newTitle, setNewTitle] = useState('');
-  const [newContent, setNewContent] = useState('');
-  const [newStatus, setNewStatus] = useState('active');
+  const [newDesc, setNewDesc] = useState('');
+  const [selectedTemplate, setSelectedTemplate] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleCreateMemory = async (e) => {
-    e.preventDefault();
-    if (!newTitle.trim() || !newContent.trim() || !activeWorkspace) return;
-    await addWorkspaceMemory(activeWorkspace.id, {
-      category: newCategory,
-      title: newTitle.trim(),
-      content: newContent.trim(),
-      status: newStatus,
-    });
-    setNewTitle('');
-    setNewContent('');
-    setIsAddingMemory(false);
-  };
+  // Rename modal
+  const [editingWs, setEditingWs] = useState(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editDesc, setEditDesc] = useState('');
 
-  const filteredMemories = useMemo(() => {
-    if (!workspaceMemories) return [];
-    if (memoryFilter === 'all') return workspaceMemories;
-    return workspaceMemories.filter((m) => m.category === memoryFilter);
-  }, [workspaceMemories, memoryFilter]);
+  // Delete confirm modal
+  const [deletingWs, setDeletingWs] = useState(null);
 
-  // Helper to read scoped stats for each workspace from localStorage
-  const getWorkspaceStats = (wsId) => {
-    try {
-      const results = JSON.parse(localStorage.getItem(`rc_ws_${wsId}_search_results`) || '[]');
-      const graphs = JSON.parse(localStorage.getItem(`rc_ws_${wsId}_added_graph_papers`) || '[]');
-      const hasReader = !!localStorage.getItem(`rc_ws_${wsId}_reader_paper`);
-      const query = localStorage.getItem(`rc_ws_${wsId}_search_query`) || '';
-      return {
-        paperCount: Array.isArray(results) ? results.length : 0,
-        graphCount: Array.isArray(graphs) ? graphs.length : 0,
-        hasReader,
-        query,
-      };
-    } catch {
-      return { paperCount: 0, graphCount: 0, hasReader: false, query: '' };
-    }
-  };
-
-  const filteredWorkspaces = useMemo(() => {
-    return workspaces
-      .filter((ws) => {
-        if (filterType === 'active' && activeWorkspace?.id !== ws.id) return false;
-        if (!filterTerm.trim()) return true;
-        const term = filterTerm.toLowerCase().trim();
-        const titleMatch = (ws.title || '').toLowerCase().includes(term);
-        const descMatch = (ws.description || '').toLowerCase().includes(term);
-        return titleMatch || descMatch;
-      })
-      .sort((a, b) => {
-        if (sortBy === 'name') {
-          return (a.title || '').localeCompare(b.title || '');
-        }
-        // default: recent
-        return new Date(b.created_at || 0) - new Date(a.created_at || 0);
-      });
-  }, [workspaces, filterTerm, filterType, sortBy, activeWorkspace]);
-
-  const handleOpenWorkspace = (wsId) => {
-    switchWorkspace(wsId);
-    navigate('/search');
-  };
-
-  // Quick-start scientific templates to quickly bootstrap research topics
+  // Research templates (moved into creation dialog)
   const researchTemplates = [
     {
+      id: 'rag',
       title: 'Agentic RAG & Multi-Hop Reasoning',
       description: 'Autonomous retrieval-augmented generation architectures, multi-hop question answering, and chain-of-thought verification.',
       badge: 'RAG Architecture',
     },
     {
+      id: 'diffusion',
       title: 'Diffusion Models & Generative Video',
       description: 'Score-based generative models, continuous-time diffusion, latent video synthesis, and consistency distillation.',
       badge: 'Multimodal',
     },
     {
+      id: 'interpretability',
       title: 'Mechanistic Interpretability in Transformers',
       description: 'Probing attention circuits, superposition, dictionary learning, and representation steering in frontier models.',
       badge: 'Interpretability',
     },
     {
+      id: 'agents',
       title: 'Autonomous Coding Agents & Tool Use',
       description: 'Self-correcting code synthesis, AST manipulation, sandboxed execution pipelines, and SWE-bench evaluation.',
       badge: 'Agentic Systems',
     },
   ];
 
-  const handleLaunchTemplate = async (template) => {
-    const confirmed = window.confirm(
-      `Create a new workspace for "${template.title}"?\n\nThis will open the Literature Search with this topic pre-loaded.`
-    );
-    if (!confirmed) return;
-    const newWs = await createWorkspace(template.title, template.description);
-    if (newWs) {
-      navigate('/search');
+  // Helper to read scoped counts from localStorage
+  const getWorkspaceStats = (wsId) => {
+    try {
+      const results = JSON.parse(localStorage.getItem(`rc_ws_${wsId}_search_results`) || '[]');
+      const graphs = JSON.parse(localStorage.getItem(`rc_ws_${wsId}_added_graph_papers`) || '[]');
+      return {
+        paperCount: Array.isArray(results) ? results.length : 0,
+        graphCount: Array.isArray(graphs) ? graphs.length : 0,
+      };
+    } catch {
+      return { paperCount: 0, graphCount: 0 };
     }
   };
 
+  // Filter and sort workspaces
+  const filteredWorkspaces = useMemo(() => {
+    return workspaces
+      .filter((ws) => {
+        const isArchived = !!ws.state_json?.archived;
+        if (statusFilter === 'active' && (isArchived || activeWorkspace?.id !== ws.id)) return false;
+        if (statusFilter === 'archived' && !isArchived) return false;
+        if (statusFilter === 'all' && isArchived) return false; // Default list excludes archived unless specified
+
+        if (!searchQuery.trim()) return true;
+        const q = searchQuery.toLowerCase().trim();
+        const titleMatch = (ws.title || '').toLowerCase().includes(q);
+        const descMatch = (ws.description || '').toLowerCase().includes(q);
+        return titleMatch || descMatch;
+      })
+      .sort((a, b) => {
+        if (sortBy === 'name') {
+          return (a.title || '').localeCompare(b.title || '');
+        }
+        if (sortBy === 'created') {
+          return new Date(a.created_at || 0) - new Date(b.created_at || 0);
+        }
+        // default 'recent'
+        return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+      });
+  }, [workspaces, searchQuery, statusFilter, sortBy, activeWorkspace]);
+
+  // Handle open workspace
+  const handleOpen = (wsId) => {
+    switchWorkspace(wsId);
+    navigate('/search');
+  };
+
+  // Handle workspace creation
+  const handleCreate = async (e) => {
+    e?.preventDefault();
+    const titleToUse = createMode === 'template' && selectedTemplate ? selectedTemplate.title : newTitle.trim();
+    const descToUse = createMode === 'template' && selectedTemplate ? selectedTemplate.description : newDesc.trim();
+
+    if (!titleToUse) return;
+    setIsSubmitting(true);
+    try {
+      const created = await createWorkspace(titleToUse, descToUse);
+      if (created) {
+        setIsCreateOpen(false);
+        setNewTitle('');
+        setNewDesc('');
+        setSelectedTemplate(null);
+        setCreateMode('blank');
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Handle rename / edit
+  const handleSaveEdit = async (e) => {
+    e?.preventDefault();
+    if (!editingWs || !editTitle.trim()) return;
+    try {
+      const res = await fetch(`/api/v1/workbench/workspaces/${editingWs.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: editTitle.trim(), description: editDesc.trim() }),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setWorkspaces((prev) => prev.map((w) => (w.id === updated.id ? updated : w)));
+        if (activeWorkspace?.id === updated.id) {
+          switchWorkspace(updated.id);
+        }
+        setEditingWs(null);
+      }
+    } catch (err) {
+      console.error('Failed to update workspace:', err);
+    }
+  };
+
+  // Handle toggle archive
+  const handleToggleArchive = async (ws) => {
+    const isArchived = !ws.state_json?.archived;
+    try {
+      const res = await fetch(`/api/v1/workbench/workspaces/${ws.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state_json: { archived: isArchived } }),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setWorkspaces((prev) => prev.map((w) => (w.id === updated.id ? updated : w)));
+      }
+    } catch (err) {
+      console.error('Failed to archive workspace:', err);
+    }
+  };
+
+  // Handle confirm delete
+  const handleConfirmDelete = async () => {
+    if (!deletingWs) return;
+    await deleteWorkspace(deletingWs.id);
+    setDeletingWs(null);
+  };
+
   return (
-    <section id="view-workspaces-hub" className="view-panel active">
-      {/* Panel Header */}
-      <div className="panel-header" style={{ marginBottom: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+    <div className="view-container" style={{ padding: '24px 32px', maxWidth: 1400, margin: '0 auto' }}>
+      {/* ── 1. Page Header ── */}
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: 16,
+          marginBottom: 20,
+          paddingBottom: 16,
+          borderBottom: '1px solid var(--border-subtle)',
+        }}
+      >
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-            <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: 'var(--text-primary)' }}>
-              Research Workspaces Hub
+            <div
+              style={{
+                width: 30,
+                height: 30,
+                borderRadius: 'var(--radius-sm, 6px)',
+                background: 'rgba(37, 99, 235, 0.1)',
+                color: 'var(--accent-primary, #2563eb)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <FolderKanban size={16} />
+            </div>
+            <h1 style={{ fontSize: 18, fontWeight: 700, margin: 0, color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>
+              Research Workspaces
             </h1>
-            <span className="badge badge-blue" style={{ fontSize: 11.5, padding: '2px 8px' }}>
+            <span className="badge badge-blue" style={{ fontSize: 11, fontWeight: 600 }}>
               {workspaces.length} {workspaces.length === 1 ? 'Workspace' : 'Workspaces'}
             </span>
           </div>
-          <p className="panel-subtitle" style={{ margin: 0, maxWidth: 720, fontSize: 13, color: 'var(--text-muted)' }}>
-            Isolated scientific research environments for literature retrieval, knowledge graphs, benchmark tracking, and manuscript synthesis.
+          <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', margin: 0 }}>
+            Manage isolated research environments, literature collections, and knowledge graph records.
           </p>
         </div>
 
         <button
           type="button"
-          className="btn btn-primary"
-          onClick={() => openWorkspaceModal()}
-          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 16px', fontWeight: 600, fontSize: 13, flexShrink: 0 }}
+          className="btn btn-primary btn-sm"
+          onClick={() => {
+            setCreateMode('blank');
+            setNewTitle('');
+            setNewDesc('');
+            setSelectedTemplate(null);
+            setIsCreateOpen(true);
+          }}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}
         >
-          <Plus size={15} />
+          <Plus size={14} />
           <span>Create Workspace</span>
         </button>
       </div>
 
-      {/* Active Workspace Spotlight Hero Banner */}
-      {activeWorkspace && (
-        <div
-          className="card"
-          style={{
-            marginBottom: 28,
-            padding: '24px 28px',
-            borderRadius: 'var(--radius-lg, 12px)',
-            border: '1px solid var(--border-hover, #6366f1)',
-            background: 'linear-gradient(135deg, var(--bg-card) 0%, var(--bg-subtle) 100%)',
-            boxShadow: '0 4px 20px rgba(0, 0, 0, 0.05)',
-            position: 'relative',
-            overflow: 'hidden',
-          }}
-        >
-          {/* Subtle decorative glow */}
-          <div
+      {/* ── 2. Workspace Toolbar ── */}
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: 12,
+          marginBottom: 16,
+          background: 'var(--bg-card)',
+          border: '1px solid var(--border-subtle)',
+          borderRadius: 'var(--radius-sm, 6px)',
+          padding: '8px 12px',
+        }}
+      >
+        {/* Search */}
+        <div style={{ position: 'relative', width: 280, minWidth: 200 }}>
+          <Search
+            size={13}
+            style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}
+          />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search workspaces..."
             style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: 4,
-              height: '100%',
-              background: 'var(--accent-primary, #6366f1)',
+              width: '100%',
+              fontSize: 12,
+              padding: '5px 8px 5px 28px',
+              borderRadius: 'var(--radius-xs, 4px)',
+              border: '1px solid var(--border-subtle)',
+              background: 'var(--bg-secondary)',
+              color: 'var(--text-primary)',
             }}
           />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              style={{
+                position: 'absolute',
+                right: 6,
+                top: '50%',
+                transform: 'translateY(-50%)',
+                border: 'none',
+                background: 'none',
+                cursor: 'pointer',
+                color: 'var(--text-muted)',
+                padding: 0,
+              }}
+            >
+              <X size={11} />
+            </button>
+          )}
+        </div>
 
-          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16, marginBottom: 18 }}>
-            <div style={{ flex: 1, minWidth: 280 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                <span
-                  className="badge badge-emerald"
-                  style={{
-                    fontSize: 11.5,
-                    fontWeight: 600,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 5,
-                    padding: '3px 10px',
-                  }}
-                >
-                  <span
-                    style={{
-                      width: 6,
-                      height: 6,
-                      borderRadius: '50%',
-                      backgroundColor: 'currentColor',
-                      display: 'inline-block',
-                    }}
-                  />
-                  Active Environment
-                </span>
-                <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'var(--font-code)' }}>
-                  ID: {activeWorkspace.id}
-                </span>
-                {activeWorkspace.created_at && (
-                  <span style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <Calendar size={12} />
-                    {activeWorkspace.created_at.slice(0, 10)}
-                  </span>
-                )}
-              </div>
-
-              <h2 style={{ fontSize: 20, fontWeight: 700, margin: '4px 0 8px', color: 'var(--text-primary)' }}>
-                {activeWorkspace.title}
-              </h2>
-              <p style={{ fontSize: 13.5, color: 'var(--text-secondary)', margin: 0, maxWidth: 780, lineHeight: 1.6 }}>
-                {activeWorkspace.description || 'No description provided for this research environment. Use the quick actions below to manage literature search, knowledge graph, and citations.'}
-              </p>
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        {/* Filters and Sorting */}
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* Status Tabs */}
+          <div style={{ display: 'flex', gap: 2, background: 'var(--bg-secondary)', padding: 2, borderRadius: 'var(--radius-xs, 4px)' }}>
+            {[
+              { id: 'all', label: 'All' },
+              { id: 'active', label: 'Active' },
+              { id: 'archived', label: 'Archived' },
+            ].map((tab) => (
               <button
+                key={tab.id}
                 type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => openWorkspaceModal(activeWorkspace.title)}
-                style={{ fontSize: 12.5, padding: '7px 14px', display: 'flex', alignItems: 'center', gap: 6 }}
+                onClick={() => setStatusFilter(tab.id)}
+                style={{
+                  fontSize: 11,
+                  padding: '4px 10px',
+                  borderRadius: 3,
+                  border: 'none',
+                  background: statusFilter === tab.id ? 'var(--bg-card)' : 'transparent',
+                  color: statusFilter === tab.id ? 'var(--text-primary)' : 'var(--text-muted)',
+                  fontWeight: statusFilter === tab.id ? 600 : 400,
+                  cursor: 'pointer',
+                  boxShadow: statusFilter === tab.id ? '0 1px 2px rgba(0,0,0,0.04)' : 'none',
+                }}
               >
-                <SlidersHorizontal size={13} />
-                <span>Edit Details</span>
+                {tab.label}
               </button>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={deactivateWorkspace}
-                style={{ fontSize: 12.5, padding: '7px 14px', display: 'flex', alignItems: 'center', gap: 6, color: 'var(--accent-rose, #f43f5e)' }}
-                title="Deactivate workspace and return to global mode"
-              >
-                <XCircle size={13} />
-                <span>Deactivate</span>
-              </button>
-            </div>
+            ))}
           </div>
 
-          {/* Active Workspace Metrics Row */}
-          <div
+          {/* Sort Selector */}
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value)}
             style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-              gap: 12,
-              marginBottom: 18,
-              padding: '14px 16px',
-              borderRadius: 'var(--radius-md, 8px)',
-              background: 'var(--bg-card)',
+              fontSize: 11.5,
+              padding: '4px 8px',
+              borderRadius: 'var(--radius-xs, 4px)',
               border: '1px solid var(--border-subtle)',
+              background: 'var(--bg-secondary)',
+              color: 'var(--text-primary)',
+              cursor: 'pointer',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div
-                style={{
-                  width: 34,
-                  height: 34,
-                  borderRadius: 8,
-                  backgroundColor: 'rgba(99, 102, 241, 0.1)',
-                  color: 'var(--accent-primary, #6366f1)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
+            <option value="recent">Recently Updated</option>
+            <option value="created">Recently Created</option>
+            <option value="name">Name (A-Z)</option>
+          </select>
+        </div>
+      </div>
+
+      {/* ── 3. Workspace List (Clean Table Layout) ── */}
+      {filteredWorkspaces.length > 0 ? (
+        <div
+          style={{
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-sm, 6px)',
+            overflowX: 'auto',
+          }}
+        >
+          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+            <thead>
+              <tr style={{ background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-subtle)' }}>
+                <th style={{ padding: '10px 14px', fontSize: 11.5, fontWeight: 700, color: 'var(--text-primary)' }}>
+                  WORKSPACE
+                </th>
+                <th style={{ padding: '10px 14px', fontSize: 11.5, fontWeight: 700, color: 'var(--text-primary)', width: 140 }}>
+                  INDEXED PAPERS
+                </th>
+                <th style={{ padding: '10px 14px', fontSize: 11.5, fontWeight: 700, color: 'var(--text-primary)', width: 140 }}>
+                  GRAPH NODES
+                </th>
+                <th style={{ padding: '10px 14px', fontSize: 11.5, fontWeight: 700, color: 'var(--text-primary)', width: 120 }}>
+                  STATUS
+                </th>
+                <th style={{ padding: '10px 14px', fontSize: 11.5, fontWeight: 700, color: 'var(--text-primary)', width: 130 }}>
+                  DATE
+                </th>
+                <th style={{ padding: '10px 14px', fontSize: 11.5, fontWeight: 700, color: 'var(--text-primary)', textAlign: 'right', width: 180 }}>
+                  ACTIONS
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredWorkspaces.map((ws) => {
+                const isActive = activeWorkspace && activeWorkspace.id === ws.id;
+                const isArchived = !!ws.state_json?.archived;
+                const stats = getWorkspaceStats(ws.id);
+
+                return (
+                  <tr
+                    key={ws.id}
+                    style={{
+                      borderBottom: '1px solid var(--border-subtle)',
+                      background: isActive ? 'rgba(37, 99, 235, 0.03)' : 'transparent',
+                    }}
+                  >
+                    {/* Name & Description */}
+                    <td style={{ padding: '12px 14px', verticalAlign: 'top' }}>
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                        <div
+                          style={{
+                            width: 26,
+                            height: 26,
+                            borderRadius: 4,
+                            background: isActive ? 'rgba(37, 99, 235, 0.1)' : 'var(--bg-subtle)',
+                            color: isActive ? 'var(--accent-primary, #2563eb)' : 'var(--text-muted)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            flexShrink: 0,
+                            marginTop: 2,
+                          }}
+                        >
+                          <FolderKanban size={13} />
+                        </div>
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span
+                              onClick={() => handleOpen(ws.id)}
+                              style={{
+                                fontSize: 13,
+                                fontWeight: 600,
+                                color: 'var(--text-primary)',
+                                cursor: 'pointer',
+                              }}
+                              title="Open workspace"
+                            >
+                              {ws.title}
+                            </span>
+                            {isActive && (
+                              <span className="badge badge-emerald" style={{ fontSize: 9.5 }}>
+                                Active
+                              </span>
+                            )}
+                          </div>
+                          <p style={{ fontSize: 11.5, color: 'var(--text-secondary)', margin: '2px 0 0', lineHeight: 1.4, maxWidth: 520 }}>
+                            {ws.description || 'No description provided.'}
+                          </p>
+                        </div>
+                      </div>
+                    </td>
+
+                    {/* Indexed Papers Count */}
+                    <td style={{ padding: '12px 14px', verticalAlign: 'middle', fontSize: 12, color: 'var(--text-secondary)' }}>
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                        <BookOpen size={12} style={{ color: 'var(--text-muted)' }} />
+                        <span>{stats.paperCount}</span>
+                      </div>
+                    </td>
+
+                    {/* Graph Nodes Count */}
+                    <td style={{ padding: '12px 14px', verticalAlign: 'middle', fontSize: 12, color: 'var(--text-secondary)' }}>
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                        <Network size={12} style={{ color: 'var(--text-muted)' }} />
+                        <span>{stats.graphCount}</span>
+                      </div>
+                    </td>
+
+                    {/* Status */}
+                    <td style={{ padding: '12px 14px', verticalAlign: 'middle' }}>
+                      {isArchived ? (
+                        <span className="badge badge-gray" style={{ fontSize: 10 }}>Archived</span>
+                      ) : isActive ? (
+                        <span className="badge badge-emerald" style={{ fontSize: 10 }}>In Use</span>
+                      ) : (
+                        <span className="badge badge-neutral" style={{ fontSize: 10 }}>Ready</span>
+                      )}
+                    </td>
+
+                    {/* Date */}
+                    <td style={{ padding: '12px 14px', verticalAlign: 'middle', fontSize: 11.5, color: 'var(--text-muted)' }}>
+                      {ws.created_at ? ws.created_at.slice(0, 10) : 'Recent'}
+                    </td>
+
+                    {/* Actions */}
+                    <td style={{ padding: '12px 14px', verticalAlign: 'middle', textAlign: 'right' }}>
+                      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
+                        <button
+                          type="button"
+                          onClick={() => handleOpen(ws.id)}
+                          className="btn btn-secondary btn-sm"
+                          style={{ fontSize: 11, padding: '3px 8px', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                          title="Open workspace"
+                        >
+                          <span>{isActive ? 'Continue' : 'Open'}</span>
+                          <ArrowRight size={11} />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingWs(ws);
+                            setEditTitle(ws.title);
+                            setEditDesc(ws.description || '');
+                          }}
+                          className="btn btn-secondary btn-sm"
+                          style={{ padding: '3px 6px' }}
+                          title="Rename / Edit"
+                        >
+                          <Edit2 size={12} />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleToggleArchive(ws)}
+                          className="btn btn-secondary btn-sm"
+                          style={{ padding: '3px 6px', color: isArchived ? 'var(--accent-primary)' : 'var(--text-muted)' }}
+                          title={isArchived ? 'Unarchive' : 'Archive'}
+                        >
+                          <Archive size={12} />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setDeletingWs(ws)}
+                          className="btn btn-secondary btn-sm"
+                          style={{ padding: '3px 6px', color: 'var(--accent-red, #ef4444)' }}
+                          title="Delete workspace"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        /* ── 6. Clean Empty States ── */
+        <div
+          style={{
+            padding: 48,
+            textAlign: 'center',
+            color: 'var(--text-muted)',
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 'var(--radius-sm, 6px)',
+          }}
+        >
+          <FolderKanban size={32} style={{ margin: '0 auto 10px', color: 'var(--text-muted)' }} />
+          <h3 style={{ fontSize: 14, fontWeight: 700, margin: '0 0 6px', color: 'var(--text-primary)' }}>
+            {searchQuery ? 'No Workspaces Found' : 'No Workspaces Created'}
+          </h3>
+          <p style={{ fontSize: 12, margin: '0 auto 16px', maxWidth: 400, lineHeight: 1.5 }}>
+            {searchQuery
+              ? `No research workspaces match the search query "${searchQuery}". Clear your search filter or create a new one.`
+              : 'Create a research workspace to isolate literature search results, knowledge graph topology, and synthesis notes.'}
+          </p>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            onClick={() => {
+              setSearchQuery('');
+              setIsCreateOpen(true);
+            }}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5 }}
+          >
+            <Plus size={13} />
+            <span>Create Workspace</span>
+          </button>
+        </div>
+      )}
+
+      {/* ── 5. Clean Workspace Creation Modal ── */}
+      {isCreateOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.45)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: 16,
+          }}
+        >
+          <div
+            style={{
+              background: 'var(--bg-card)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 'var(--radius-md, 8px)',
+              width: '100%',
+              maxWidth: 520,
+              padding: '20px 24px',
+              boxShadow: '0 10px 25px rgba(0,0,0,0.15)',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
+                Create Research Workspace
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsCreateOpen(false)}
+                style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 0 }}
               >
-                <BookOpen size={16} />
-              </div>
-              <div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>
-                  Found Papers
-                </div>
-                <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>
-                  {searchResults.length} Papers
-                </div>
-              </div>
+                <X size={15} />
+              </button>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div
+            {/* Mode Tabs: Blank vs Template */}
+            <div style={{ display: 'flex', gap: 4, background: 'var(--bg-secondary)', padding: 3, borderRadius: 'var(--radius-xs, 4px)', marginBottom: 16 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setCreateMode('blank');
+                  setSelectedTemplate(null);
+                }}
                 style={{
-                  width: 34,
-                  height: 34,
-                  borderRadius: 8,
-                  backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                  color: 'var(--accent-emerald, #10b981)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
+                  flex: 1,
+                  fontSize: 12,
+                  padding: '5px 10px',
+                  borderRadius: 3,
+                  border: 'none',
+                  background: createMode === 'blank' ? 'var(--bg-card)' : 'transparent',
+                  color: createMode === 'blank' ? 'var(--text-primary)' : 'var(--text-muted)',
+                  fontWeight: createMode === 'blank' ? 600 : 400,
+                  cursor: 'pointer',
                 }}
               >
-                <Network size={16} />
-              </div>
-              <div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>
-                  Knowledge Graph
-                </div>
-                <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>
-                  {addedToGraphPaperIds.length} Nodes
-                </div>
-              </div>
+                Blank Workspace
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setCreateMode('template');
+                  if (!selectedTemplate) setSelectedTemplate(researchTemplates[0]);
+                }}
+                style={{
+                  flex: 1,
+                  fontSize: 12,
+                  padding: '5px 10px',
+                  borderRadius: 3,
+                  border: 'none',
+                  background: createMode === 'template' ? 'var(--bg-card)' : 'transparent',
+                  color: createMode === 'template' ? 'var(--text-primary)' : 'var(--text-muted)',
+                  fontWeight: createMode === 'template' ? 600 : 400,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 4,
+                }}
+              >
+                <Sparkles size={11} style={{ color: 'var(--accent-primary)' }} />
+                <span>Research Template</span>
+              </button>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div
-                style={{
-                  width: 34,
-                  height: 34,
-                  borderRadius: 8,
-                  backgroundColor: 'rgba(245, 158, 11, 0.1)',
-                  color: 'var(--accent-amber, #f59e0b)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <FileText size={16} />
-              </div>
-              <div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>
-                  Paper Reader
-                </div>
-                <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>
-                  {activeReaderPaper ? '1 Ingested' : 'Ready'}
-                </div>
-              </div>
-            </div>
+            <form onSubmit={handleCreate}>
+              {createMode === 'blank' ? (
+                <>
+                  <div style={{ marginBottom: 12 }}>
+                    <label style={{ display: 'block', fontSize: 11.5, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>
+                      Workspace Name
+                    </label>
+                    <input
+                      type="text"
+                      value={newTitle}
+                      onChange={(e) => setNewTitle(e.target.value)}
+                      placeholder="e.g. Quantization-Aware Training, Diffusion Models..."
+                      required
+                      autoFocus
+                      style={{
+                        width: '100%',
+                        fontSize: 12.5,
+                        padding: '7px 10px',
+                        borderRadius: 'var(--radius-xs, 4px)',
+                        border: '1px solid var(--border-subtle)',
+                        background: 'var(--bg-secondary)',
+                        color: 'var(--text-primary)',
+                      }}
+                    />
+                  </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div
-                style={{
-                  width: 34,
-                  height: 34,
-                  borderRadius: 8,
-                  backgroundColor: 'rgba(139, 92, 246, 0.1)',
-                  color: '#8b5cf6',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <Compass size={16} />
-              </div>
-              <div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>
-                  Research Domain
+                  <div style={{ marginBottom: 16 }}>
+                    <label style={{ display: 'block', fontSize: 11.5, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>
+                      Description (Optional)
+                    </label>
+                    <textarea
+                      value={newDesc}
+                      onChange={(e) => setNewDesc(e.target.value)}
+                      placeholder="Research scope, questions, or target venue..."
+                      rows={3}
+                      style={{
+                        width: '100%',
+                        fontSize: 12.5,
+                        padding: '7px 10px',
+                        borderRadius: 'var(--radius-xs, 4px)',
+                        border: '1px solid var(--border-subtle)',
+                        background: 'var(--bg-secondary)',
+                        color: 'var(--text-primary)',
+                        resize: 'vertical',
+                      }}
+                    />
+                  </div>
+                </>
+              ) : (
+                /* Template Selector */
+                <div style={{ marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <label style={{ display: 'block', fontSize: 11.5, fontWeight: 600, color: 'var(--text-secondary)' }}>
+                    Select Research Blueprint:
+                  </label>
+                  {researchTemplates.map((t) => {
+                    const isSel = selectedTemplate?.id === t.id;
+                    return (
+                      <div
+                        key={t.id}
+                        onClick={() => setSelectedTemplate(t)}
+                        style={{
+                          padding: '10px 12px',
+                          borderRadius: 'var(--radius-xs, 4px)',
+                          border: `1px solid ${isSel ? 'var(--accent-primary, #2563eb)' : 'var(--border-subtle)'}`,
+                          background: isSel ? 'rgba(37, 99, 235, 0.05)' : 'var(--bg-secondary)',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+                          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' }}>{t.title}</span>
+                          <span className="badge badge-neutral" style={{ fontSize: 9.5 }}>{t.badge}</span>
+                        </div>
+                        <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: 0, lineHeight: 1.35 }}>
+                          {t.description}
+                        </p>
+                      </div>
+                    );
+                  })}
                 </div>
-                <div
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 600,
-                    color: 'var(--text-primary)',
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    maxWidth: 160,
-                  }}
-                  title={activeWorkspace.title}
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setIsCreateOpen(false)}
                 >
-                  {activeWorkspace.title}
-                </div>
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting || (createMode === 'blank' ? !newTitle.trim() : !selectedTemplate)}
+                  className="btn btn-primary btn-sm"
+                >
+                  {isSubmitting ? 'Creating...' : 'Create Workspace'}
+                </button>
               </div>
-            </div>
-          </div>
-
-          {/* Quick Launch Action Buttons */}
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, paddingTop: 6 }}>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => navigate('/chat')}
-              style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5, fontWeight: 600 }}
-            >
-              <Sparkles size={14} />
-              <span>AI Research Chat</span>
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => navigate('/search')}
-              style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5 }}
-            >
-              <Search size={14} />
-              <span>Search Literature</span>
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => navigate('/search-results')}
-              style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5 }}
-            >
-              <BookOpen size={14} />
-              <span>Founded Papers</span>
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => navigate('/knowledge-graph')}
-              style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5 }}
-            >
-              <Network size={14} />
-              <span>Knowledge Graph ({addedToGraphPaperIds.length})</span>
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => navigate('/litgraph')}
-              style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5 }}
-            >
-              <Workflow size={14} />
-              <span>LitGraph Similarity</span>
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => navigate('/pdf-inspector')}
-              style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5 }}
-            >
-              <FileText size={14} />
-              <span>Paper Reader & Markdown</span>
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => navigate('/novelty')}
-              style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5 }}
-            >
-              <Lightbulb size={14} />
-              <span>Novelty & Gaps</span>
-            </button>
+            </form>
           </div>
         </div>
       )}
 
-      {/* Active Workspace Long-Term Research Memory & Hypotheses Ledger */}
-      {activeWorkspace && (
+      {/* ── 4. Rename / Edit Modal ── */}
+      {editingWs && (
         <div
-          className="card"
           style={{
-            marginBottom: 24,
-            padding: '20px 22px',
-            borderRadius: 'var(--radius-md, 10px)',
-            background: 'var(--bg-card)',
-            border: '1px solid var(--border-subtle)',
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.45)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: 16,
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div
-                style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: 8,
-                  backgroundColor: 'rgba(99, 102, 241, 0.1)',
-                  color: 'var(--accent-primary)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <Brain size={17} />
-              </div>
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
-                    Workspace Research Memory & Hypotheses Ledger
-                  </h3>
-                  <span className="badge badge-blue" style={{ fontSize: 11 }}>
-                    {(workspaceMemories || []).length} Recorded
-                  </span>
-                </div>
-                <p style={{ margin: 0, fontSize: 12.5, color: 'var(--text-muted)' }}>
-                  Persistent architectural decisions, active hypotheses, hardware constraints, and empirical findings injected into AI reasoning.
-                </p>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              onClick={() => setIsAddingMemory((v) => !v)}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}
-            >
-              <Plus size={13} />
-              <span>{isAddingMemory ? 'Cancel' : 'Add Memory'}</span>
-            </button>
-          </div>
-
-          {/* New Memory Form */}
-          {isAddingMemory && (
-            <form
-              onSubmit={handleCreateMemory}
-              style={{
-                marginBottom: 16,
-                padding: '14px 16px',
-                borderRadius: 'var(--radius-sm, 6px)',
-                background: 'var(--bg-subtle)',
-                border: '1px solid var(--border-subtle)',
-              }}
-            >
-              <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr 140px', gap: 10, marginBottom: 10 }}>
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>
-                    CATEGORY
-                  </label>
-                  <select
-                    value={newCategory}
-                    onChange={(e) => setNewCategory(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '6px 8px',
-                      borderRadius: 6,
-                      border: '1px solid var(--border-subtle)',
-                      background: 'var(--bg-input)',
-                      color: 'var(--text-primary)',
-                      fontSize: 12,
-                    }}
-                  >
-                    <option value="decision">Decision</option>
-                    <option value="hypothesis">Hypothesis</option>
-                    <option value="constraint">Constraint</option>
-                    <option value="finding">Finding</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>
-                    TITLE
-                  </label>
-                  <input
-                    type="text"
-                    value={newTitle}
-                    onChange={(e) => setNewTitle(e.target.value)}
-                    placeholder="e.g. BF16 Precision Target, LoRA Rank 16 Hypothesis..."
-                    style={{
-                      width: '100%',
-                      boxSizing: 'border-box',
-                      padding: '6px 10px',
-                      borderRadius: 6,
-                      border: '1px solid var(--border-subtle)',
-                      background: 'var(--bg-input)',
-                      color: 'var(--text-primary)',
-                      fontSize: 12,
-                    }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>
-                    STATUS
-                  </label>
-                  <select
-                    value={newStatus}
-                    onChange={(e) => setNewStatus(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '6px 8px',
-                      borderRadius: 6,
-                      border: '1px solid var(--border-subtle)',
-                      background: 'var(--bg-input)',
-                      color: 'var(--text-primary)',
-                      fontSize: 12,
-                    }}
-                  >
-                    <option value="active">Active</option>
-                    <option value="confirmed">Confirmed</option>
-                    <option value="refuted">Refuted</option>
-                  </select>
-                </div>
-              </div>
-
-              <div style={{ marginBottom: 10 }}>
-                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>
-                  DETAILS & RATIONALE
+          <div
+            style={{
+              background: 'var(--bg-card)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 'var(--radius-md, 8px)',
+              width: '100%',
+              maxWidth: 460,
+              padding: '20px 24px',
+            }}
+          >
+            <h3 style={{ fontSize: 15, fontWeight: 700, margin: '0 0 12px', color: 'var(--text-primary)' }}>
+              Edit Workspace
+            </h3>
+            <form onSubmit={handleSaveEdit}>
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: 'block', fontSize: 11.5, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>
+                  Workspace Title
                 </label>
-                <textarea
-                  value={newContent}
-                  onChange={(e) => setNewContent(e.target.value)}
-                  placeholder="Record the exact rationale, hardware limit, or empirical observation..."
-                  rows={2}
+                <input
+                  type="text"
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  required
                   style={{
                     width: '100%',
-                    boxSizing: 'border-box',
-                    padding: '8px 10px',
-                    borderRadius: 6,
+                    fontSize: 12.5,
+                    padding: '7px 10px',
+                    borderRadius: 'var(--radius-xs, 4px)',
                     border: '1px solid var(--border-subtle)',
-                    background: 'var(--bg-input)',
+                    background: 'var(--bg-secondary)',
                     color: 'var(--text-primary)',
-                    fontSize: 12,
-                    fontFamily: 'inherit',
+                  }}
+                />
+              </div>
+
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: 'block', fontSize: 11.5, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>
+                  Description
+                </label>
+                <textarea
+                  value={editDesc}
+                  onChange={(e) => setEditDesc(e.target.value)}
+                  rows={3}
+                  style={{
+                    width: '100%',
+                    fontSize: 12.5,
+                    padding: '7px 10px',
+                    borderRadius: 'var(--radius-xs, 4px)',
+                    border: '1px solid var(--border-subtle)',
+                    background: 'var(--bg-secondary)',
+                    color: 'var(--text-primary)',
+                    resize: 'vertical',
                   }}
                 />
               </div>
@@ -635,562 +841,76 @@ export default function WorkspacesView() {
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
-                  onClick={() => setIsAddingMemory(false)}
+                  onClick={() => setEditingWs(null)}
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
+                  disabled={!editTitle.trim()}
                   className="btn btn-primary btn-sm"
-                  disabled={!newTitle.trim() || !newContent.trim()}
                 >
-                  Save to Workspace Memory
+                  Save Changes
                 </button>
               </div>
             </form>
-          )}
-
-          {/* Filter Tabs */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
-            {['all', 'decision', 'hypothesis', 'constraint', 'finding'].map((cat) => (
-              <button
-                key={cat}
-                type="button"
-                onClick={() => setMemoryFilter(cat)}
-                style={{
-                  border: 'none',
-                  padding: '3px 10px',
-                  borderRadius: 4,
-                  fontSize: 11.5,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  background: memoryFilter === cat ? 'var(--accent-primary)' : 'var(--bg-subtle)',
-                  color: memoryFilter === cat ? '#fff' : 'var(--text-muted)',
-                  textTransform: 'capitalize',
-                  transition: 'all 0.1s ease',
-                }}
-              >
-                {cat} {cat === 'all' ? `(${workspaceMemories.length})` : `(${workspaceMemories.filter((m) => m.category === cat).length})`}
-              </button>
-            ))}
           </div>
-
-          {/* Memories List */}
-          {filteredMemories.length === 0 ? (
-            <div style={{ padding: '14px 16px', background: 'var(--bg-subtle)', borderRadius: 6, fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>
-              No {memoryFilter === 'all' ? '' : memoryFilter} memories recorded yet. Click "Add Memory" above to persist research decisions and constraints.
-            </div>
-          ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 10 }}>
-              {filteredMemories.map((mem) => {
-                const badgeColor =
-                  mem.category === 'decision'
-                    ? 'badge-blue'
-                    : mem.category === 'hypothesis'
-                    ? 'badge-purple'
-                    : mem.category === 'constraint'
-                    ? 'badge-amber'
-                    : 'badge-emerald';
-
-                const statusColor =
-                  mem.status === 'confirmed'
-                    ? '#059669'
-                    : mem.status === 'refuted'
-                    ? '#e11d48'
-                    : 'var(--accent-primary)';
-
-                return (
-                  <div
-                    key={mem.id}
-                    style={{
-                      background: 'var(--bg-subtle)',
-                      border: '1px solid var(--border-subtle)',
-                      borderRadius: 8,
-                      padding: '12px 14px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      justifyContent: 'space-between',
-                    }}
-                  >
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <span className={`badge ${badgeColor}`} style={{ textTransform: 'uppercase', fontSize: 10, fontWeight: 700 }}>
-                            {mem.category}
-                          </span>
-                          <span
-                            style={{
-                              fontSize: 10,
-                              fontWeight: 700,
-                              padding: '1px 6px',
-                              borderRadius: 4,
-                              background: 'var(--bg-card)',
-                              color: statusColor,
-                              border: `1px solid ${statusColor}40`,
-                              textTransform: 'uppercase',
-                            }}
-                          >
-                            {mem.status}
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => deleteWorkspaceMemory(activeWorkspace.id, mem.id)}
-                          style={{
-                            background: 'none',
-                            border: 'none',
-                            cursor: 'pointer',
-                            color: 'var(--text-muted)',
-                            padding: 2,
-                          }}
-                          title="Delete memory item"
-                        >
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
-
-                      <h4 style={{ margin: '0 0 4px', fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
-                        {mem.title}
-                      </h4>
-                      <p style={{ margin: 0, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                        {mem.content}
-                      </p>
-                    </div>
-
-                    {mem.created_at && (
-                      <div style={{ marginTop: 8, paddingTop: 6, borderTop: '1px solid var(--border-subtle)', fontSize: 10.5, color: 'var(--text-muted)' }}>
-                        Recorded: {mem.created_at.slice(0, 10)}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
         </div>
       )}
 
-      {/* Search & Filter Toolbar */}
-      <div
-        className="card"
-        style={{
-          marginBottom: 20,
-          padding: '12px 18px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: 12,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 260 }}>
+      {/* ── 4. Delete Confirmation Dialog ── */}
+      {deletingWs && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.45)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: 16,
+          }}
+        >
           <div
             style={{
-              flex: 1,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              background: 'var(--bg-input)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: 'var(--radius-sm)',
-              padding: '0 12px',
-            }}
-          >
-            <Search size={14} style={{ color: 'var(--text-muted)' }} />
-            <input
-              type="text"
-              value={filterTerm}
-              onChange={(e) => setFilterTerm(e.target.value)}
-              placeholder="Search workspaces by keyword or title..."
-              style={{
-                flex: 1,
-                background: 'transparent',
-                border: 'none',
-                outline: 'none',
-                color: 'var(--text-primary)',
-                fontSize: 13,
-                padding: '8px 0',
-              }}
-            />
-            {filterTerm && (
-              <button
-                type="button"
-                onClick={() => setFilterTerm('')}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 12 }}
-              >
-                Clear
-              </button>
-            )}
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{ display: 'flex', background: 'var(--bg-subtle)', padding: 2, borderRadius: 'var(--radius-sm)' }}>
-            <button
-              type="button"
-              onClick={() => setFilterType('all')}
-              style={{
-                border: 'none',
-                background: filterType === 'all' ? 'var(--bg-card)' : 'transparent',
-                color: filterType === 'all' ? 'var(--text-primary)' : 'var(--text-muted)',
-                boxShadow: filterType === 'all' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
-                padding: '5px 12px',
-                borderRadius: 'calc(var(--radius-sm) - 2px)',
-                fontSize: 12,
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >
-              All ({workspaces.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => setFilterType('active')}
-              style={{
-                border: 'none',
-                background: filterType === 'active' ? 'var(--bg-card)' : 'transparent',
-                color: filterType === 'active' ? 'var(--text-primary)' : 'var(--text-muted)',
-                boxShadow: filterType === 'active' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
-                padding: '5px 12px',
-                borderRadius: 'calc(var(--radius-sm) - 2px)',
-                fontSize: 12,
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >
-              Active
-            </button>
-          </div>
-
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value)}
-            style={{
-              padding: '6px 12px',
-              fontSize: 12,
-              borderRadius: 'var(--radius-sm)',
-              border: '1px solid var(--border-subtle)',
               background: 'var(--bg-card)',
-              color: 'var(--text-primary)',
-              cursor: 'pointer',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 'var(--radius-md, 8px)',
+              width: '100%',
+              maxWidth: 420,
+              padding: '20px 24px',
             }}
           >
-            <option value="recent">Recently Created</option>
-            <option value="name">Alphabetical (A-Z)</option>
-          </select>
-        </div>
-      </div>
-
-      {/* Workspaces Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 18, marginBottom: 36 }}>
-        {filteredWorkspaces.map((ws) => {
-          const isActive = activeWorkspace && activeWorkspace.id === ws.id;
-          const stats = getWorkspaceStats(ws.id);
-
-          return (
-            <div
-              key={ws.id}
-              className="card"
-              style={{
-                padding: '20px 22px',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'space-between',
-                borderRadius: 'var(--radius-md, 10px)',
-                border: isActive ? '1.5px solid var(--accent-primary, #6366f1)' : '1px solid var(--border-subtle)',
-                background: isActive ? 'var(--bg-subtle)' : 'var(--bg-card)',
-                boxShadow: isActive ? '0 4px 16px rgba(99, 102, 241, 0.08)' : 'none',
-                transition: 'border-color 0.2s, box-shadow 0.2s, transform 0.2s',
-              }}
-            >
-              <div>
-                {/* Card Header */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div
-                      style={{
-                        width: 28,
-                        height: 28,
-                        borderRadius: 6,
-                        backgroundColor: isActive ? 'rgba(99, 102, 241, 0.15)' : 'var(--bg-subtle)',
-                        color: isActive ? 'var(--accent-primary)' : 'var(--text-muted)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }}
-                    >
-                      <FolderKanban size={15} />
-                    </div>
-                    <span style={{ fontSize: 11.5, color: 'var(--text-muted)', fontFamily: 'var(--font-code)' }}>
-                      {ws.id}
-                    </span>
-                  </div>
-
-                  {isActive ? (
-                    <span className="badge badge-emerald" style={{ fontSize: 11, fontWeight: 600 }}>Active</span>
-                  ) : (
-                    <span className="badge badge-neutral" style={{ fontSize: 11 }}>Workspace</span>
-                  )}
-                </div>
-
-                {/* Card Title */}
-                <h3
-                  onClick={() => handleOpenWorkspace(ws.id)}
-                  style={{
-                    fontSize: 16,
-                    fontWeight: 700,
-                    margin: '0 0 8px',
-                    color: 'var(--text-primary)',
-                    lineHeight: 1.35,
-                    cursor: 'pointer',
-                  }}
-                  title={ws.title}
-                >
-                  {ws.title}
-                </h3>
-
-                {/* Card Description */}
-                <p
-                  style={{
-                    fontSize: 12.8,
-                    color: 'var(--text-secondary)',
-                    margin: '0 0 16px',
-                    lineHeight: 1.5,
-                    display: '-webkit-box',
-                    WebkitLineClamp: 3,
-                    WebkitBoxOrient: 'vertical',
-                    overflow: 'hidden',
-                  }}
-                >
-                  {ws.description || 'No specific description provided for this research environment.'}
-                </p>
-
-                {/* Scoped Stats Chips */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 16 }}>
-                  <span
-                    style={{
-                      fontSize: 11,
-                      padding: '3px 8px',
-                      borderRadius: 4,
-                      backgroundColor: 'var(--bg-subtle)',
-                      border: '1px solid var(--border-subtle)',
-                      color: 'var(--text-secondary)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 4,
-                    }}
-                  >
-                    <BookOpen size={11} style={{ color: 'var(--accent-primary)' }} />
-                    {stats.paperCount} {stats.paperCount === 1 ? 'Paper' : 'Papers'}
-                  </span>
-
-                  <span
-                    style={{
-                      fontSize: 11,
-                      padding: '3px 8px',
-                      borderRadius: 4,
-                      backgroundColor: 'var(--bg-subtle)',
-                      border: '1px solid var(--border-subtle)',
-                      color: 'var(--text-secondary)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 4,
-                    }}
-                  >
-                    <Network size={11} style={{ color: 'var(--accent-emerald, #10b981)' }} />
-                    {stats.graphCount} Graph Nodes
-                  </span>
-
-                  {stats.hasReader && (
-                    <span
-                      style={{
-                        fontSize: 11,
-                        padding: '3px 8px',
-                        borderRadius: 4,
-                        backgroundColor: 'var(--bg-subtle)',
-                        border: '1px solid var(--border-subtle)',
-                        color: 'var(--text-secondary)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 4,
-                      }}
-                    >
-                      <FileText size={11} style={{ color: 'var(--accent-amber, #f59e0b)' }} />
-                      Reader Ingested
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* Card Footer */}
-              <div style={{ paddingTop: 14, borderTop: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {/* Meta info & Delete */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--text-muted)' }}>
-                    <Calendar size={12} />
-                    <span>{ws.created_at ? ws.created_at.slice(0, 10) : 'Active'}</span>
-                  </div>
-
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    onClick={() => {
-                      if (confirm(`Are you sure you want to delete workspace "${ws.title}"? This cannot be undone.`)) {
-                        deleteWorkspace(ws.id);
-                      }
-                    }}
-                    style={{ padding: '4px 8px', color: 'var(--accent-rose)', opacity: 0.85 }}
-                    title="Delete Workspace"
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-
-                {/* Action Buttons Row */}
-                <div style={{ display: 'flex', gap: 8, width: '100%' }}>
-                  {isActive && (
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      onClick={deactivateWorkspace}
-                      style={{
-                        flex: 1,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: 5,
-                        fontSize: 12,
-                        padding: '6px 10px',
-                        color: 'var(--accent-rose, #f43f5e)',
-                      }}
-                      title="Deactivate this workspace"
-                    >
-                      <XCircle size={13} />
-                      <span>Deactivate</span>
-                    </button>
-                  )}
-
-                  <button
-                    type="button"
-                    className="btn btn-primary btn-sm"
-                    onClick={() => handleOpenWorkspace(ws.id)}
-                    style={{
-                      flex: 1,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: 5,
-                      fontSize: 12,
-                      padding: '6px 14px',
-                      fontWeight: 600,
-                    }}
-                  >
-                    <span>{isActive ? 'Open Workspace' : 'Switch & Open'}</span>
-                    <ArrowRight size={13} />
-                  </button>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Empty State when no workspaces match search */}
-      {filteredWorkspaces.length === 0 && (
-        <div className="card" style={{ padding: 48, textAlign: 'center', color: 'var(--text-muted)', marginBottom: 36 }}>
-          <FolderKanban size={42} style={{ margin: '0 auto 14px', display: 'block', color: 'var(--border-hover)' }} />
-          <h3 style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6 }}>
-            {filterTerm ? `No workspaces matching "${filterTerm}"` : 'No Research Workspaces Found'}
-          </h3>
-          <p style={{ fontSize: 13, maxWidth: 460, margin: '0 auto 18px', color: 'var(--text-secondary)' }}>
-            Create an isolated workspace to organize papers, custom knowledge graphs, and research notes for a specific scientific domain.
-          </p>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={() => openWorkspaceModal()}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-          >
-            <Plus size={14} />
-            <span>Create New Workspace</span>
-          </button>
-        </div>
-      )}
-
-      {/* Quick-Start Scientific Topic Blueprints */}
-      <div
-        className="card"
-        style={{
-          padding: '24px 28px',
-          borderRadius: 'var(--radius-lg, 12px)',
-          background: 'var(--bg-subtle)',
-          border: '1px solid var(--border-subtle)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 18 }}>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-              <Sparkles size={16} style={{ color: 'var(--accent-primary)' }} />
-              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--text-primary)' }}>
-                Quick-Start Scientific Blueprints
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, color: 'var(--accent-red, #ef4444)' }}>
+              <AlertTriangle size={18} />
+              <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
+                Delete Workspace?
               </h3>
             </div>
-            <p style={{ margin: 0, fontSize: 12.5, color: 'var(--text-muted)' }}>
-              Bootstrap an isolated research environment instantly from pre-configured scientific research topics.
+            <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', margin: '0 0 16px', lineHeight: 1.45 }}>
+              Are you sure you want to delete <strong>"{deletingWs.title}"</strong>? This action cannot be undone and will permanently remove associated research graph and literature session records.
             </p>
-          </div>
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14 }}>
-          {researchTemplates.map((tpl, i) => (
-            <div
-              key={i}
-              style={{
-                padding: '16px 18px',
-                borderRadius: 'var(--radius-md, 8px)',
-                background: 'var(--bg-card)',
-                border: '1px solid var(--border-subtle)',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'space-between',
-              }}
-            >
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                  <span className="badge badge-purple" style={{ fontSize: 10.5 }}>
-                    {tpl.badge}
-                  </span>
-                </div>
-                <h4 style={{ margin: '0 0 6px', fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.35 }}>
-                  {tpl.title}
-                </h4>
-                <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.45 }}>
-                  {tpl.description}
-                </p>
-              </div>
-
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
-                onClick={() => handleLaunchTemplate(tpl)}
-                style={{
-                  width: '100%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 6,
-                  fontSize: 12,
-                  fontWeight: 600,
-                }}
+                onClick={() => setDeletingWs(null)}
               >
-                <Plus size={13} />
-                <span>Launch Blueprint</span>
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                className="btn btn-sm"
+                style={{ background: 'var(--accent-red, #ef4444)', color: '#fff', border: 'none' }}
+              >
+                Delete Workspace
               </button>
             </div>
-          ))}
+          </div>
         </div>
-      </div>
-    </section>
+      )}
+    </div>
   );
 }
-

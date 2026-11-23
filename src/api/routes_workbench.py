@@ -13,6 +13,11 @@ class WorkspaceCreate(BaseModel):
     title: str
     description: Optional[str] = ""
 
+class WorkspaceUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    state_json: Optional[dict] = None
+
 class WorkspaceOut(BaseModel):
     id: str
     title: str
@@ -230,6 +235,30 @@ async def get_workspace(workspace_id: str, db: AsyncSession = Depends(get_db)):
     ws = await db.get(WorkspaceModel, workspace_id)
     if not ws:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Workspace '{workspace_id}' not found.")
+    return WorkspaceOut(
+        id=ws.id,
+        title=ws.title,
+        description=ws.description or "",
+        created_at=ws.created_at.isoformat() if ws.created_at else "",
+        state_json=ws.state_json or {},
+    )
+
+@router.patch("/workspaces/{workspace_id}", response_model=WorkspaceOut)
+async def update_workspace(workspace_id: str, req: WorkspaceUpdate, db: AsyncSession = Depends(get_db)):
+    """Update a research workspace title, description, or archived state."""
+    ws = await db.get(WorkspaceModel, workspace_id)
+    if not ws:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Workspace '{workspace_id}' not found.")
+    if req.title is not None and req.title.strip():
+        ws.title = req.title.strip()
+    if req.description is not None:
+        ws.description = req.description.strip()
+    if req.state_json is not None:
+        current_state = dict(ws.state_json or {})
+        current_state.update(req.state_json)
+        ws.state_json = current_state
+    await db.commit()
+    await db.refresh(ws)
     return WorkspaceOut(
         id=ws.id,
         title=ws.title,
