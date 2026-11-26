@@ -1,160 +1,282 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Cpu,
   BookOpen,
-  Layers,
-  Server,
-  Brain,
-  Key,
-  Globe,
   Database,
+  Search,
+  Bot,
+  Server,
+  Shield,
+  Activity,
   CheckCircle2,
   XCircle,
   AlertCircle,
+  AlertTriangle,
   Loader2,
   Save,
+  RotateCcw,
   RefreshCw,
   Eye,
   EyeOff,
-  Zap,
-  Sliders,
+  ChevronDown,
+  ChevronRight,
   ExternalLink,
+  Trash2,
+  Play,
+  Check,
+  Star,
 } from 'lucide-react';
-import { useApp } from '../context/AppContext';
-import ModelConfigModal from '../components/modals/ModelConfigModal';
+import { KNOWN_PROVIDER_DEFS } from '../components/modals/ModelConfigModal';
 
 const API_BASE = '/api/v1/settings';
 
-const TABS = [
+const SETTINGS_NAV = [
   {
-    id: 'models',
-    label: 'AI Models & Providers',
-    icon: Cpu,
-    description: 'LLM inference providers, API credentials, and active models',
-    badge: 'Core',
+    section: 'MODELS & LITERATURE',
+    items: [
+      {
+        id: 'models',
+        label: 'AI Models & Providers',
+        icon: Cpu,
+        description: 'Manage LLM providers, API credentials, model checkpoints, and default routing.',
+      },
+      {
+        id: 'academic',
+        label: 'Academic & Search APIs',
+        icon: BookOpen,
+        description: 'Configure Semantic Scholar, OpenAlex polite pool, arXiv, CrossRef, and Europe PMC.',
+      },
+    ],
   },
   {
-    id: 'academic',
-    label: 'Academic & Search APIs',
-    icon: BookOpen,
-    description: 'Literature graph APIs: Semantic Scholar, OpenAlex, arXiv, CrossRef',
-    badge: 'Literature',
+    section: 'PIPELINE & EXECUTION',
+    items: [
+      {
+        id: 'rag',
+        label: 'Embeddings & Vector DB',
+        icon: Database,
+        description: 'Select embedding backend, model checkpoint, and dense vector dimensions.',
+      },
+      {
+        id: 'retrieval',
+        label: 'Research & Retrieval',
+        icon: Search,
+        description: 'Tune document chunking, overlap windows, Top-K retrieval, and ranking limits.',
+      },
+      {
+        id: 'agents',
+        label: 'Agents & Execution',
+        icon: Bot,
+        description: 'Configure global default LLM provider and multi-agent reasoning loop limits.',
+      },
+      {
+        id: 'infrastructure',
+        label: 'Cache & Infrastructure',
+        icon: Server,
+        description: 'Configure Redis paper cache, TTL policies, Searqon web search, and timeouts.',
+      },
+    ],
   },
   {
-    id: 'rag',
-    label: 'Embeddings & Vector RAG',
-    icon: Layers,
-    description: 'Dense vector embeddings, chunk sizes, and hybrid retrieval params',
-    badge: 'Vector DB',
-  },
-  {
-    id: 'infrastructure',
-    label: 'Cache & Infrastructure',
-    icon: Server,
-    description: 'Redis active paper cache, Searqon web research, and network timeouts',
-    badge: 'System',
-  },
-  {
-    id: 'reasoning',
-    label: 'Reasoning & Agent Limits',
-    icon: Brain,
-    description: 'Default LLM provider, multi-agent loop depth, and candidate rank limits',
-    badge: 'Engine',
+    section: 'SECURITY & OPERATIONS',
+    items: [
+      {
+        id: 'security',
+        label: 'Security & Credentials',
+        icon: Shield,
+        description: 'Audit stored API keys, inspect secret sources (SQLite vs .env), and revoke keys.',
+      },
+      {
+        id: 'diagnostics',
+        label: 'Diagnostics & Health',
+        icon: Activity,
+        description: 'Verify backend health, run live provider & service connectivity tests, and validate config.',
+      },
+    ],
   },
 ];
 
-export default function SettingsView() {
-  let isDark = false;
-  try {
-    const appCtx = useApp();
-    if (appCtx?.theme === 'dark') isDark = true;
-  } catch (e) {
-    if (typeof document !== 'undefined') {
-      isDark = document.body.classList.contains('dark-theme');
-    }
-  }
+// Map UI category -> backend system_settings keys
+const CATEGORY_KEYS = {
+  academic: [
+    'semantic_scholar_api_key',
+    'openalex_email',
+    'openalex_api_key',
+    'arxiv_base_url',
+    'crossref_base_url',
+    'europepmc_base_url',
+  ],
+  rag: ['embedding_provider', 'embedding_model', 'embedding_dim'],
+  retrieval: ['rag_top_k', 'rag_chunk_size', 'rag_chunk_overlap', 'default_rank_limit'],
+  agents: ['default_llm_provider', 'max_loop_iterations'],
+  infrastructure: [
+    'redis_enabled',
+    'redis_url',
+    'redis_active_paper_ttl',
+    'web_search_enabled',
+    'searqon_base_url',
+    'web_search_top_k',
+    'web_search_cache_ttl',
+    'searqon_timeout',
+  ],
+};
 
-  const [activeTab, setActiveTab] = useState('models');
+const ADVANCED_KEYS = new Set([
+  'arxiv_base_url',
+  'crossref_base_url',
+  'europepmc_base_url',
+  'rag_chunk_overlap',
+  'default_rank_limit',
+  'searqon_timeout',
+  'web_search_cache_ttl',
+  'redis_active_paper_ttl',
+]);
+
+export default function SettingsView() {
+  const [activeCategory, setActiveCategory] = useState('models');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [systemData, setSystemData] = useState({ categories: [], settings: [] });
+
+  // System settings state
+  const [systemSettings, setSystemSettings] = useState([]);
+  const [savedValues, setSavedValues] = useState({});
   const [formValues, setFormValues] = useState({});
   const [revealKeys, setRevealKeys] = useState({});
-  const [saveBanner, setSaveBanner] = useState(null);
+
+  // Providers state
+  const [providers, setProviders] = useState([]);
+  const [selectedProviderId, setSelectedProviderId] = useState('gemini');
+  const [providerTestResults, setProviderTestResults] = useState({});
+
+  // Service test & health state
   const [testingService, setTestingService] = useState({});
-  const [testResults, setTestResults] = useState({});
+  const [serviceTestResults, setServiceTestResults] = useState({});
+  const [healthStatus, setHealthStatus] = useState(null);
 
-  const t = {
-    canvasBg: isDark ? '#09090b' : '#f8fafc',
-    headerBg: isDark ? '#141417' : '#ffffff',
-    headerBorder: isDark ? '#27272a' : '#e2e8f0',
-    cardBg: isDark ? '#141417' : '#ffffff',
-    cardBorder: isDark ? '#27272a' : '#e2e8f0',
-    cardSubtleBg: isDark ? '#18181c' : '#f8fafc',
-    inputBg: isDark ? '#1c1c22' : '#ffffff',
-    inputBorder: isDark ? '#3f3f46' : '#cbd5e1',
-    inputText: isDark ? '#fafafa' : '#0f172a',
-    textPrimary: isDark ? '#fafafa' : '#0f172a',
-    textSecondary: isDark ? '#d4d4d8' : '#334155',
-    textMuted: isDark ? '#a1a1aa' : '#64748b',
-    tabInactiveBg: isDark ? '#18181c' : '#f1f5f9',
-    tabInactiveText: isDark ? '#a1a1aa' : '#475569',
-    tabActiveBg: isDark ? 'rgba(99, 102, 241, 0.18)' : '#eef2ff',
-    tabActiveBorder: isDark ? 'rgba(99, 102, 241, 0.5)' : '#c7d2fe',
-    tabActiveText: isDark ? '#a5b4fc' : '#4338ca',
-    btnSecondaryBg: isDark ? '#1c1c22' : '#ffffff',
-    btnSecondaryBorder: isDark ? '#3f3f46' : '#cbd5e1',
-    btnSecondaryText: isDark ? '#e4e4e7' : '#475569',
-  };
+  // Feedback & destructive confirmation modal
+  const [banner, setBanner] = useState(null);
+  const [confirmModal, setConfirmModal] = useState(null);
 
-  const fetchSystemSettings = useCallback(async () => {
+  const loadAll = useCallback(async () => {
+    setLoading(true);
     try {
-      setLoading(true);
-      const res = await fetch(`${API_BASE}/system`);
-      if (res.ok) {
-        const data = await res.json();
-        setSystemData(data);
-        const initialForm = {};
-        (data.settings || []).forEach((item) => {
-          initialForm[item.key] = item.value ?? '';
+      const [sysRes, provRes, healthRes] = await Promise.all([
+        fetch(`${API_BASE}/system`),
+        fetch(`${API_BASE}/providers`),
+        fetch('/api/v1/health').catch(() => null),
+      ]);
+
+      if (sysRes.ok) {
+        const data = await sysRes.json();
+        const items = data.settings || [];
+        setSystemSettings(items);
+        const vals = {};
+        items.forEach((item) => {
+          vals[item.key] = item.value ?? '';
         });
-        setFormValues(initialForm);
+        setSavedValues(vals);
+        setFormValues(vals);
+      }
+
+      if (provRes.ok) {
+        const pData = await provRes.json();
+        setProviders(pData.providers || []);
+      }
+
+      if (healthRes && healthRes.ok) {
+        const hData = await healthRes.json();
+        setHealthStatus({ ok: true, ...hData });
+      } else {
+        setHealthStatus({ ok: false, error: 'Backend health endpoint unreachable' });
       }
     } catch (err) {
-      console.error('Failed loading system settings:', err);
+      setBanner({ type: 'error', text: `Failed to load configuration: ${err.message}` });
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchSystemSettings();
-  }, [fetchSystemSettings]);
+    loadAll();
+  }, [loadAll]);
 
-  const handleInputChange = (key, value) => {
-    setFormValues((prev) => ({ ...prev, [key]: value }));
-    if (testResults[key]) {
-      setTestResults((prev) => {
-        const copy = { ...prev };
-        delete copy[key];
-        return copy;
-      });
+  const settingsByKey = useMemo(() => {
+    const map = {};
+    systemSettings.forEach((s) => {
+      map[s.key] = s;
+    });
+    return map;
+  }, [systemSettings]);
+
+  const isCategoryDirty = useCallback(
+    (catId) => {
+      const keys = CATEGORY_KEYS[catId] || [];
+      return keys.some((k) => String(formValues[k] ?? '') !== String(savedValues[k] ?? ''));
+    },
+    [formValues, savedValues]
+  );
+
+  const validationErrors = useMemo(() => {
+    const errs = {};
+    const chunkSize = Number(formValues.rag_chunk_size);
+    const chunkOverlap = Number(formValues.rag_chunk_overlap);
+    if (!Number.isNaN(chunkSize) && chunkSize < 100) {
+      errs.rag_chunk_size = 'Chunk size must be at least 100 characters.';
     }
+    if (!Number.isNaN(chunkOverlap) && !Number.isNaN(chunkSize) && chunkOverlap >= chunkSize) {
+      errs.rag_chunk_overlap = 'Chunk overlap must be smaller than chunk size.';
+    }
+    const topK = Number(formValues.rag_top_k);
+    if (!Number.isNaN(topK) && (topK < 1 || topK > 100)) {
+      errs.rag_top_k = 'Top-K must be between 1 and 100.';
+    }
+    const maxLoops = Number(formValues.max_loop_iterations);
+    if (!Number.isNaN(maxLoops) && (maxLoops < 1 || maxLoops > 50)) {
+      errs.max_loop_iterations = 'Max loop iterations must be between 1 and 50.';
+    }
+    return errs;
+  }, [formValues]);
+
+  const handleFieldChange = (key, value) => {
+    setFormValues((prev) => ({ ...prev, [key]: value }));
   };
 
-  const handleSaveTab = async (category) => {
-    setSaving(true);
-    setSaveBanner(null);
-    try {
-      const categorySettings = (systemData.settings || []).filter((s) => s.category === category);
-      const payload = {};
-      categorySettings.forEach((s) => {
-        const currentVal = formValues[s.key];
-        if (s.sensitive && typeof currentVal === 'string' && currentVal.includes('...')) {
-          return;
-        }
-        payload[s.key] = currentVal;
+  const handleDiscardCategory = (catId) => {
+    const keys = CATEGORY_KEYS[catId] || [];
+    setFormValues((prev) => {
+      const next = { ...prev };
+      keys.forEach((k) => {
+        next[k] = savedValues[k] ?? '';
       });
+      return next;
+    });
+    setBanner({ type: 'info', text: 'Unsaved changes discarded.' });
+    setTimeout(() => setBanner(null), 2500);
+  };
+
+  const handleSaveCategory = async (catId, overridePayload = null) => {
+    const keys = CATEGORY_KEYS[catId] || [];
+    const hasErr = keys.some((k) => validationErrors[k]);
+    if (hasErr && !overridePayload) {
+      setBanner({ type: 'error', text: 'Fix validation errors before saving.' });
+      return false;
+    }
+
+    setSaving(true);
+    setBanner(null);
+    try {
+      const payload = overridePayload || {};
+      if (!overridePayload) {
+        keys.forEach((k) => {
+          const spec = settingsByKey[k];
+          const val = formValues[k];
+          // Skip unchanged masked sensitive values
+          if (spec?.sensitive && typeof val === 'string' && val.includes('...')) {
+            return;
+          }
+          payload[k] = val;
+        });
+      }
 
       const res = await fetch(`${API_BASE}/system`, {
         method: 'POST',
@@ -162,1487 +284,1261 @@ export default function SettingsView() {
         body: JSON.stringify({ settings: payload }),
       });
       const data = await res.json();
-
-      if (data.ok) {
-        setSaveBanner({
-          type: 'success',
-          text: `Settings for ${category.toUpperCase()} saved persistently to SQLite & applied to live engine!`,
-        });
-        if (data.data) {
-          setSystemData(data.data);
-          const updatedForm = { ...formValues };
-          (data.data.settings || []).forEach((item) => {
-            if (item.category === category) {
-              updatedForm[item.key] = item.value ?? '';
-            }
+      if (res.ok && data.ok) {
+        const refreshedItems = data.data?.settings || [];
+        if (refreshedItems.length) {
+          setSystemSettings(refreshedItems);
+          const newSaved = {};
+          refreshedItems.forEach((it) => {
+            newSaved[it.key] = it.value ?? '';
           });
-          setFormValues(updatedForm);
+          setSavedValues(newSaved);
+          setFormValues((prev) => {
+            const next = { ...prev };
+            Object.keys(payload).forEach((k) => {
+              next[k] = newSaved[k] ?? '';
+            });
+            return next;
+          });
         }
-        setTimeout(() => setSaveBanner(null), 4000);
+        setBanner({ type: 'success', text: 'Configuration saved to SQLite and applied.' });
+        setTimeout(() => setBanner(null), 3500);
+        return true;
       } else {
-        setSaveBanner({
-          type: 'error',
-          text: data.error || 'Failed to save settings to SQLite',
-        });
+        setBanner({ type: 'error', text: data.error || 'Failed to save configuration.' });
+        return false;
       }
     } catch (err) {
-      setSaveBanner({
-        type: 'error',
-        text: `Network error saving settings: ${err.message}`,
-      });
+      setBanner({ type: 'error', text: `Network error: ${err.message}` });
+      return false;
     } finally {
       setSaving(false);
     }
   };
 
-  const handleTestService = async (serviceId, payload = {}) => {
+  const handleTestService = async (serviceId, extraPayload = {}) => {
     setTestingService((prev) => ({ ...prev, [serviceId]: true }));
-    setTestResults((prev) => {
-      const copy = { ...prev };
-      delete copy[serviceId];
-      return copy;
-    });
-
     try {
       const res = await fetch(`${API_BASE}/test-service`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ service_id: serviceId, ...payload }),
+        body: JSON.stringify({ service_id: serviceId, ...extraPayload }),
       });
       const data = await res.json();
-      setTestResults((prev) => ({ ...prev, [serviceId]: data }));
+      setServiceTestResults((prev) => ({ ...prev, [serviceId]: data }));
+      return data;
     } catch (err) {
-      setTestResults((prev) => ({
-        ...prev,
-        [serviceId]: { success: false, error: err.message || 'Failed to test service' },
-      }));
+      const errRes = { success: false, error: err.message };
+      setServiceTestResults((prev) => ({ ...prev, [serviceId]: errRes }));
+      return errRes;
     } finally {
       setTestingService((prev) => ({ ...prev, [serviceId]: false }));
     }
   };
 
-  const getSettingsForCategory = (cat) => {
-    return (systemData.settings || []).filter((s) => s.category === cat);
-  };
+  const activeNavItem = useMemo(() => {
+    for (const group of SETTINGS_NAV) {
+      const found = group.items.find((it) => it.id === activeCategory);
+      if (found) return found;
+    }
+    return SETTINGS_NAV[0].items[0];
+  }, [activeCategory]);
+
+  const defaultProviderId = savedValues.default_llm_provider || 'ollama';
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100%',
-        backgroundColor: t.canvasBg,
-        color: t.textPrimary,
-        overflow: 'hidden',
-        fontFamily: 'var(--font-main, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif)',
-      }}
-    >
-      {/* ── Page Header ── */}
-      <div
-        style={{
-          padding: '20px 28px 16px',
-          backgroundColor: t.headerBg,
-          borderBottom: `1px solid ${t.headerBorder}`,
-          flexShrink: 0,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div
-              style={{
-                width: 38,
-                height: 38,
-                borderRadius: 10,
-                backgroundColor: isDark ? 'rgba(37, 99, 235, 0.2)' : '#eff6ff',
-                border: isDark ? '1px solid rgba(37, 99, 235, 0.4)' : '1px solid #bfdbfe',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#3b82f6',
-              }}
-            >
-              <Sliders size={20} />
+    <div className="cfg-root">
+      {/* Left Vertical Navigation */}
+      <aside className="cfg-sidebar">
+        <div className="cfg-sidebar-header">
+          <span className="cfg-sidebar-title">Configuration</span>
+          <button
+            type="button"
+            className="cfg-icon-btn"
+            onClick={loadAll}
+            disabled={loading}
+            title="Reload configuration from SQLite"
+            aria-label="Reload configuration"
+          >
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+          </button>
+        </div>
+
+        <nav className="cfg-nav">
+          {SETTINGS_NAV.map((group) => (
+            <div key={group.section} className="cfg-nav-group">
+              <div className="cfg-nav-section-label">{group.section}</div>
+              {group.items.map((item) => {
+                const Icon = item.icon;
+                const active = activeCategory === item.id;
+                const dirty = isCategoryDirty(item.id);
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={`cfg-nav-item ${active ? 'active' : ''}`}
+                    onClick={() => setActiveCategory(item.id)}
+                  >
+                    <Icon size={15} className="cfg-nav-icon" />
+                    <span className="cfg-nav-label">{item.label}</span>
+                    {dirty && <span className="cfg-dirty-dot" title="Unsaved changes" />}
+                  </button>
+                );
+              })}
             </div>
+          ))}
+        </nav>
+      </aside>
+
+      {/* Right Main Content */}
+      <main className="cfg-main">
+        <div className="cfg-content-inner">
+          {/* Section Header */}
+          <header className="cfg-page-header">
             <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <h1 style={{ fontSize: 18, fontWeight: 700, margin: 0, color: t.textPrimary }}>
-                  Platform Settings & Configuration
-                </h1>
-                <span
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    padding: '2px 8px',
-                    borderRadius: 12,
-                    fontSize: 11,
-                    fontWeight: 600,
-                    backgroundColor: isDark ? 'rgba(16, 185, 129, 0.18)' : '#ecfdf5',
-                    color: isDark ? '#34d399' : '#059669',
-                    border: isDark ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid #a7f3d0',
+              <h1 className="cfg-page-title">{activeNavItem.label}</h1>
+              <p className="cfg-page-desc">{activeNavItem.description}</p>
+            </div>
+            <div className="cfg-header-status">
+              {CATEGORY_KEYS[activeCategory] && (
+                isCategoryDirty(activeCategory) ? (
+                  <span className="cfg-state-pill unsaved">Unsaved changes</span>
+                ) : (
+                  <span className="cfg-state-pill saved">
+                    <CheckCircle2 size={12} />
+                    Saved
+                  </span>
+                )
+              )}
+            </div>
+          </header>
+
+          {/* Status Banner */}
+          {banner && (
+            <div className={`cfg-banner ${banner.type}`}>
+              {banner.type === 'success' ? (
+                <CheckCircle2 size={15} />
+              ) : banner.type === 'error' ? (
+                <AlertCircle size={15} />
+              ) : (
+                <AlertTriangle size={15} />
+              )}
+              <span>{banner.text}</span>
+            </div>
+          )}
+
+          {/* Category Body */}
+          {loading && systemSettings.length === 0 ? (
+            <div className="cfg-loading-state">
+              <Loader2 size={20} className="animate-spin" />
+              <span>Loading platform configuration...</span>
+            </div>
+          ) : (
+            <>
+              {activeCategory === 'models' && (
+                <ProvidersPanel
+                  providers={providers}
+                  selectedId={selectedProviderId}
+                  onSelect={setSelectedProviderId}
+                  defaultProviderId={defaultProviderId}
+                  onSetDefault={(pId) => handleSaveCategory('agents', { default_llm_provider: pId })}
+                  testResults={providerTestResults}
+                  setTestResults={setProviderTestResults}
+                  onRefresh={loadAll}
+                  setBanner={setBanner}
+                  setConfirmModal={setConfirmModal}
+                />
+              )}
+
+              {CATEGORY_KEYS[activeCategory] && (
+                <SystemCategoryPanel
+                  categoryId={activeCategory}
+                  keys={CATEGORY_KEYS[activeCategory]}
+                  settingsByKey={settingsByKey}
+                  formValues={formValues}
+                  savedValues={savedValues}
+                  revealKeys={revealKeys}
+                  setRevealKeys={setRevealKeys}
+                  validationErrors={validationErrors}
+                  onChange={handleFieldChange}
+                  onSave={() => handleSaveCategory(activeCategory)}
+                  onDiscard={() => handleDiscardCategory(activeCategory)}
+                  isDirty={isCategoryDirty(activeCategory)}
+                  saving={saving}
+                  onTestService={handleTestService}
+                  testingService={testingService}
+                  serviceTestResults={serviceTestResults}
+                />
+              )}
+
+              {activeCategory === 'security' && (
+                <SecurityPanel
+                  providers={providers}
+                  systemSettings={systemSettings}
+                  onJumpToProvider={(pId) => {
+                    setSelectedProviderId(pId);
+                    setActiveCategory('models');
                   }}
-                >
-                  <Database size={11} />
-                  SQLite Persistent
-                </span>
-              </div>
-              <p style={{ fontSize: 12.5, margin: '2px 0 0', color: t.textMuted }}>
-                All environment variables (.env) and runtime preferences persist locally in SQLite with instant engine reload
-              </p>
+                  onJumpToCategory={(catId) => setActiveCategory(catId)}
+                  onRefresh={loadAll}
+                  setBanner={setBanner}
+                  setConfirmModal={setConfirmModal}
+                />
+              )}
+
+              {activeCategory === 'diagnostics' && (
+                <DiagnosticsPanel
+                  healthStatus={healthStatus}
+                  providers={providers}
+                  providerTestResults={providerTestResults}
+                  setProviderTestResults={setProviderTestResults}
+                  serviceTestResults={serviceTestResults}
+                  onTestService={handleTestService}
+                  testingService={testingService}
+                  formValues={formValues}
+                  validationErrors={validationErrors}
+                  onRefresh={loadAll}
+                />
+              )}
+            </>
+          )}
+        </div>
+      </main>
+
+      {/* Destructive Action Confirmation Modal */}
+      {confirmModal && (
+        <div className="cfg-modal-backdrop" onClick={() => setConfirmModal(null)}>
+          <div className="cfg-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="cfg-modal-header">
+              <AlertTriangle size={18} className="cfg-modal-warn-icon" />
+              <h3>{confirmModal.title}</h3>
+            </div>
+            <p className="cfg-modal-body">{confirmModal.message}</p>
+            <div className="cfg-modal-actions">
+              <button
+                type="button"
+                className="cfg-btn secondary"
+                onClick={() => setConfirmModal(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="cfg-btn danger"
+                onClick={async () => {
+                  await confirmModal.onConfirm();
+                  setConfirmModal(null);
+                }}
+              >
+                {confirmModal.confirmLabel || 'Confirm'}
+              </button>
             </div>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+// ─────────────────────────────────────────────────────────────────────────────
+// 1. AI MODELS & PROVIDERS PANEL
+// ─────────────────────────────────────────────────────────────────────────────
+
+function ProvidersPanel({
+  providers,
+  selectedId,
+  onSelect,
+  defaultProviderId,
+  onSetDefault,
+  testResults,
+  setTestResults,
+  onRefresh,
+  setBanner,
+  setConfirmModal,
+}) {
+  const [apiKeyInput, setApiKeyInput] = useState('');
+  const [showKey, setShowKey] = useState(false);
+  const [baseUrlInput, setBaseUrlInput] = useState('');
+  const [modelInput, setModelInput] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+
+  // Merge known defs with any custom providers returned from SQLite
+  const providerList = useMemo(() => {
+    const map = new Map();
+    KNOWN_PROVIDER_DEFS.forEach((def) => {
+      map.set(def.id, { ...def });
+    });
+    providers.forEach((p) => {
+      if (!map.has(p.provider_id)) {
+        map.set(p.provider_id, {
+          id: p.provider_id,
+          name: p.provider_id.toUpperCase(),
+          tagline: 'Custom OpenAI-compatible endpoint',
+          defaultBaseUrl: p.base_url || '',
+          modelPlaceholder: p.model || '',
+          suggestions: [],
+          isLocal: p.provider_id === 'vllm' || p.provider_id === 'lmstudio',
+        });
+      }
+    });
+    return Array.from(map.values()).map((def) => {
+      const saved = providers.find((p) => p.provider_id === def.id) || {};
+      return { ...def, saved };
+    });
+  }, [providers]);
+
+  const current = useMemo(
+    () => providerList.find((p) => p.id === selectedId) || providerList[0],
+    [providerList, selectedId]
+  );
+
+  useEffect(() => {
+    if (current) {
+      setApiKeyInput('');
+      setShowKey(false);
+      setBaseUrlInput(current.saved?.base_url || current.defaultBaseUrl || '');
+      setModelInput(current.saved?.model || current.modelPlaceholder || '');
+    }
+  }, [current]);
+
+  const isDirty = useMemo(() => {
+    if (!current) return false;
+    const origUrl = current.saved?.base_url || current.defaultBaseUrl || '';
+    const origModel = current.saved?.model || current.modelPlaceholder || '';
+    return (
+      apiKeyInput.trim() !== '' ||
+      baseUrlInput.trim() !== origUrl ||
+      modelInput.trim() !== origModel
+    );
+  }, [current, apiKeyInput, baseUrlInput, modelInput]);
+
+  const handleTest = async () => {
+    setTesting(true);
+    try {
+      const res = await fetch(`${API_BASE}/test-connection`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider_id: current.id,
+          api_key: apiKeyInput.trim() || undefined,
+          base_url: baseUrlInput.trim() || undefined,
+          model: modelInput.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      setTestResults((prev) => ({ ...prev, [current.id]: data }));
+    } catch (err) {
+      setTestResults((prev) => ({
+        ...prev,
+        [current.id]: { success: false, error: err.message },
+      }));
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const res = await fetch(`${API_BASE}/providers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider_id: current.id,
+          api_key: apiKeyInput.trim() || undefined,
+          base_url: baseUrlInput.trim() || undefined,
+          model: modelInput.trim() || undefined,
+        }),
+      });
+      if (res.ok) {
+        setApiKeyInput('');
+        await onRefresh();
+        setBanner({ type: 'success', text: `Saved ${current.name} configuration to SQLite.` });
+        setTimeout(() => setBanner(null), 3500);
+      } else {
+        setBanner({ type: 'error', text: `Failed to save ${current.name} settings.` });
+      }
+    } catch (err) {
+      setBanner({ type: 'error', text: `Network error: ${err.message}` });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDiscard = () => {
+    setApiKeyInput('');
+    setBaseUrlInput(current.saved?.base_url || current.defaultBaseUrl || '');
+    setModelInput(current.saved?.model || current.modelPlaceholder || '');
+  };
+
+  const handleClearCredentials = () => {
+    setConfirmModal({
+      title: `Remove ${current.name} Configuration`,
+      message: `This will remove the saved API key, custom base URL, and model selection for ${current.name} from SQLite. Environment variable fallbacks (.env) will still apply if defined.`,
+      confirmLabel: 'Remove Configuration',
+      onConfirm: async () => {
+        const res = await fetch(`${API_BASE}/providers/${current.id}`, { method: 'DELETE' });
+        if (res.ok) {
+          await onRefresh();
+          setBanner({ type: 'info', text: `Cleared SQLite configuration for ${current.name}.` });
+          setTimeout(() => setBanner(null), 3000);
+        }
+      },
+    });
+  };
+
+  if (!current) return null;
+  const lastTest = testResults[current.id];
+  const isDefault = defaultProviderId === current.id;
+  const hasKey = Boolean(current.saved?.has_key);
+
+  return (
+    <div className="cfg-providers-layout">
+      {/* Provider List */}
+      <div className="cfg-provider-list">
+        {providerList.map((p) => {
+          const active = p.id === current.id;
+          const pTest = testResults[p.id];
+          const pDefault = defaultProviderId === p.id;
+          const configured = Boolean(p.saved?.has_key);
+
+          return (
+            <button
+              key={p.id}
+              type="button"
+              className={`cfg-provider-row ${active ? 'active' : ''}`}
+              onClick={() => onSelect(p.id)}
+            >
+              <div className="cfg-provider-row-main">
+                <div className="cfg-provider-row-title">
+                  <span>{p.name}</span>
+                  {pDefault && (
+                    <span className="cfg-tag default" title="Global default provider">
+                      Default
+                    </span>
+                  )}
+                </div>
+                <div className="cfg-provider-row-meta">
+                  <span className="cfg-mono">{p.saved?.model || p.modelPlaceholder || 'No model'}</span>
+                </div>
+              </div>
+              <div className="cfg-provider-row-status">
+                {pTest ? (
+                  pTest.success ? (
+                    <CheckCircle2 size={14} className="cfg-status-ok" title={`Connected (${pTest.latency_ms}ms)`} />
+                  ) : (
+                    <XCircle size={14} className="cfg-status-err" title={pTest.error} />
+                  )
+                ) : configured ? (
+                  <span className="cfg-dot ok" title="Configured" />
+                ) : (
+                  <span className="cfg-dot missing" title="Missing credentials" />
+                )}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Provider Detail Panel */}
+      <div className="cfg-card cfg-provider-detail">
+        <div className="cfg-detail-header">
+          <div>
+            <div className="cfg-detail-title-row">
+              <h2>{current.name}</h2>
+              {hasKey ? (
+                <span className="cfg-state-pill saved">
+                  {current.isLocal ? 'Local Endpoint' : 'Configured'}
+                </span>
+              ) : (
+                <span className="cfg-state-pill warn">Missing Credentials</span>
+              )}
+              {current.saved?.key_source && current.saved.key_source !== 'none' && (
+                <span className="cfg-source-tag">Source: {current.saved.key_source}</span>
+              )}
+            </div>
+            <p className="cfg-detail-subtitle">{current.tagline}</p>
+          </div>
+
+          <div className="cfg-detail-header-actions">
+            {current.docUrl && (
+              <a
+                href={current.docUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="cfg-btn secondary sm"
+              >
+                API Docs
+                <ExternalLink size={12} />
+              </a>
+            )}
+            {!isDefault && (
+              <button
+                type="button"
+                className="cfg-btn secondary sm"
+                onClick={() => onSetDefault(current.id)}
+              >
+                <Star size={12} />
+                Set as Default
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="cfg-form-grid">
+          {/* API Key */}
+          {!current.isLocal && (
+            <div className="cfg-field">
+              <label className="cfg-label">
+                API Credential
+                {current.saved?.api_key_masked && (
+                  <span className="cfg-label-hint">
+                    Saved: <code className="cfg-mono">{current.saved.api_key_masked}</code>
+                  </span>
+                )}
+              </label>
+              <div className="cfg-input-group">
+                <input
+                  type={showKey ? 'text' : 'password'}
+                  className="cfg-input"
+                  value={apiKeyInput}
+                  onChange={(e) => setApiKeyInput(e.target.value)}
+                  placeholder={
+                    current.saved?.api_key_masked
+                      ? `Enter new key to replace (${current.saved.api_key_masked})`
+                      : current.keyPlaceholder || 'Enter API key...'
+                  }
+                  autoComplete="off"
+                />
+                <button
+                  type="button"
+                  className="cfg-input-addon-btn"
+                  onClick={() => setShowKey((v) => !v)}
+                  title={showKey ? 'Hide input' : 'Show input'}
+                >
+                  {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Base URL */}
+          <div className="cfg-field">
+            <label className="cfg-label">
+              Base URL
+              <span className="cfg-label-hint">Optional override for proxy or self-hosted endpoint</span>
+            </label>
+            <input
+              type="text"
+              className="cfg-input cfg-mono"
+              value={baseUrlInput}
+              onChange={(e) => setBaseUrlInput(e.target.value)}
+              placeholder={current.defaultBaseUrl || 'https://...'}
+            />
+          </div>
+
+          {/* Model Selection */}
+          <div className="cfg-field">
+            <label className="cfg-label">Default Model Checkpoint</label>
+            <input
+              type="text"
+              className="cfg-input cfg-mono"
+              value={modelInput}
+              onChange={(e) => setModelInput(e.target.value)}
+              placeholder={current.modelPlaceholder || 'Enter model identifier...'}
+            />
+            {current.suggestions?.length > 0 && (
+              <div className="cfg-model-chips">
+                {current.suggestions.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    className={`cfg-model-chip ${modelInput === m ? 'active' : ''}`}
+                    onClick={() => setModelInput(m)}
+                  >
+                    {modelInput === m && <Check size={11} />}
+                    <span>{m}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Connection Test Result */}
+        {lastTest && (
+          <div className={`cfg-test-result ${lastTest.success ? 'ok' : 'err'}`}>
+            {lastTest.success ? <CheckCircle2 size={15} /> : <XCircle size={15} />}
+            <div className="cfg-test-result-text">
+              <strong>{lastTest.success ? 'Connection Verified' : 'Connection Failed'}</strong>
+              <span>
+                {lastTest.message || lastTest.error}
+                {lastTest.latency_ms ? ` (${lastTest.latency_ms} ms)` : ''}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Footer Actions */}
+        <div className="cfg-card-footer">
+          <div className="cfg-footer-left">
             <button
               type="button"
-              onClick={fetchSystemSettings}
-              disabled={loading}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                padding: '7px 13px',
-                borderRadius: 7,
-                border: `1px solid ${t.btnSecondaryBorder}`,
-                backgroundColor: t.btnSecondaryBg,
-                color: t.btnSecondaryText,
-                fontSize: 12.5,
-                fontWeight: 500,
-                cursor: loading ? 'not-allowed' : 'pointer',
-              }}
-              title="Refresh database state"
+              className="cfg-btn secondary"
+              onClick={handleTest}
+              disabled={testing}
             >
-              <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
-              Reload DB
+              {testing ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
+              Test Connection
+            </button>
+
+            {current.saved?.stored_in_db && (
+              <button
+                type="button"
+                className="cfg-btn ghost-danger"
+                onClick={handleClearCredentials}
+              >
+                <Trash2 size={14} />
+                Clear Saved Config
+              </button>
+            )}
+          </div>
+
+          <div className="cfg-footer-right">
+            {isDirty && (
+              <button type="button" className="cfg-btn secondary" onClick={handleDiscard}>
+                <RotateCcw size={14} />
+                Discard
+              </button>
+            )}
+            <button
+              type="button"
+              className="cfg-btn primary"
+              onClick={handleSave}
+              disabled={saving || !isDirty}
+            >
+              {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+              Save Changes
             </button>
           </div>
         </div>
-
-        {/* ── Category Tabs ── */}
-        <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 2 }}>
-          {TABS.map((tab) => {
-            const Icon = tab.icon;
-            const isActive = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveTab(tab.id)}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 7,
-                  padding: '8px 14px',
-                  borderRadius: 8,
-                  fontSize: 13,
-                  fontWeight: isActive ? 600 : 500,
-                  border: isActive ? `1px solid ${t.tabActiveBorder}` : '1px solid transparent',
-                  backgroundColor: isActive ? t.tabActiveBg : t.tabInactiveBg,
-                  color: isActive ? t.tabActiveText : t.tabInactiveText,
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                <Icon size={15} style={{ color: isActive ? (isDark ? '#a5b4fc' : '#4f46e5') : t.textMuted }} />
-                <span>{tab.label}</span>
-                <span
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 700,
-                    padding: '1px 6px',
-                    borderRadius: 10,
-                    backgroundColor: isActive ? (isDark ? 'rgba(99, 102, 241, 0.3)' : '#e0e7ff') : (isDark ? '#27272a' : '#e2e8f0'),
-                    color: isActive ? (isDark ? '#c7d2fe' : '#3730a3') : t.textMuted,
-                  }}
-                >
-                  {tab.badge}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* ── Save Banner Notification ── */}
-      {saveBanner && (
-        <div
-          style={{
-            padding: '10px 24px',
-            backgroundColor: saveBanner.type === 'success' ? (isDark ? 'rgba(16, 185, 129, 0.18)' : '#ecfdf5') : (isDark ? 'rgba(239, 68, 68, 0.18)' : '#fef2f2'),
-            borderBottom: `1px solid ${saveBanner.type === 'success' ? (isDark ? 'rgba(34, 197, 94, 0.35)' : '#a7f3d0') : (isDark ? 'rgba(239, 68, 68, 0.35)' : '#fecaca')}`,
-            color: saveBanner.type === 'success' ? (isDark ? '#34d399' : '#065f46') : (isDark ? '#f87171' : '#991b1b'),
-            fontSize: 12.5,
-            fontWeight: 500,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-          }}
-        >
-          {saveBanner.type === 'success' ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
-          <span>{saveBanner.text}</span>
-        </div>
-      )}
-
-      {/* ── Tab Content Container ── */}
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '24px 28px' }}>
-        {/* ── TAB 1: AI Models & Providers (Reusing ModelConfigModal inline) ── */}
-        {activeTab === 'models' && (
-          <div style={{ maxWidth: 1100, margin: '0 auto', display: 'flex', flexDirection: 'column' }}>
-            <ModelConfigModal inline={true} />
-          </div>
-        )}
-
-        {/* ── TAB 2: Academic & Search APIs ── */}
-        {activeTab === 'academic' && (
-          <AcademicTabContent
-            settings={getSettingsForCategory('academic')}
-            formValues={formValues}
-            revealKeys={revealKeys}
-            setRevealKeys={setRevealKeys}
-            onChange={handleInputChange}
-            onSave={() => handleSaveTab('academic')}
-            saving={saving}
-            onTest={handleTestService}
-            testingService={testingService}
-            testResults={testResults}
-            t={t}
-            isDark={isDark}
-          />
-        )}
-
-        {/* ── TAB 3: Embeddings & Vector RAG ── */}
-        {activeTab === 'rag' && (
-          <RagTabContent
-            settings={getSettingsForCategory('rag')}
-            formValues={formValues}
-            onChange={handleInputChange}
-            onSave={() => handleSaveTab('rag')}
-            saving={saving}
-            t={t}
-            isDark={isDark}
-          />
-        )}
-
-        {/* ── TAB 4: Cache & Infrastructure ── */}
-        {activeTab === 'infrastructure' && (
-          <InfrastructureTabContent
-            settings={getSettingsForCategory('infrastructure')}
-            formValues={formValues}
-            onChange={handleInputChange}
-            onSave={() => handleSaveTab('infrastructure')}
-            saving={saving}
-            onTest={handleTestService}
-            testingService={testingService}
-            testResults={testResults}
-            t={t}
-            isDark={isDark}
-          />
-        )}
-
-        {/* ── TAB 5: Reasoning & Agent Limits ── */}
-        {activeTab === 'reasoning' && (
-          <ReasoningTabContent
-            settings={getSettingsForCategory('reasoning')}
-            formValues={formValues}
-            onChange={handleInputChange}
-            onSave={() => handleSaveTab('reasoning')}
-            saving={saving}
-            t={t}
-            isDark={isDark}
-          />
-        )}
       </div>
     </div>
   );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TAB COMPONENTS
+// 2. SYSTEM SETTINGS PANEL (Academic, RAG, Retrieval, Agents, Infrastructure)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function AcademicTabContent({
-  settings,
+function SystemCategoryPanel({
+  categoryId,
+  keys,
+  settingsByKey,
   formValues,
   revealKeys,
   setRevealKeys,
+  validationErrors,
   onChange,
   onSave,
+  onDiscard,
+  isDirty,
   saving,
-  onTest,
+  onTestService,
   testingService,
-  testResults,
-  t,
-  isDark,
+  serviceTestResults,
 }) {
-  const inputStyleCurrent = makeInputStyle(t);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
-  return (
-    <div style={{ maxWidth: 960, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
-      {/* Intro Card */}
-      <div
-        style={{
-          backgroundColor: t.cardBg,
-          borderRadius: 12,
-          border: `1px solid ${t.cardBorder}`,
-          padding: '18px 24px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <div
-            style={{
-              width: 40,
-              height: 40,
-              borderRadius: 10,
-              backgroundColor: isDark ? 'rgba(37, 99, 235, 0.2)' : '#eff6ff',
-              border: isDark ? '1px solid rgba(37, 99, 235, 0.4)' : '1px solid #bfdbfe',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#3b82f6',
-            }}
-          >
-            <BookOpen size={20} />
-          </div>
-          <div>
-            <h2 style={{ fontSize: 15, fontWeight: 700, margin: 0, color: t.textPrimary }}>
-              Academic Sources & Literature APIs
-            </h2>
-            <p style={{ fontSize: 12.5, margin: '2px 0 0', color: t.textMuted }}>
-              Credentials and endpoints for fetching papers, citation networks, metadata, and abstracts
-            </p>
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={onSave}
-          disabled={saving}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 7,
-            padding: '9px 18px',
-            borderRadius: 8,
-            backgroundColor: '#2563eb',
-            color: '#ffffff',
-            fontSize: 13,
-            fontWeight: 600,
-            border: 'none',
-            cursor: saving ? 'not-allowed' : 'pointer',
-            boxShadow: '0 1px 2px 0 rgba(0,0,0,0.05)',
-          }}
-        >
-          {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
-          Save Academic Settings
-        </button>
-      </div>
+  const primaryKeys = keys.filter((k) => !ADVANCED_KEYS.has(k) && settingsByKey[k]);
+  const advancedKeys = keys.filter((k) => ADVANCED_KEYS.has(k) && settingsByKey[k]);
 
-      {/* Grid of Sources */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-        {/* Semantic Scholar Card */}
-        <div
-          style={{
-            backgroundColor: t.cardBg,
-            borderRadius: 12,
-            border: `1px solid ${t.cardBorder}`,
-            padding: '20px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 14,
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span
-                style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: 8,
-                  backgroundColor: isDark ? 'rgba(22, 163, 74, 0.2)' : '#f0fdf4',
-                  color: isDark ? '#4ade80' : '#16a34a',
-                  border: isDark ? '1px solid rgba(22, 163, 74, 0.4)' : '1px solid #bbf7d0',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: 12,
-                  fontWeight: 800,
-                }}
-              >
-                S2
-              </span>
-              <div>
-                <h3 style={{ fontSize: 14, fontWeight: 700, margin: 0, color: t.textPrimary }}>
-                  Semantic Scholar API
-                </h3>
-                <span style={{ fontSize: 11, color: t.textMuted }}>Literature graph & citation lookup</span>
-              </div>
-            </div>
-            <a
-              href="https://www.semanticscholar.org/product/api"
-              target="_blank"
-              rel="noreferrer"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-                fontSize: 11.5,
-                color: '#3b82f6',
-                textDecoration: 'none',
-              }}
-            >
-              Get Key <ExternalLink size={12} />
-            </a>
-          </div>
+  const renderField = (key) => {
+    const spec = settingsByKey[key];
+    if (!spec) return null;
+    const val = formValues[key] ?? '';
+    const err = validationErrors[key];
 
-          <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: t.textSecondary, marginBottom: 6 }}>
-              Semantic Scholar API Key (SEMANTIC_SCHOLAR_API_KEY)
-            </label>
-            <div style={{ position: 'relative' }}>
-              <input
-                type={revealKeys.semantic_scholar_api_key ? 'text' : 'password'}
-                value={formValues.semantic_scholar_api_key ?? ''}
-                placeholder="s2k-..."
-                autoComplete="new-password"
-                autoCorrect="off"
-                autoCapitalize="off"
-                spellCheck={false}
-                data-lpignore="true"
-                data-form-type="other"
-                data-1p-ignore="true"
-                onChange={(e) => onChange('semantic_scholar_api_key', e.target.value)}
-                style={inputStyleCurrent}
-              />
-              <button
-                type="button"
-                onClick={() =>
-                  setRevealKeys((prev) => ({
-                    ...prev,
-                    semantic_scholar_api_key: !prev.semantic_scholar_api_key,
-                  }))
-                }
-                style={revealIconStyle}
-                title="Toggle key visibility"
-              >
-                {revealKeys.semantic_scholar_api_key ? <EyeOff size={14} /> : <Eye size={14} />}
-              </button>
-            </div>
-            <p style={{ fontSize: 11.5, color: t.textMuted, margin: '6px 0 0' }}>
-              Enables higher rate limits (100 req/min) for deep citation expansion and batch paper retrieval
-            </p>
+    if (spec.type === 'bool') {
+      return (
+        <div key={key} className="cfg-toggle-row">
+          <div className="cfg-toggle-info">
+            <div className="cfg-label">{spec.label}</div>
+            <div className="cfg-field-desc">{spec.description}</div>
           </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingTop: 8, minHeight: 34 }}>
-            <button
-              type="button"
-              onClick={() =>
-                onTest('semantic_scholar', { api_key: formValues.semantic_scholar_api_key || undefined })
-              }
-              disabled={testingService.semantic_scholar}
-              style={makeTestButtonStyle(t)}
-            >
-              {testingService.semantic_scholar ? (
-                <Loader2 size={13} className="animate-spin" />
-              ) : (
-                <Zap size={13} />
-              )}
-              Test Semantic Scholar
-            </button>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', flex: 1, minWidth: 0 }}>
-              <ServiceStatusBadge result={testResults.semantic_scholar} isDark={isDark} />
-            </div>
-          </div>
-        </div>
-
-        {/* OpenAlex Card */}
-        <div
-          style={{
-            backgroundColor: t.cardBg,
-            borderRadius: 12,
-            border: `1px solid ${t.cardBorder}`,
-            padding: '20px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 14,
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span
-                style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: 8,
-                  backgroundColor: isDark ? 'rgba(217, 119, 6, 0.2)' : '#fef3c7',
-                  color: isDark ? '#fbbf24' : '#d97706',
-                  border: isDark ? '1px solid rgba(217, 119, 6, 0.4)' : '1px solid #fde68a',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: 12,
-                  fontWeight: 800,
-                }}
-              >
-                OA
-              </span>
-              <div>
-                <h3 style={{ fontSize: 14, fontWeight: 700, margin: 0, color: t.textPrimary }}>
-                  OpenAlex (Polite Pool)
-                </h3>
-                <span style={{ fontSize: 11, color: t.textMuted }}>Global bibliometric index & author disambiguation</span>
-              </div>
-            </div>
-            <a
-              href="https://openalex.org"
-              target="_blank"
-              rel="noreferrer"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-                fontSize: 11.5,
-                color: '#3b82f6',
-                textDecoration: 'none',
-              }}
-            >
-              Docs <ExternalLink size={12} />
-            </a>
-          </div>
-
-          <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: t.textSecondary, marginBottom: 6 }}>
-              OpenAlex Polite Pool Email (OPENALEX_EMAIL)
-            </label>
+          <label className="cfg-switch">
             <input
-              type="email"
-              value={formValues.openalex_email ?? ''}
-              placeholder="researcher@example.com"
-              autoComplete="off"
-              autoCorrect="off"
-              autoCapitalize="off"
-              spellCheck={false}
-              data-lpignore="true"
-              data-form-type="other"
-              onChange={(e) => onChange('openalex_email', e.target.value)}
-              style={inputStyleCurrent}
+              type="checkbox"
+              checked={Boolean(val)}
+              onChange={(e) => onChange(key, e.target.checked)}
             />
-            <p style={{ fontSize: 11.5, color: t.textMuted, margin: '6px 0 0' }}>
-              Enters OpenAlex polite pool for 10x faster concurrent queries and priority queueing
-            </p>
-          </div>
-
-          <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: t.textSecondary, marginBottom: 6 }}>
-              OpenAlex Premium API Key (Optional) (OPENALEX_API_KEY)
-            </label>
-            <div style={{ position: 'relative' }}>
-              <input
-                type={revealKeys.openalex_api_key ? 'text' : 'password'}
-                value={formValues.openalex_api_key ?? ''}
-                placeholder="b4z..."
-                autoComplete="new-password"
-                autoCorrect="off"
-                autoCapitalize="off"
-                spellCheck={false}
-                data-lpignore="true"
-                data-form-type="other"
-                data-1p-ignore="true"
-                onChange={(e) => onChange('openalex_api_key', e.target.value)}
-                style={inputStyleCurrent}
-              />
-              <button
-                type="button"
-                onClick={() =>
-                  setRevealKeys((prev) => ({
-                    ...prev,
-                    openalex_api_key: !prev.openalex_api_key,
-                  }))
-                }
-                style={revealIconStyle}
-                title="Toggle key visibility"
-              >
-                {revealKeys.openalex_api_key ? <EyeOff size={14} /> : <Eye size={14} />}
-              </button>
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingTop: 8, minHeight: 34 }}>
-            <button
-              type="button"
-              onClick={() =>
-                onTest('openalex', {
-                  email: formValues.openalex_email || undefined,
-                  api_key: formValues.openalex_api_key || undefined,
-                })
-              }
-              disabled={testingService.openalex}
-              style={makeTestButtonStyle(t)}
-            >
-              {testingService.openalex ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
-              Test OpenAlex
-            </button>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', flex: 1, minWidth: 0 }}>
-              <ServiceStatusBadge result={testResults.openalex} isDark={isDark} />
-            </div>
-          </div>
+            <span className="cfg-switch-slider" />
+          </label>
         </div>
-      </div>
+      );
+    }
 
-      {/* Endpoints Table */}
-      <div
-        style={{
-          backgroundColor: t.cardBg,
-          borderRadius: 12,
-          border: `1px solid ${t.cardBorder}`,
-          padding: '20px',
-        }}
-      >
-        <h3 style={{ fontSize: 14, fontWeight: 700, margin: '0 0 12px', color: t.textPrimary }}>
-          Literature Pre-print & DOI Repository Endpoints
-        </h3>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: t.textSecondary, marginBottom: 6 }}>
-              arXiv Query API Endpoint URL
-            </label>
-            <input
-              type="text"
-              value={formValues.arxiv_base_url ?? ''}
-              placeholder="https://export.arxiv.org/api/query"
-              autoComplete="off"
-              spellCheck={false}
-              onChange={(e) => onChange('arxiv_base_url', e.target.value)}
-              style={inputStyleCurrent}
-            />
-          </div>
+    const isMasked = spec.sensitive && typeof val === 'string' && val.includes('...');
+    const revealed = revealKeys[key];
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-            <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: t.textSecondary, marginBottom: 6 }}>
-                CrossRef Metadata API URL
-              </label>
-              <input
-                type="text"
-                value={formValues.crossref_base_url ?? ''}
-                placeholder="https://api.crossref.org"
-                autoComplete="off"
-                spellCheck={false}
-                onChange={(e) => onChange('crossref_base_url', e.target.value)}
-                style={inputStyleCurrent}
-              />
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: t.textSecondary, marginBottom: 6 }}>
-                Europe PMC Biomedical Search API URL
-              </label>
-              <input
-                type="text"
-                value={formValues.europepmc_base_url ?? ''}
-                placeholder="https://www.ebi.ac.uk/europepmc/webservices/rest"
-                autoComplete="off"
-                spellCheck={false}
-                onChange={(e) => onChange('europepmc_base_url', e.target.value)}
-                style={inputStyleCurrent}
-              />
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function RagTabContent({ settings, formValues, onChange, onSave, saving, t, isDark }) {
-  const inputStyleCurrent = makeInputStyle(t);
-
-  return (
-    <div style={{ maxWidth: 960, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
-      {/* Header */}
-      <div
-        style={{
-          backgroundColor: t.cardBg,
-          borderRadius: 12,
-          border: `1px solid ${t.cardBorder}`,
-          padding: '18px 24px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <div
-            style={{
-              width: 40,
-              height: 40,
-              borderRadius: 10,
-              backgroundColor: isDark ? 'rgba(124, 58, 237, 0.2)' : '#f5f3ff',
-              border: isDark ? '1px solid rgba(124, 58, 237, 0.4)' : '1px solid #ddd6fe',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#8b5cf6',
-            }}
-          >
-            <Layers size={20} />
-          </div>
-          <div>
-            <h2 style={{ fontSize: 15, fontWeight: 700, margin: 0, color: t.textPrimary }}>
-              Vector Embeddings & RAG Chunking Parameters
-            </h2>
-            <p style={{ fontSize: 12.5, margin: '2px 0 0', color: t.textMuted }}>
-              Dense embedding checkpoints, vector dimensionality, chunk sliding windows, and top-K semantic search
-            </p>
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={onSave}
-          disabled={saving}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 7,
-            padding: '9px 18px',
-            borderRadius: 8,
-            backgroundColor: '#2563eb',
-            color: '#ffffff',
-            fontSize: 13,
-            fontWeight: 600,
-            border: 'none',
-            cursor: saving ? 'not-allowed' : 'pointer',
-          }}
-        >
-          {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
-          Save RAG Settings
-        </button>
-      </div>
-
-      {/* Embedding Backend */}
-      <div
-        style={{
-          backgroundColor: t.cardBg,
-          borderRadius: 12,
-          border: `1px solid ${t.cardBorder}`,
-          padding: '20px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 16,
-        }}
-      >
-        <h3 style={{ fontSize: 14, fontWeight: 700, margin: 0, color: t.textPrimary }}>
-          Dense Vector Embedding Provider
-        </h3>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
-          <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: t.textSecondary, marginBottom: 6 }}>
-              Embedding Provider (EMBEDDING_PROVIDER)
-            </label>
-            <select
-              value={formValues.embedding_provider ?? 'ollama'}
-              onChange={(e) => onChange('embedding_provider', e.target.value)}
-              style={makeSelectStyle(t)}
-            >
-              <option value="ollama">Ollama (Local / Offline)</option>
-              <option value="gemini">Google Gemini Embedding</option>
-              <option value="openai">OpenAI (text-embedding-3)</option>
-              <option value="huggingface">HuggingFace Inference</option>
-            </select>
-          </div>
-
-          <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: t.textSecondary, marginBottom: 6 }}>
-              Model Checkpoint (EMBEDDING_MODEL)
-            </label>
-            <input
-              type="text"
-              value={formValues.embedding_model ?? ''}
-              placeholder="nomic-embed-text"
-              autoComplete="off"
-              spellCheck={false}
-              onChange={(e) => onChange('embedding_model', e.target.value)}
-              style={inputStyleCurrent}
-            />
-          </div>
-
-          <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: t.textSecondary, marginBottom: 6 }}>
-              Vector Dimension (EMBEDDING_DIM)
-            </label>
-            <input
-              type="number"
-              value={formValues.embedding_dim ?? 768}
-              placeholder="768"
-              autoComplete="off"
-              onChange={(e) => onChange('embedding_dim', parseInt(e.target.value, 10) || 768)}
-              style={inputStyleCurrent}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* RAG Chunking & Retrieval */}
-      <div
-        style={{
-          backgroundColor: t.cardBg,
-          borderRadius: 12,
-          border: `1px solid ${t.cardBorder}`,
-          padding: '20px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 18,
-        }}
-      >
-        <h3 style={{ fontSize: 14, fontWeight: 700, margin: 0, color: t.textPrimary }}>
-          Document Parsing & Semantic Retrieval Configuration
-        </h3>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 18 }}>
-          {/* Chunk Size */}
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-              <label style={{ fontSize: 12, fontWeight: 600, color: t.textSecondary }}>
-                Chunk Size (RAG_CHUNK_SIZE)
-              </label>
-              <span style={{ fontSize: 12, fontWeight: 700, color: '#3b82f6' }}>
-                {formValues.rag_chunk_size ?? 800} chars
-              </span>
-            </div>
-            <input
-              type="range"
-              min="200"
-              max="2000"
-              step="50"
-              value={formValues.rag_chunk_size ?? 800}
-              onChange={(e) => onChange('rag_chunk_size', parseInt(e.target.value, 10))}
-              style={{ width: '100%', accentColor: '#2563eb', cursor: 'pointer' }}
-            />
-            <p style={{ fontSize: 11.5, color: t.textMuted, margin: '6px 0 0' }}>
-              Target length of paragraph chunks extracted from research papers
-            </p>
-          </div>
-
-          {/* Chunk Overlap */}
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-              <label style={{ fontSize: 12, fontWeight: 600, color: t.textSecondary }}>
-                Chunk Overlap (RAG_CHUNK_OVERLAP)
-              </label>
-              <span style={{ fontSize: 12, fontWeight: 700, color: '#3b82f6' }}>
-                {formValues.rag_chunk_overlap ?? 150} chars
-              </span>
-            </div>
-            <input
-              type="range"
-              min="0"
-              max="500"
-              step="25"
-              value={formValues.rag_chunk_overlap ?? 150}
-              onChange={(e) => onChange('rag_chunk_overlap', parseInt(e.target.value, 10))}
-              style={{ width: '100%', accentColor: '#2563eb', cursor: 'pointer' }}
-            />
-            <p style={{ fontSize: 11.5, color: t.textMuted, margin: '6px 0 0' }}>
-              Sliding context preservation across adjacent paragraph boundaries
-            </p>
-          </div>
-
-          {/* Top-K */}
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-              <label style={{ fontSize: 12, fontWeight: 600, color: t.textSecondary }}>
-                Retrieved Passages (RAG_TOP_K)
-              </label>
-              <span style={{ fontSize: 12, fontWeight: 700, color: '#3b82f6' }}>
-                Top {formValues.rag_top_k ?? 5}
-              </span>
-            </div>
-            <input
-              type="range"
-              min="1"
-              max="20"
-              step="1"
-              value={formValues.rag_top_k ?? 5}
-              onChange={(e) => onChange('rag_top_k', parseInt(e.target.value, 10))}
-              style={{ width: '100%', accentColor: '#2563eb', cursor: 'pointer' }}
-            />
-            <p style={{ fontSize: 11.5, color: t.textMuted, margin: '6px 0 0' }}>
-              Passages retrieved into LLM reasoning context per question or hypothesis
-            </p>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function InfrastructureTabContent({
-  settings,
-  formValues,
-  onChange,
-  onSave,
-  saving,
-  onTest,
-  testingService,
-  testResults,
-  t,
-  isDark,
-}) {
-  const inputStyleCurrent = makeInputStyle(t);
-
-  return (
-    <div style={{ maxWidth: 960, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
-      {/* Header */}
-      <div
-        style={{
-          backgroundColor: t.cardBg,
-          borderRadius: 12,
-          border: `1px solid ${t.cardBorder}`,
-          padding: '18px 24px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <div
-            style={{
-              width: 40,
-              height: 40,
-              borderRadius: 10,
-              backgroundColor: isDark ? 'rgba(16, 185, 129, 0.2)' : '#ecfdf5',
-              border: isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #a7f3d0',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#10b981',
-            }}
-          >
-            <Server size={20} />
-          </div>
-          <div>
-            <h2 style={{ fontSize: 15, fontWeight: 700, margin: 0, color: t.textPrimary }}>
-              Cache & Infrastructure Services
-            </h2>
-            <p style={{ fontSize: 12.5, margin: '2px 0 0', color: t.textMuted }}>
-              Redis high-speed in-memory paper graph cache and Searqon autonomous web crawler configuration
-            </p>
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={onSave}
-          disabled={saving}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 7,
-            padding: '9px 18px',
-            borderRadius: 8,
-            backgroundColor: '#2563eb',
-            color: '#ffffff',
-            fontSize: 13,
-            fontWeight: 600,
-            border: 'none',
-            cursor: saving ? 'not-allowed' : 'pointer',
-          }}
-        >
-          {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
-          Save Infrastructure Settings
-        </button>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
-        {/* Redis Cache Card */}
-        <div
-          style={{
-            backgroundColor: t.cardBg,
-            borderRadius: 12,
-            border: `1px solid ${t.cardBorder}`,
-            padding: '20px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 16,
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span
-                style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: 8,
-                  backgroundColor: isDark ? 'rgba(239, 68, 68, 0.2)' : '#fee2e2',
-                  color: isDark ? '#f87171' : '#dc2626',
-                  border: isDark ? '1px solid rgba(239, 68, 68, 0.4)' : '1px solid #fecaca',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: 12,
-                  fontWeight: 800,
-                }}
-              >
-                RD
-              </span>
-              <div>
-                <h3 style={{ fontSize: 14, fontWeight: 700, margin: 0, color: t.textPrimary }}>
-                  Redis Active Cache
-                </h3>
-                <span style={{ fontSize: 11, color: t.textMuted }}>Sub-millisecond paper graph retrieval</span>
-              </div>
-            </div>
-
-            <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600, color: t.textSecondary }}>
-              <input
-                type="checkbox"
-                checked={Boolean(formValues.redis_enabled)}
-                onChange={(e) => onChange('redis_enabled', e.target.checked)}
-                style={{ accentColor: '#2563eb', cursor: 'pointer', width: 16, height: 16 }}
-              />
-              <span>Enabled</span>
-            </label>
-          </div>
-
-          <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: t.textSecondary, marginBottom: 6 }}>
-              Redis Connection URL (REDIS_URL)
-            </label>
-            <input
-              type="text"
-              value={formValues.redis_url ?? 'redis://localhost:6379'}
-              placeholder="redis://localhost:6379"
-              autoComplete="off"
-              spellCheck={false}
-              onChange={(e) => onChange('redis_url', e.target.value)}
-              style={inputStyleCurrent}
-            />
-          </div>
-
-          <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: t.textSecondary, marginBottom: 6 }}>
-              Active Paper TTL (REDIS_ACTIVE_PAPER_TTL)
-            </label>
-            <input
-              type="number"
-              value={formValues.redis_active_paper_ttl ?? 3600}
-              placeholder="3600"
-              autoComplete="off"
-              onChange={(e) => onChange('redis_active_paper_ttl', parseInt(e.target.value, 10) || 3600)}
-              style={inputStyleCurrent}
-            />
-            <p style={{ fontSize: 11.5, color: t.textMuted, margin: '4px 0 0' }}>
-              Seconds to retain full parsed paper AST before automatic eviction (3600s = 1 hr)
-            </p>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingTop: 6, minHeight: 34 }}>
-            <button
-              type="button"
-              onClick={() => onTest('redis', { target_url: formValues.redis_url || undefined })}
-              disabled={testingService.redis}
-              style={makeTestButtonStyle(t)}
-            >
-              {testingService.redis ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
-              Test Redis Ping
-            </button>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', flex: 1, minWidth: 0 }}>
-              <ServiceStatusBadge result={testResults.redis} isDark={isDark} />
-            </div>
-          </div>
-        </div>
-
-        {/* Searqon Web Research Card */}
-        <div
-          style={{
-            backgroundColor: t.cardBg,
-            borderRadius: 12,
-            border: `1px solid ${t.cardBorder}`,
-            padding: '20px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 16,
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span
-                style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: 8,
-                  backgroundColor: isDark ? 'rgba(99, 102, 241, 0.2)' : '#e0e7ff',
-                  color: isDark ? '#a5b4fc' : '#4338ca',
-                  border: isDark ? '1px solid rgba(99, 102, 241, 0.4)' : '1px solid #c7d2fe',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: 12,
-                  fontWeight: 800,
-                }}
-              >
-                SQ
-              </span>
-              <div>
-                <h3 style={{ fontSize: 14, fontWeight: 700, margin: 0, color: t.textPrimary }}>
-                  Searqon Web Crawler
-                </h3>
-                <span style={{ fontSize: 11, color: t.textMuted }}>Live code repos & SOTA benchmark search</span>
-              </div>
-            </div>
-
-            <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600, color: t.textSecondary }}>
-              <input
-                type="checkbox"
-                checked={Boolean(formValues.web_search_enabled)}
-                onChange={(e) => onChange('web_search_enabled', e.target.checked)}
-                style={{ accentColor: '#2563eb', cursor: 'pointer', width: 16, height: 16 }}
-              />
-              <span>Enabled</span>
-            </label>
-          </div>
-
-          <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: t.textSecondary, marginBottom: 6 }}>
-              Searqon Base URL (SEARQON_BASE_URL)
-            </label>
-            <input
-              type="text"
-              value={formValues.searqon_base_url ?? 'http://localhost:7493'}
-              placeholder="http://localhost:7493"
-              autoComplete="off"
-              spellCheck={false}
-              onChange={(e) => onChange('searqon_base_url', e.target.value)}
-              style={inputStyleCurrent}
-            />
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: t.textSecondary, marginBottom: 6 }}>
-                Timeout (Seconds)
-              </label>
-              <input
-                type="number"
-                step="0.5"
-                value={formValues.searqon_timeout ?? 10.0}
-                placeholder="10.0"
-                autoComplete="off"
-                onChange={(e) => onChange('searqon_timeout', parseFloat(e.target.value) || 10.0)}
-                style={inputStyleCurrent}
-              />
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: t.textSecondary, marginBottom: 6 }}>
-                Top Search Results
-              </label>
-              <input
-                type="number"
-                value={formValues.web_search_top_k ?? 5}
-                placeholder="5"
-                autoComplete="off"
-                onChange={(e) => onChange('web_search_top_k', parseInt(e.target.value, 10) || 5)}
-                style={inputStyleCurrent}
-              />
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingTop: 6, minHeight: 34 }}>
-            <button
-              type="button"
-              onClick={() => onTest('searqon', { target_url: formValues.searqon_base_url || undefined })}
-              disabled={testingService.searqon}
-              style={makeTestButtonStyle(t)}
-            >
-              {testingService.searqon ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
-              Test Searqon Health
-            </button>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', flex: 1, minWidth: 0 }}>
-              <ServiceStatusBadge result={testResults.searqon} isDark={isDark} />
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ReasoningTabContent({ settings, formValues, onChange, onSave, saving, t, isDark }) {
-  const inputStyleCurrent = makeInputStyle(t);
-
-  return (
-    <div style={{ maxWidth: 960, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
-      {/* Header */}
-      <div
-        style={{
-          backgroundColor: t.cardBg,
-          borderRadius: 12,
-          border: `1px solid ${t.cardBorder}`,
-          padding: '18px 24px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <div
-            style={{
-              width: 40,
-              height: 40,
-              borderRadius: 10,
-              backgroundColor: isDark ? 'rgba(239, 68, 68, 0.2)' : '#fef2f2',
-              border: isDark ? '1px solid rgba(239, 68, 68, 0.4)' : '1px solid #fecaca',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#ef4444',
-            }}
-          >
-            <Brain size={20} />
-          </div>
-          <div>
-            <h2 style={{ fontSize: 15, fontWeight: 700, margin: 0, color: t.textPrimary }}>
-              Autonomous Reasoning & Multi-Agent Execution Limits
-            </h2>
-            <p style={{ fontSize: 12.5, margin: '2px 0 0', color: t.textMuted }}>
-              Safety thresholds, default reasoning provider, and candidate ranking limits
-            </p>
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={onSave}
-          disabled={saving}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 7,
-            padding: '9px 18px',
-            borderRadius: 8,
-            backgroundColor: '#2563eb',
-            color: '#ffffff',
-            fontSize: 13,
-            fontWeight: 600,
-            border: 'none',
-            cursor: saving ? 'not-allowed' : 'pointer',
-          }}
-        >
-          {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
-          Save Reasoning Settings
-        </button>
-      </div>
-
-      <div
-        style={{
-          backgroundColor: t.cardBg,
-          borderRadius: 12,
-          border: `1px solid ${t.cardBorder}`,
-          padding: '20px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 18,
-        }}
-      >
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
-          <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: t.textSecondary, marginBottom: 6 }}>
-              Default LLM Provider (DEFAULT_LLM_PROVIDER)
-            </label>
-            <select
-              value={formValues.default_llm_provider ?? 'ollama'}
-              onChange={(e) => onChange('default_llm_provider', e.target.value)}
-              style={makeSelectStyle(t)}
-            >
-              <option value="ollama">Ollama (Local Offline)</option>
-              <option value="vllm">vLLM (Local OpenAI Compatible)</option>
-              <option value="lmstudio">LM Studio (Local)</option>
-              <option value="gemini">Google Gemini</option>
-              <option value="groq">Groq LPU</option>
-              <option value="openrouter">OpenRouter</option>
-              <option value="nvidia">NVIDIA NIM</option>
-              <option value="deepseek">DeepSeek AI</option>
-              <option value="openai">OpenAI</option>
-            </select>
-            <p style={{ fontSize: 11.5, color: t.textMuted, margin: '6px 0 0' }}>
-              Engine used by default when none is explicitly requested in chat or synthesis tools
-            </p>
-          </div>
-
-          <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: t.textSecondary, marginBottom: 6 }}>
-              Max Multi-Agent Loop Iterations (MAX_LOOP_ITERATIONS)
-            </label>
-            <input
-              type="number"
-              min="1"
-              max="50"
-              value={formValues.max_loop_iterations ?? 10}
-              placeholder="10"
-              autoComplete="off"
-              onChange={(e) => onChange('max_loop_iterations', parseInt(e.target.value, 10) || 10)}
-              style={inputStyleCurrent}
-            />
-            <p style={{ fontSize: 11.5, color: t.textMuted, margin: '6px 0 0' }}>
-              Safety ceiling preventing unbounded recursive reasoning during deep research passes
-            </p>
-          </div>
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
-          <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: t.textSecondary, marginBottom: 6 }}>
-              Default Paper Ranking Limit (DEFAULT_RANK_LIMIT)
-            </label>
-            <input
-              type="number"
-              min="5"
-              max="100"
-              value={formValues.default_rank_limit ?? 25}
-              placeholder="25"
-              autoComplete="off"
-              onChange={(e) => onChange('default_rank_limit', parseInt(e.target.value, 10) || 25)}
-              style={inputStyleCurrent}
-            />
-            <p style={{ fontSize: 11.5, color: t.textMuted, margin: '6px 0 0' }}>
-              Number of papers scored by the cross-encoder reranker during literature survey
-            </p>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// REUSABLE SUBCOMPONENTS & STYLES
-// ─────────────────────────────────────────────────────────────────────────────
-
-function ServiceStatusBadge({ result, isDark }) {
-  if (!result) return null;
-  if (result.success) {
-    const rawMsg = result.message || 'Connected';
-    const displayMsg = rawMsg.includes('ms') ? rawMsg : `${rawMsg} (${result.latency_ms} ms)`;
     return (
-      <span
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 5,
-          fontSize: 11.5,
-          color: isDark ? '#34d399' : '#059669',
-          fontWeight: 600,
-          backgroundColor: isDark ? 'rgba(16, 185, 129, 0.18)' : '#ecfdf5',
-          padding: '4px 9px',
-          borderRadius: 6,
-          border: isDark ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid #a7f3d0',
-          whiteSpace: 'nowrap',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          maxWidth: '100%',
-          flexShrink: 1,
-        }}
-        title={result.message}
-      >
-        <CheckCircle2 size={13} style={{ flexShrink: 0 }} />
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {displayMsg}
-        </span>
-      </span>
+      <div key={key} className="cfg-field">
+        <div className="cfg-label-row">
+          <label className="cfg-label" htmlFor={`field-${key}`}>
+            {spec.label}
+          </label>
+          {spec.source && (
+            <span className="cfg-source-tag">
+              {spec.source === 'sqlite' ? 'SQLite' : spec.source === 'env' ? '.env' : 'Default'}
+            </span>
+          )}
+        </div>
+        <p className="cfg-field-desc">{spec.description}</p>
+
+        {spec.options ? (
+          <select
+            id={`field-${key}`}
+            className="cfg-input"
+            value={val}
+            onChange={(e) => onChange(key, e.target.value)}
+          >
+            {spec.options.map((opt) => (
+              <option key={opt} value={opt}>
+                {opt}
+              </option>
+            ))}
+          </select>
+        ) : spec.sensitive ? (
+          <div className="cfg-input-group">
+            <input
+              id={`field-${key}`}
+              type={revealed ? 'text' : 'password'}
+              className="cfg-input cfg-mono"
+              value={val}
+              onChange={(e) => onChange(key, e.target.value)}
+              placeholder={spec.placeholder || 'Enter API key...'}
+              autoComplete="off"
+            />
+            <button
+              type="button"
+              className="cfg-input-addon-btn"
+              onClick={() => setRevealKeys((p) => ({ ...p, [key]: !p[key] }))}
+              title={isMasked ? 'Masked key cannot be revealed; enter a new key to replace' : 'Toggle visibility'}
+            >
+              {revealed ? <EyeOff size={14} /> : <Eye size={14} />}
+            </button>
+          </div>
+        ) : (
+          <input
+            id={`field-${key}`}
+            type={spec.type === 'int' || spec.type === 'float' ? 'number' : 'text'}
+            step={spec.type === 'float' ? '0.1' : '1'}
+            className={`cfg-input ${spec.type !== 'string' ? 'cfg-mono' : ''}`}
+            value={val}
+            onChange={(e) =>
+              onChange(
+                key,
+                spec.type === 'int'
+                  ? e.target.value === '' ? '' : parseInt(e.target.value, 10)
+                  : spec.type === 'float'
+                  ? e.target.value === '' ? '' : parseFloat(e.target.value)
+                  : e.target.value
+              )
+            }
+            placeholder={spec.placeholder || ''}
+          />
+        )}
+
+        {err && <div className="cfg-field-error">{err}</div>}
+      </div>
     );
-  }
+  };
+
   return (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 5,
-        fontSize: 11.5,
-        color: isDark ? '#f87171' : '#dc2626',
-        fontWeight: 600,
-        backgroundColor: isDark ? 'rgba(239, 68, 68, 0.18)' : '#fef2f2',
-        padding: '4px 9px',
-        borderRadius: 6,
-        border: isDark ? '1px solid rgba(239, 68, 68, 0.35)' : '1px solid #fecaca',
-        whiteSpace: 'nowrap',
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        maxWidth: '100%',
-        flexShrink: 1,
-      }}
-      title={result.error}
-    >
-      <XCircle size={13} style={{ flexShrink: 0 }} />
-      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        {result.error?.substring(0, 45) || 'Failed'}
-      </span>
-    </span>
+    <div className="cfg-stack">
+      <div className="cfg-card">
+        <div className="cfg-form-grid">{primaryKeys.map(renderField)}</div>
+
+        {/* Service Live Connectivity Tests */}
+        {categoryId === 'academic' && (
+          <div className="cfg-service-tests">
+            <div className="cfg-subsection-label">Connector Verification</div>
+            <div className="cfg-service-test-row">
+              <ServiceTestChip
+                label="Test Semantic Scholar"
+                serviceId="semantic_scholar"
+                testing={testingService.semantic_scholar}
+                result={serviceTestResults.semantic_scholar}
+                onTest={() =>
+                  onTestService('semantic_scholar', {
+                    api_key:
+                      typeof formValues.semantic_scholar_api_key === 'string' &&
+                      !formValues.semantic_scholar_api_key.includes('...')
+                        ? formValues.semantic_scholar_api_key
+                        : undefined,
+                  })
+                }
+              />
+              <ServiceTestChip
+                label="Test OpenAlex"
+                serviceId="openalex"
+                testing={testingService.openalex}
+                result={serviceTestResults.openalex}
+                onTest={() =>
+                  onTestService('openalex', {
+                    email: formValues.openalex_email || undefined,
+                    api_key:
+                      typeof formValues.openalex_api_key === 'string' &&
+                      !formValues.openalex_api_key.includes('...')
+                        ? formValues.openalex_api_key
+                        : undefined,
+                  })
+                }
+              />
+            </div>
+          </div>
+        )}
+
+        {categoryId === 'infrastructure' && (
+          <div className="cfg-service-tests">
+            <div className="cfg-subsection-label">Service Connectivity</div>
+            <div className="cfg-service-test-row">
+              <ServiceTestChip
+                label="Ping Redis"
+                serviceId="redis"
+                testing={testingService.redis}
+                result={serviceTestResults.redis}
+                onTest={() =>
+                  onTestService('redis', { target_url: formValues.redis_url || undefined })
+                }
+              />
+              <ServiceTestChip
+                label="Test Searqon"
+                serviceId="searqon"
+                testing={testingService.searqon}
+                result={serviceTestResults.searqon}
+                onTest={() =>
+                  onTestService('searqon', { target_url: formValues.searqon_base_url || undefined })
+                }
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Expandable Advanced Configuration */}
+        {advancedKeys.length > 0 && (
+          <div className="cfg-advanced-section">
+            <button
+              type="button"
+              className="cfg-advanced-toggle"
+              onClick={() => setAdvancedOpen((v) => !v)}
+            >
+              {advancedOpen ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+              <span>Advanced Configuration</span>
+              <span className="cfg-advanced-count">{advancedKeys.length} parameters</span>
+            </button>
+            {advancedOpen && (
+              <div className="cfg-advanced-body">
+                <div className="cfg-form-grid">{advancedKeys.map(renderField)}</div>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="cfg-card-footer">
+          <div className="cfg-footer-left">
+            <span className="cfg-footer-note">Changes persist in SQLite and update runtime config immediately.</span>
+          </div>
+          <div className="cfg-footer-right">
+            {isDirty && (
+              <button type="button" className="cfg-btn secondary" onClick={onDiscard}>
+                <RotateCcw size={14} />
+                Discard
+              </button>
+            )}
+            <button
+              type="button"
+              className="cfg-btn primary"
+              onClick={onSave}
+              disabled={saving || !isDirty}
+            >
+              {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+              Save Changes
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
-function makeInputStyle(t) {
-  return {
-    width: '100%',
-    boxSizing: 'border-box',
-    padding: '8px 12px',
-    borderRadius: '8px',
-    border: `1px solid ${t.inputBorder}`,
-    backgroundColor: t.inputBg,
-    color: t.inputText,
-    fontSize: '12.5px',
-    fontFamily: 'monospace, var(--font-code, monospace)',
-    outline: 'none',
-    transition: 'border-color 0.15s ease, box-shadow 0.15s ease',
-  };
+function ServiceTestChip({ label, testing, result, onTest }) {
+  return (
+    <div className="cfg-service-chip-wrap">
+      <button type="button" className="cfg-btn secondary sm" onClick={onTest} disabled={testing}>
+        {testing ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
+        {label}
+      </button>
+      {result && (
+        <span className={`cfg-inline-test ${result.success ? 'ok' : 'err'}`}>
+          {result.success ? <CheckCircle2 size={13} /> : <XCircle size={13} />}
+          <span>{result.success ? `${result.latency_ms}ms` : result.error}</span>
+        </span>
+      )}
+    </div>
+  );
 }
 
-function makeSelectStyle(t) {
-  return {
-    width: '100%',
-    boxSizing: 'border-box',
-    padding: '8px 12px',
-    borderRadius: '8px',
-    border: `1px solid ${t.inputBorder}`,
-    backgroundColor: t.inputBg,
-    color: t.inputText,
-    fontSize: '12.5px',
-    outline: 'none',
-    cursor: 'pointer',
+// ─────────────────────────────────────────────────────────────────────────────
+// 3. SECURITY & CREDENTIALS PANEL
+// ─────────────────────────────────────────────────────────────────────────────
+
+function SecurityPanel({
+  providers,
+  systemSettings,
+  onJumpToProvider,
+  onJumpToCategory,
+  onRefresh,
+  setBanner,
+  setConfirmModal,
+}) {
+  const sensitiveSystem = systemSettings.filter((s) => s.sensitive);
+
+  const handleRevokeProvider = (p) => {
+    setConfirmModal({
+      title: `Revoke ${p.provider_id.toUpperCase()} Credential`,
+      message: `Remove the stored credential for ${p.provider_id} from SQLite?`,
+      confirmLabel: 'Revoke Key',
+      onConfirm: async () => {
+        const res = await fetch(`${API_BASE}/providers/${p.provider_id}`, { method: 'DELETE' });
+        if (res.ok) {
+          await onRefresh();
+          setBanner({ type: 'info', text: `Credential for ${p.provider_id} removed from SQLite.` });
+          setTimeout(() => setBanner(null), 3000);
+        }
+      },
+    });
   };
+
+  return (
+    <div className="cfg-stack">
+      <div className="cfg-card">
+        <div className="cfg-card-header-simple">
+          <h3>AI Provider Credentials</h3>
+          <p>All saved keys are masked at the API boundary. Full secrets are never transmitted back to the browser.</p>
+        </div>
+
+        <div className="cfg-table-wrap">
+          <table className="cfg-table">
+            <thead>
+              <tr>
+                <th>Provider</th>
+                <th>Masked Credential</th>
+                <th>Source</th>
+                <th>Status</th>
+                <th className="align-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {providers.map((p) => (
+                <tr key={p.provider_id}>
+                  <td className="cfg-table-primary">{p.provider_id.toUpperCase()}</td>
+                  <td>
+                    <code className="cfg-mono">
+                      {p.api_key_masked || (p.provider_id === 'ollama' ? 'Not required (Local)' : '—')}
+                    </code>
+                  </td>
+                  <td>
+                    <span className="cfg-source-tag">{p.key_source || 'none'}</span>
+                  </td>
+                  <td>
+                    {p.has_key ? (
+                      <span className="cfg-state-pill saved">Active</span>
+                    ) : (
+                      <span className="cfg-state-pill warn">Missing</span>
+                    )}
+                  </td>
+                  <td className="align-right">
+                    <div className="cfg-table-actions">
+                      <button
+                        type="button"
+                        className="cfg-btn secondary xs"
+                        onClick={() => onJumpToProvider(p.provider_id)}
+                      >
+                        Rotate / Edit
+                      </button>
+                      {p.stored_in_db && (
+                        <button
+                          type="button"
+                          className="cfg-btn ghost-danger xs"
+                          onClick={() => handleRevokeProvider(p)}
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="cfg-card">
+        <div className="cfg-card-header-simple">
+          <h3>Academic & External API Keys</h3>
+          <p>Sensitive system-level keys used by literature connectors.</p>
+        </div>
+        <div className="cfg-table-wrap">
+          <table className="cfg-table">
+            <thead>
+              <tr>
+                <th>Setting</th>
+                <th>Masked Value</th>
+                <th>Source</th>
+                <th className="align-right">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sensitiveSystem.map((s) => (
+                <tr key={s.key}>
+                  <td className="cfg-table-primary">{s.label}</td>
+                  <td>
+                    <code className="cfg-mono">{s.value || '—'}</code>
+                  </td>
+                  <td>
+                    <span className="cfg-source-tag">{s.source || 'default'}</span>
+                  </td>
+                  <td className="align-right">
+                    <button
+                      type="button"
+                      className="cfg-btn secondary xs"
+                      onClick={() => onJumpToCategory(s.category)}
+                    >
+                      Configure
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
 }
 
-const revealIconStyle = {
-  position: 'absolute',
-  right: '8px',
-  top: '50%',
-  transform: 'translateY(-50%)',
-  background: 'transparent',
-  border: 'none',
-  cursor: 'pointer',
-  color: '#94a3b8',
-  padding: '4px',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-};
+// ─────────────────────────────────────────────────────────────────────────────
+// 4. DIAGNOSTICS & HEALTH PANEL
+// ─────────────────────────────────────────────────────────────────────────────
 
-function makeTestButtonStyle(t) {
-  return {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 6,
-    padding: '0 12px',
-    height: '32px',
-    borderRadius: '6px',
-    border: `1px solid ${t.btnSecondaryBorder}`,
-    backgroundColor: t.btnSecondaryBg,
-    color: t.btnSecondaryText,
-    fontSize: '12px',
-    fontWeight: 600,
-    cursor: 'pointer',
-    whiteSpace: 'nowrap',
-    flexShrink: 0,
-    boxSizing: 'border-box',
-    transition: 'all 0.15s ease',
+function DiagnosticsPanel({
+  healthStatus,
+  providers,
+  providerTestResults,
+  setProviderTestResults,
+  serviceTestResults,
+  onTestService,
+  testingService,
+  formValues,
+  validationErrors,
+  onRefresh,
+}) {
+  const [runningAll, setRunningAll] = useState(false);
+
+  const runAllDiagnostics = async () => {
+    setRunningAll(true);
+    try {
+      await onRefresh();
+      const configuredProviders = providers.filter((p) => p.has_key);
+      await Promise.all([
+        ...configuredProviders.map(async (p) => {
+          try {
+            const res = await fetch(`${API_BASE}/test-connection`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ provider_id: p.provider_id, model: p.model }),
+            });
+            const data = await res.json();
+            setProviderTestResults((prev) => ({ ...prev, [p.provider_id]: data }));
+          } catch (err) {
+            setProviderTestResults((prev) => ({
+              ...prev,
+              [p.provider_id]: { success: false, error: err.message },
+            }));
+          }
+        }),
+        onTestService('redis', { target_url: formValues.redis_url || undefined }),
+        onTestService('searqon', { target_url: formValues.searqon_base_url || undefined }),
+        onTestService('semantic_scholar'),
+        onTestService('openalex', { email: formValues.openalex_email || undefined }),
+      ]);
+    } finally {
+      setRunningAll(false);
+    }
   };
+
+  const defaultProv = formValues.default_llm_provider || 'ollama';
+  const defaultProvRecord = providers.find((p) => p.provider_id === defaultProv);
+  const configWarnings = [];
+  if (defaultProvRecord && !defaultProvRecord.has_key) {
+    configWarnings.push(`Global default provider "${defaultProv}" has no API key or endpoint configured.`);
+  }
+  Object.entries(validationErrors).forEach(([k, msg]) => {
+    configWarnings.push(`${k}: ${msg}`);
+  });
+
+  return (
+    <div className="cfg-stack">
+      {/* System Health Summary */}
+      <div className="cfg-card">
+        <div className="cfg-diag-header">
+          <div>
+            <h3>Backend API & SQLite Health</h3>
+            <p>
+              {healthStatus?.ok
+                ? `Healthy • API v${healthStatus.version || '2.0'}`
+                : healthStatus?.error || 'Checking...'}
+            </p>
+          </div>
+          <button
+            type="button"
+            className="cfg-btn primary"
+            onClick={runAllDiagnostics}
+            disabled={runningAll}
+          >
+            {runningAll ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
+            Run All Diagnostics
+          </button>
+        </div>
+
+        {/* Config Validation */}
+        <div className="cfg-validation-box">
+          <div className="cfg-subsection-label">Configuration Validation</div>
+          {configWarnings.length === 0 ? (
+            <div className="cfg-inline-test ok">
+              <CheckCircle2 size={14} />
+              <span>All active runtime parameters are valid.</span>
+            </div>
+          ) : (
+            <div className="cfg-warning-list">
+              {configWarnings.map((w, idx) => (
+                <div key={idx} className="cfg-inline-test err">
+                  <AlertTriangle size={14} />
+                  <span>{w}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Infrastructure & Academic Service Checks */}
+      <div className="cfg-card">
+        <div className="cfg-card-header-simple">
+          <h3>External & Infrastructure Services</h3>
+        </div>
+        <div className="cfg-table-wrap">
+          <table className="cfg-table">
+            <thead>
+              <tr>
+                <th>Service</th>
+                <th>Status</th>
+                <th>Latency</th>
+                <th>Details</th>
+                <th className="align-right">Check</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[
+                { id: 'redis', name: 'Redis Paper Cache' },
+                { id: 'searqon', name: 'Searqon Web Search' },
+                { id: 'semantic_scholar', name: 'Semantic Scholar API' },
+                { id: 'openalex', name: 'OpenAlex API' },
+              ].map((svc) => {
+                const res = serviceTestResults[svc.id];
+                const busy = testingService[svc.id];
+                return (
+                  <tr key={svc.id}>
+                    <td className="cfg-table-primary">{svc.name}</td>
+                    <td>
+                      {res ? (
+                        res.success ? (
+                          <span className="cfg-state-pill saved">Connected</span>
+                        ) : (
+                          <span className="cfg-state-pill err">Failed</span>
+                        )
+                      ) : (
+                        <span className="cfg-state-pill neutral">Not tested</span>
+                      )}
+                    </td>
+                    <td className="cfg-mono">{res?.latency_ms ? `${res.latency_ms} ms` : '—'}</td>
+                    <td className="cfg-diag-msg">{res?.message || res?.error || '—'}</td>
+                    <td className="align-right">
+                      <button
+                        type="button"
+                        className="cfg-btn secondary xs"
+                        onClick={() => onTestService(svc.id)}
+                        disabled={busy}
+                      >
+                        {busy ? <Loader2 size={12} className="animate-spin" /> : 'Test'}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Configured AI Provider Checks */}
+      <div className="cfg-card">
+        <div className="cfg-card-header-simple">
+          <h3>Configured AI Providers</h3>
+        </div>
+        <div className="cfg-table-wrap">
+          <table className="cfg-table">
+            <thead>
+              <tr>
+                <th>Provider</th>
+                <th>Model</th>
+                <th>Result</th>
+                <th>Latency</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              {providers
+                .filter((p) => p.has_key)
+                .map((p) => {
+                  const res = providerTestResults[p.provider_id];
+                  return (
+                    <tr key={p.provider_id}>
+                      <td className="cfg-table-primary">{p.provider_id.toUpperCase()}</td>
+                      <td className="cfg-mono">{p.model || '—'}</td>
+                      <td>
+                        {res ? (
+                          res.success ? (
+                            <span className="cfg-state-pill saved">Connected</span>
+                          ) : (
+                            <span className="cfg-state-pill err">Failed</span>
+                          )
+                        ) : (
+                          <span className="cfg-state-pill neutral">Not tested</span>
+                        )}
+                      </td>
+                      <td className="cfg-mono">{res?.latency_ms ? `${res.latency_ms} ms` : '—'}</td>
+                      <td className="cfg-diag-msg">{res?.message || res?.error || '—'}</td>
+                    </tr>
+                  );
+                })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
 }
