@@ -1,6 +1,15 @@
 import React, { useState, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Plus, Lightbulb, Search, CheckCircle2, AlertCircle, X } from 'lucide-react';
+import {
+  Plus,
+  Lightbulb,
+  Search,
+  CheckCircle2,
+  AlertCircle,
+  AlertTriangle,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { useNoveltyWorkspace } from './useNoveltyWorkspace';
 import ResearchScopeCard from './ResearchScopeCard';
 import AnalysisConfigBar from './AnalysisConfigBar';
@@ -24,6 +33,7 @@ export default function NoveltyStudioPage() {
   const [customDraft, setCustomDraft] = useState(null);
   const [compareIds, setCompareIds] = useState([]);
   const [showCompareView, setShowCompareView] = useState(false);
+  const [confirmModal, setConfirmModal] = useState(null);
 
   const toggleCompare = (id) => {
     setCompareIds((prev) =>
@@ -45,6 +55,37 @@ export default function NoveltyStudioPage() {
       baselines_to_beat: [gap.method_name || gap.method_id].filter(Boolean),
     });
     setCustomModalOpen(true);
+  };
+
+  const requestDeleteProposal = (proposalOrId) => {
+    const target =
+      typeof proposalOrId === 'string'
+        ? ws.proposals.find((p) => p.id === proposalOrId) || { id: proposalOrId, title: 'this proposal' }
+        : proposalOrId;
+    setConfirmModal({
+      title: 'Delete Research Proposal',
+      message: `Remove "${target.title}" from this workspace? This action cannot be undone.`,
+      confirmLabel: 'Delete Proposal',
+      onConfirm: async () => {
+        await ws.deleteProposal(target.id);
+        if (inspectProposal?.id === target.id) setInspectProposal(null);
+        setCompareIds((prev) => prev.filter((x) => x !== target.id));
+      },
+    });
+  };
+
+  const requestClearAll = () => {
+    setConfirmModal({
+      title: 'Clear Workspace Proposals',
+      message: `Delete all ${ws.proposals.length} saved proposals in "${ws.workspaceTitle}"?`,
+      confirmLabel: 'Clear All',
+      onConfirm: async () => {
+        await ws.clearAllProposals();
+        setInspectProposal(null);
+        setCompareIds([]);
+        setShowCompareView(false);
+      },
+    });
   };
 
   return (
@@ -167,6 +208,16 @@ export default function NoveltyStudioPage() {
                   {showCompareView ? 'Exit Compare' : `Compare (${compareIds.length})`}
                 </button>
               )}
+              {ws.proposals.length > 0 && (
+                <button
+                  type="button"
+                  className="nov-icon-btn danger"
+                  onClick={requestClearAll}
+                  title="Clear all saved proposals in this workspace"
+                >
+                  <Trash2 size={13} />
+                </button>
+              )}
             </div>
           </div>
 
@@ -191,7 +242,9 @@ export default function NoveltyStudioPage() {
                     <th>Title</th>
                     <th>Strategy</th>
                     <th>Prior-Art Status</th>
+                    <th>Proposed Contribution</th>
                     <th>Hypothesis</th>
+                    <th>Datasets & Metrics</th>
                     <th>Baselines</th>
                   </tr>
                 </thead>
@@ -203,7 +256,11 @@ export default function NoveltyStudioPage() {
                       </td>
                       <td>{MECHANISM_LABELS[p.mechanism] || p.mechanism}</td>
                       <td>{resolvePriorArtStatus(p).label}</td>
-                      <td>{p.testable_hypothesis}</td>
+                      <td>{p.novelty_statement || '—'}</td>
+                      <td>{p.testable_hypothesis || '—'}</td>
+                      <td>
+                        {[...(p.target_datasets || []), ...(p.expected_metrics || [])].join(', ') || '—'}
+                      </td>
                       <td>{(p.baselines_to_beat || []).join(', ') || '—'}</td>
                     </tr>
                   ))}
@@ -230,7 +287,7 @@ export default function NoveltyStudioPage() {
                   onAddToGraph={ws.addProposalToGraph}
                   isAddedToGraph={ws.addedCandidateIds.has(prop.id)}
                   isAddingToGraph={ws.addingGraphId === prop.id}
-                  onDelete={ws.deleteProposal}
+                  onDelete={requestDeleteProposal}
                 />
               ))}
             </div>
@@ -245,6 +302,7 @@ export default function NoveltyStudioPage() {
         onAddToGraph={ws.addProposalToGraph}
         isAddedToGraph={inspectProposal ? ws.addedCandidateIds.has(inspectProposal.id) : false}
         isAddingToGraph={inspectProposal ? ws.addingGraphId === inspectProposal.id : false}
+        onRequestDelete={requestDeleteProposal}
       />
 
       {/* Custom Proposal Modal */}
@@ -254,6 +312,38 @@ export default function NoveltyStudioPage() {
         onClose={() => setCustomModalOpen(false)}
         onSubmit={ws.createCustomProposal}
       />
+
+      {/* Destructive Action Confirmation Modal */}
+      {confirmModal && (
+        <div className="nov-modal-backdrop" onClick={() => setConfirmModal(null)}>
+          <div className="nov-confirm-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="nov-confirm-header">
+              <AlertTriangle size={17} className="nov-warn-icon" />
+              <h3>{confirmModal.title}</h3>
+            </div>
+            <p className="nov-confirm-body">{confirmModal.message}</p>
+            <div className="nov-modal-footer">
+              <button
+                type="button"
+                className="nov-btn secondary"
+                onClick={() => setConfirmModal(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="nov-btn danger"
+                onClick={async () => {
+                  await confirmModal.onConfirm();
+                  setConfirmModal(null);
+                }}
+              >
+                {confirmModal.confirmLabel || 'Confirm'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

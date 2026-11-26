@@ -7007,3 +7007,99 @@ body.dark-theme .novelty-grounding-chip {
     grid-template-columns: 1fr;
   }
 }
+
+/* Drawer Tabs, Evidence & Confirmation Modal Additions */
+.nov-drawer-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.nov-drawer-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 20px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-subtle);
+}
+
+.nov-drawer-tab {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+
+.nov-drawer-tab:hover {
+  color: var(--text-primary);
+}
+
+.nov-drawer-tab.active {
+  color: var(--text-primary);
+  font-weight: 600;
+  border-bottom-color: var(--accent-primary, #3b82f6);
+}
+
+.nov-evidence-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nov-evidence-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.nov-confirm-modal {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  max-width: 420px;
+  width: 100%;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+}
+
+.nov-confirm-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nov-confirm-header h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.nov-confirm-body {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.nov-warn-icon {
+  color: #f59e0b;
+  flex-shrink: 0;
+}
+
+.nov-btn.danger {
+  background: #ef4444;
+  color: #fff;
+}
+
+.nov-btn.danger:hover {
+  background: #dc2626;
+}

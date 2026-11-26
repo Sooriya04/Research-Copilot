@@ -91,7 +91,17 @@ export function useNoveltyWorkspace(initialMechanism = 'all') {
         const data = await res.json();
         list = data.papers || [];
       }
-      // Fallback to workspace-attached or search-staged graph papers
+      // Fallback to activeWorkspace.papers or search-staged graph papers
+      if (list.length === 0 && activeWorkspace?.papers?.length > 0) {
+        list = activeWorkspace.papers.map((p) => ({
+          id: p.id || p.arxiv_id || p.paper_id,
+          title: p.title || p.id,
+          year: p.year,
+          authors: p.authors || [],
+          methods: p.methods || [],
+          datasets: p.datasets || [],
+        }));
+      }
       if (list.length === 0 && addedToGraphPaperIds?.length > 0 && searchResults?.length > 0) {
         const stagedSet = new Set(addedToGraphPaperIds);
         list = searchResults
@@ -112,7 +122,7 @@ export function useNoveltyWorkspace(initialMechanism = 'all') {
     } finally {
       setLoadingPapers(false);
     }
-  }, [workspaceId, addedToGraphPaperIds, searchResults]);
+  }, [workspaceId, activeWorkspace?.papers, addedToGraphPaperIds, searchResults]);
 
   // Fetch saved proposals from SQLite
   const fetchProposals = useCallback(async () => {
@@ -243,6 +253,19 @@ export function useNoveltyWorkspace(initialMechanism = 'all') {
     }
   };
 
+  const clearAllProposals = async () => {
+    try {
+      const qs = workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : '';
+      const res = await fetch(`/api/v1/novelty/proposals${qs}`, { method: 'DELETE' });
+      if (res.ok) {
+        setProposals([]);
+        notify('info', 'Cleared saved proposals for this workspace.');
+      }
+    } catch (err) {
+      notify('error', `Failed to clear proposals: ${err.message}`);
+    }
+  };
+
   const createCustomProposal = async (form) => {
     const res = await fetch('/api/v1/novelty/custom', {
       method: 'POST',
@@ -312,6 +335,7 @@ export function useNoveltyWorkspace(initialMechanism = 'all') {
     addingGraphId,
     addProposalToGraph,
     deleteProposal,
+    clearAllProposals,
     createCustomProposal,
     toast,
   };
