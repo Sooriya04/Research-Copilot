@@ -1,3 +1,15 @@
+/**
+ * Module: frontend/src/views/novelty/AnalysisExecutionBar.jsx
+ *
+ * What this file does:
+ * Renders Area C (Analysis Execution) of the Research Novelty Studio.
+ * Houses the primary "Run Novelty Analysis" button, live 8-stage progress tracker rail,
+ * run duration telemetry, and error alerts with retry triggers.
+ *
+ * Components & Functions:
+ * - AnalysisExecutionBar: Execution status header and 8-stage animated step indicator.
+ */
+
 import React from 'react';
 import { Play, RotateCw, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { PIPELINE_STAGES } from './noveltyConstants';

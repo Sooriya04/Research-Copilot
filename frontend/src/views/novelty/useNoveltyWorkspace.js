@@ -1,3 +1,17 @@
+/**
+ * Module: frontend/src/views/novelty/useNoveltyWorkspace.js
+ *
+ * What this file does:
+ * Custom React hook encapsulating state management, data loading, workspace grounding,
+ * provider status polling, synthesis pipeline execution, and proposal CRUD operations
+ * for the Research Novelty Studio.
+ *
+ * Functions & Hooks:
+ * - useNoveltyWorkspace(initialMechanism): Manages active workspace grounding papers,
+ *   selected providers, 8-stage execution animations, persisted proposal queries,
+ *   Knowledge Graph candidate node injection, and custom proposal submissions.
+ */
+
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
 

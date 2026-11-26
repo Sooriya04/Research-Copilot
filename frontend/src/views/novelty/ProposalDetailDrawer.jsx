@@ -1,3 +1,21 @@
+/**
+ * Module: frontend/src/views/novelty/ProposalDetailDrawer.jsx
+ *
+ * What this file does:
+ * Full-featured inspection drawer for a selected research proposal.
+ * Features 3 tabs:
+ * 1. Proposal & Method: Detailed methodology, algorithmic approach, KaTeX math formulation,
+ *    testable hypotheses, benchmark baselines, datasets, metrics, and limitations.
+ * 2. Evidence & Provenance: Grounded paper list with links to Paper Details and full-text indicators.
+ * 3. Prior-Art Assessment: Search queries executed, overlapping mechanisms, distinct contributions,
+ *    and honesty checks.
+ * Includes actions to inject as provisional candidate node into Knowledge Graph, copy Markdown,
+ * send critique prompt to Chat, and delete saved proposals.
+ *
+ * Components & Functions:
+ * - ProposalDetailDrawer: Slide-over drawer component with tab navigation and action triggers.
+ */
+
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {

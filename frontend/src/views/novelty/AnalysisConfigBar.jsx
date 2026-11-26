@@ -1,3 +1,17 @@
+/**
+ * Module: frontend/src/views/novelty/AnalysisConfigBar.jsx
+ *
+ * What this file does:
+ * Renders Area B (Analysis Configuration) of the Research Novelty Studio.
+ * Allows researchers to choose analysis depth (Focused vs. Comprehensive), toggle
+ * automated Prior-Art Verification, and configure provider/model selection via a collapsible
+ * advanced drawer without crowding the primary interface.
+ *
+ * Components & Functions:
+ * - AnalysisConfigBar: Card component exposing high-level configuration toggles
+ *   and optional advanced provider controls linking to the Settings page.
+ */
+
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Sliders, ChevronDown, ChevronRight, Settings } from 'lucide-react';

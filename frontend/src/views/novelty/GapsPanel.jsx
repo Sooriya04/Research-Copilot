@@ -1,3 +1,15 @@
+/**
+ * Module: frontend/src/views/novelty/GapsPanel.jsx
+ *
+ * What this file does:
+ * Collapsible panel displaying detected research gaps extracted during Stage 3.
+ * Each gap shows its title, description, and a "Draft Proposal" action that pre-fills
+ * the Custom Proposal Modal with the gap's premise.
+ *
+ * Components & Functions:
+ * - GapsPanel: Collapsible accordion listing research gaps with quick drafting triggers.
+ */
+
 import React, { useState } from 'react';
 import { AlertCircle, ChevronDown, ChevronRight, ArrowRight } from 'lucide-react';
 

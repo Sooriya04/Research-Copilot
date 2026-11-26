@@ -1,3 +1,16 @@
+/**
+ * Module: frontend/src/views/novelty/ProposalCard.jsx
+ *
+ * What this file does:
+ * Renders an evidence-grounded research proposal card (replacing the old masonry grid).
+ * Displays title, problem statement, core contribution, strategy tag, prior-art
+ * verification badge, evidence source badge, supporting paper count, comparison checkbox,
+ * graph injection button, and delete action.
+ *
+ * Components & Functions:
+ * - ProposalCard: Structured card component with inspect and comparison actions.
+ */
+
 import React from 'react';
 import {
   FileText,

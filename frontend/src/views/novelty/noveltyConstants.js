@@ -1,3 +1,20 @@
+/**
+ * Module: frontend/src/views/novelty/noveltyConstants.js
+ *
+ * What this file does:
+ * Defines scientific pipeline stage metadata, ideation mechanism labels, prior-art
+ * verification status mappings, and evidence availability helper resolvers used across
+ * the Novelty Studio user interface.
+ *
+ * Exports:
+ * - PIPELINE_STAGES: Array of 8 sequential stages from Research Grounding to Persistence.
+ * - MECHANISM_LABELS: Mapping of strategy identifiers to human-readable labels.
+ * - PRIOR_ART_STATUS_META: Status labels and color badge tokens for prior-art assessments.
+ * - EVIDENCE_STATUS_META: Badges indicating full-text vs abstract-only grounding.
+ * - resolvePriorArtStatus(status): Resolver returning display label, tone, and tooltip.
+ * - resolveEvidenceStatus(status): Resolver returning evidence availability badge properties.
+ */
+
 export const PIPELINE_STAGES = [
   { id: 'grounding', label: 'Research Grounding' },
   { id: 'paper_analysis', label: 'Paper Analysis' },

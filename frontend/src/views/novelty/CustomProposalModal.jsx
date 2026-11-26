@@ -1,3 +1,15 @@
+/**
+ * Module: frontend/src/views/novelty/CustomProposalModal.jsx
+ *
+ * What this file does:
+ * Modal dialog enabling researchers to manually author structured research proposals.
+ * Validates required scientific fields (Title, Problem Statement, Novelty Statement,
+ * Strategy mechanism) and parses comma-separated lists for datasets, baselines, and metrics.
+ *
+ * Components & Functions:
+ * - CustomProposalModal: Controlled modal with form validation and async submission handling.
+ */
+
 import React, { useState, useEffect } from 'react';
 import { X, Loader2 } from 'lucide-react';
 import { MECHANISM_LABELS } from './noveltyConstants';

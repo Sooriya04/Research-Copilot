@@ -1,3 +1,19 @@
+/**
+ * Module: frontend/src/views/novelty/NoveltyStudioPage.jsx
+ *
+ * What this file does:
+ * Top-level container component for the redesigned Research Novelty Studio.
+ * Replaces the crowded monolithic UI with a clean, 3-area layout:
+ * - Area A: Research Scope (active workspace, grounding papers, topic input)
+ * - Area B: Analysis Configuration (depth mode, prior-art toggle, provider drawer)
+ * - Area C: Analysis Execution (primary run trigger, 8-stage progress rail, telemetry)
+ * Displays proposal cards, proposal comparison table view, deletion confirmations,
+ * and delegates inspection to ProposalDetailDrawer and authoring to CustomProposalModal.
+ *
+ * Components & Functions:
+ * - NoveltyStudioPage: Main view component coordinating novelty analysis workflows.
+ */
+
 import React, { useState, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import {

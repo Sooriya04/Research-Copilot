@@ -1,3 +1,16 @@
+/**
+ * Module: frontend/src/views/novelty/ResearchScopeCard.jsx
+ *
+ * What this file does:
+ * Renders Area A (Research Scope) of the Research Novelty Studio.
+ * Displays active workspace title, research topic input, grounding readiness indicator,
+ * and an expandable multi-select list of available workspace papers with full-text badges.
+ *
+ * Components & Functions:
+ * - ResearchScopeCard: Section component with paper selection toggles, "Select All",
+ *   "Clear Selection", and quick links to Literature Search and Knowledge Graph.
+ */
+
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Layers, BookOpen, ChevronDown, ChevronRight, Check, Search, Network } from 'lucide-react';

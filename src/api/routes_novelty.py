@@ -40,6 +40,8 @@ class NoveltyStudioRequest(BaseModel):
     provider_keys: Optional[Dict[str, Optional[str]]] = None
     base_url: Optional[str] = None
     force_refresh: bool = False
+    analysis_mode: str = Field(default="focused", description="focused | comprehensive")
+    verify_prior_art: bool = True
 
 
 class ProviderTestRequest(BaseModel):
@@ -398,6 +400,8 @@ async def synthesize_novelties_endpoint(req: NoveltyStudioRequest):
             base_url=req.base_url,
             force_refresh=req.force_refresh,
             provider_keys=req.provider_keys,
+            analysis_mode=req.analysis_mode,
+            verify_prior_art=req.verify_prior_art,
         )
         elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
 
