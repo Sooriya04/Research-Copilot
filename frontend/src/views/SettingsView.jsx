@@ -132,15 +132,53 @@ const ADVANCED_KEYS = new Set([
   'redis_active_paper_ttl',
 ]);
 
+// Fallback metadata matching src/core/system_settings.py so inputs always render
+// even while loading or if the backend is temporarily offline.
+const FALLBACK_SETTING_SPECS = [
+  { key: 'semantic_scholar_api_key', category: 'academic', type: 'string', sensitive: true, default: '', label: 'Semantic Scholar API Key', description: 'API key for rate-limit exempt access to Semantic Scholar literature graph.', placeholder: 's2k-...' },
+  { key: 'openalex_email', category: 'academic', type: 'string', sensitive: false, default: 'researcher@example.com', label: 'OpenAlex Polite Email', description: 'Contact email included in OpenAlex requests to join the fast polite pool.', placeholder: 'researcher@example.com' },
+  { key: 'openalex_api_key', category: 'academic', type: 'string', sensitive: true, default: '', label: 'OpenAlex Premium API Key', description: 'Optional OpenAlex API key for dedicated high-throughput concurrency.', placeholder: 'b4z...' },
+  { key: 'arxiv_base_url', category: 'academic', type: 'string', sensitive: false, default: 'https://export.arxiv.org/api/query', label: 'arXiv Endpoint URL', description: 'Base query URL for arXiv OAI-PMH & Atom literature search API.', placeholder: 'https://export.arxiv.org/api/query' },
+  { key: 'crossref_base_url', category: 'academic', type: 'string', sensitive: false, default: 'https://api.crossref.org', label: 'CrossRef Endpoint URL', description: 'Base REST URL for CrossRef DOI bibliographic metadata lookups.', placeholder: 'https://api.crossref.org' },
+  { key: 'europepmc_base_url', category: 'academic', type: 'string', sensitive: false, default: 'https://www.ebi.ac.uk/europepmc/webservices/rest', label: 'Europe PMC Endpoint URL', description: 'Base REST URL for biomedical and life sciences preprint lookups.', placeholder: 'https://www.ebi.ac.uk/europepmc/webservices/rest' },
+  { key: 'embedding_provider', category: 'rag', type: 'string', sensitive: false, default: 'ollama', label: 'Embedding Provider', description: 'Backend engine used to generate dense semantic vector representations.', options: ['ollama', 'gemini', 'huggingface', 'openai'] },
+  { key: 'embedding_model', category: 'rag', type: 'string', sensitive: false, default: 'nomic-embed-text', label: 'Embedding Model Name', description: 'Specific embedding checkpoint name (e.g. nomic-embed-text, text-embedding-3-small).', placeholder: 'nomic-embed-text' },
+  { key: 'embedding_dim', category: 'rag', type: 'int', sensitive: false, default: 768, label: 'Embedding Vector Dimension', description: 'Dimension of generated embeddings (e.g. 768 for nomic-embed-text, 1536 for OpenAI).', placeholder: '768' },
+  { key: 'rag_top_k', category: 'rag', type: 'int', sensitive: false, default: 5, label: 'RAG Top-K Chunks', description: 'Maximum number of most-relevant semantic text passages retrieved per query.', placeholder: '5' },
+  { key: 'rag_chunk_size', category: 'rag', type: 'int', sensitive: false, default: 800, label: 'Text Chunk Size (chars)', description: 'Character length of individual document chunks indexed into the vector store.', placeholder: '800' },
+  { key: 'rag_chunk_overlap', category: 'rag', type: 'int', sensitive: false, default: 150, label: 'Chunk Overlap (chars)', description: 'Character overlap between adjacent chunks to preserve cross-boundary context.', placeholder: '150' },
+  { key: 'default_llm_provider', category: 'reasoning', type: 'string', sensitive: false, default: 'ollama', label: 'Global Default LLM Provider', description: 'Default engine invoked for paper synthesis, novelty analysis, and autonomous planning.', options: ['ollama', 'vllm', 'lmstudio', 'gemini', 'groq', 'openrouter', 'openai', 'nvidia', 'deepseek'] },
+  { key: 'max_loop_iterations', category: 'reasoning', type: 'int', sensitive: false, default: 10, label: 'Max Multi-Agent Loop Iterations', description: 'Safety threshold preventing unbounded recursive reasoning during deep research runs.', placeholder: '10' },
+  { key: 'default_rank_limit', category: 'reasoning', type: 'int', sensitive: false, default: 25, label: 'Default Ranking Limit', description: 'Number of candidate literature papers scored during cross-encoder ranking passes.', placeholder: '25' },
+  { key: 'redis_enabled', category: 'infrastructure', type: 'bool', sensitive: false, default: true, label: 'Enable Redis Active Paper Cache', description: 'Store active parsed paper graphs and AST chunks in Redis for sub-millisecond retrieval.' },
+  { key: 'redis_url', category: 'infrastructure', type: 'string', sensitive: false, default: 'redis://localhost:6379', label: 'Redis Connection URL', description: 'Redis connection URI (supports redis:// and rediss:// protocols).', placeholder: 'redis://localhost:6379' },
+  { key: 'redis_active_paper_ttl', category: 'infrastructure', type: 'int', sensitive: false, default: 3600, label: 'Active Paper TTL (seconds)', description: 'Time-to-live for paper cache entries before background eviction (3600s = 1 hour).', placeholder: '3600' },
+  { key: 'web_search_enabled', category: 'infrastructure', type: 'bool', sensitive: false, default: true, label: 'Enable External Web Search', description: 'Permit live web retrieval via Searqon for external code repos and benchmarks.' },
+  { key: 'searqon_base_url', category: 'infrastructure', type: 'string', sensitive: false, default: 'http://localhost:7493', label: 'Searqon Service URL', description: 'Base HTTP endpoint for the local Searqon autonomous web search crawler.', placeholder: 'http://localhost:7493' },
+  { key: 'searqon_timeout', category: 'infrastructure', type: 'float', sensitive: false, default: 10.0, label: 'Searqon Request Timeout (s)', description: 'Maximum seconds to wait for Searqon web scraping responses.', placeholder: '10.0' },
+  { key: 'web_search_top_k', category: 'infrastructure', type: 'int', sensitive: false, default: 5, label: 'Web Search Top Results', description: 'Number of external search citations ingested per query.', placeholder: '5' },
+  { key: 'web_search_cache_ttl', category: 'infrastructure', type: 'int', sensitive: false, default: 900, label: 'Search Cache TTL (seconds)', description: 'Cache validity for live web search queries (900s = 15 minutes).', placeholder: '900' },
+];
+
+const INITIAL_DEFAULTS = Object.fromEntries(
+  FALLBACK_SETTING_SPECS.map((s) => [s.key, s.default ?? ''])
+);
+
 export default function SettingsView() {
-  const [activeCategory, setActiveCategory] = useState('models');
+  const [activeCategory, setActiveCategory] = useState(() => {
+    try {
+      const sec = new URLSearchParams(window.location.search).get('section');
+      if (sec) return sec;
+    } catch {}
+    return 'models';
+  });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  // System settings state
-  const [systemSettings, setSystemSettings] = useState([]);
-  const [savedValues, setSavedValues] = useState({});
-  const [formValues, setFormValues] = useState({});
+  // System settings state (pre-seeded with fallback specs so inputs always render)
+  const [systemSettings, setSystemSettings] = useState(FALLBACK_SETTING_SPECS);
+  const [savedValues, setSavedValues] = useState(INITIAL_DEFAULTS);
+  const [formValues, setFormValues] = useState(INITIAL_DEFAULTS);
   const [revealKeys, setRevealKeys] = useState({});
 
   // Providers state
@@ -161,24 +199,31 @@ export default function SettingsView() {
     setLoading(true);
     try {
       const [sysRes, provRes, healthRes] = await Promise.all([
-        fetch(`${API_BASE}/system`),
-        fetch(`${API_BASE}/providers`),
+        fetch(`${API_BASE}/system`).catch(() => null),
+        fetch(`${API_BASE}/providers`).catch(() => null),
         fetch('/api/v1/health').catch(() => null),
       ]);
 
-      if (sysRes.ok) {
+      if (sysRes && sysRes.ok) {
         const data = await sysRes.json();
         const items = data.settings || [];
-        setSystemSettings(items);
-        const vals = {};
-        items.forEach((item) => {
-          vals[item.key] = item.value ?? '';
+        if (items.length > 0) {
+          setSystemSettings(items);
+          const vals = { ...INITIAL_DEFAULTS };
+          items.forEach((item) => {
+            vals[item.key] = item.value ?? item.default ?? '';
+          });
+          setSavedValues(vals);
+          setFormValues(vals);
+        }
+      } else {
+        setBanner({
+          type: 'info',
+          text: 'Backend API unavailable — displaying default field schema. Start the backend server to persist changes.',
         });
-        setSavedValues(vals);
-        setFormValues(vals);
       }
 
-      if (provRes.ok) {
+      if (provRes && provRes.ok) {
         const pData = await provRes.json();
         setProviders(pData.providers || []);
       }
