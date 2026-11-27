@@ -64,7 +64,7 @@ export default function NoveltyStudioPage() {
 
   const handleFormulateFromGap = (gap) => {
     setCustomDraft({
-      title: `Evaluating ${gap.method_name || gap.method_id} on ${gap.dataset_name || gap.dataset_id}`,
+      title: gap.title || `Evaluating ${gap.method_name || gap.method_id} on ${gap.dataset_name || gap.dataset_id}`,
       mechanism: 'gap_realization',
       pitch: gap.description || 'Addressing an unexplored method-dataset intersection.',
       target_datasets: [gap.dataset_name || gap.dataset_id].filter(Boolean),

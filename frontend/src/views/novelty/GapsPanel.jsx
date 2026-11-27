@@ -40,7 +40,7 @@ export default function GapsPanel({ gaps, loading, onFormulateFromGap }) {
             <div key={g.id || i} className="nov-gap-row">
               <div className="nov-gap-info">
                 <div className="nov-gap-title">
-                  {g.method_name || g.method_id} × {g.dataset_name || g.dataset_id}
+                  {g.title || `${g.method_name || g.method_id} × ${g.dataset_name || g.dataset_id}`}
                 </div>
                 <div className="nov-muted-sm">
                   {g.description || 'Unexplored method-dataset intersection in workspace graph.'}
