@@ -36,42 +36,49 @@ class PaperAnalyzer:
 
         # Batch up to 8 papers into a single structured extraction call for efficiency,
         # preferring full_text (up to 3500 chars) over abstracts.
-        paper_blocks = []
-        for p in papers:
-            body = p.full_text[:3500] if p.has_full_text and p.full_text else p.abstract[:1500]
-            avail = "full_text" if p.has_full_text else ("abstract_only" if p.abstract else "metadata_only")
-            paper_blocks.append(
-                f"PAPER_ID: {p.id}\n"
-                f"TITLE: {p.title} ({p.year or 'n/d'})\n"
-                f"SOURCE_AVAILABILITY: {avail}\n"
-                f"CONTENT:\n{body or 'No abstract/full text available.'}\n"
+        BATCH_SIZE = 8
+        items: List[dict] = []
+
+        for i in range(0, len(papers), BATCH_SIZE):
+            batch = papers[i : i + BATCH_SIZE]
+            paper_blocks = []
+            for p in batch:
+                body = p.full_text[:3500] if p.has_full_text and p.full_text else p.abstract[:1500]
+                avail = "full_text" if p.has_full_text else ("abstract_only" if p.abstract else "metadata_only")
+                paper_blocks.append(
+                    f"PAPER_ID: {p.id}\n"
+                    f"TITLE: {p.title} ({p.year or 'n/d'})\n"
+                    f"SOURCE_AVAILABILITY: {avail}\n"
+                    f"CONTENT:\n{body or 'No abstract/full text available.'}\n"
+                )
+
+            prompt = (
+                "Extract factual technical profiles for each paper below. "
+                "Do NOT fabricate methods, limitations, or findings that are not present in the provided content; "
+                "leave lists empty if not stated.\n\n"
+                + "\n---\n".join(paper_blocks)
+                + "\nReturn STRICT JSON matching:\n"
+                '{"analyses": [{"paper_id": "...", "research_problem": "...", "main_contributions": ["..."], '
+                '"methodology": "...", "mechanisms": ["..."], "assumptions": ["..."], '
+                '"limitations": ["..."], "experimental_findings": ["..."], "future_directions": ["..."]}]}'
             )
 
-        prompt = (
-            "Extract factual technical profiles for each paper below. "
-            "Do NOT fabricate methods, limitations, or findings that are not present in the provided content; "
-            "leave lists empty if not stated.\n\n"
-            + "\n---\n".join(paper_blocks)
-            + "\nReturn STRICT JSON matching:\n"
-            '{"analyses": [{"paper_id": "...", "research_problem": "...", "main_contributions": ["..."], '
-            '"methodology": "...", "mechanisms": ["..."], "assumptions": ["..."], '
-            '"limitations": ["..."], "experimental_findings": ["..."], "future_directions": ["..."]}]}'
-        )
-
-        try:
-            raw = await self.orchestrator.complete(
-                provider,
-                [
-                    ChatMessage(role="system", content="Extract structured scientific facts strictly from provided text. Return JSON only."),
-                    ChatMessage(role="user", content=prompt),
-                ],
-                model=model,
-                temperature=0.1,
-            )
-            parsed = parse_llm_json(raw)
-            items = parsed.get("analyses", []) if isinstance(parsed, dict) else (parsed if isinstance(parsed, list) else [])
-        except Exception:
-            items = []
+            try:
+                raw = await self.orchestrator.complete(
+                    provider,
+                    [
+                        ChatMessage(role="system", content="Extract structured scientific facts strictly from provided text. Return JSON only."),
+                        ChatMessage(role="user", content=prompt),
+                    ],
+                    model=model,
+                    temperature=0.1,
+                )
+                parsed = parse_llm_json(raw)
+                batch_items = parsed.get("analyses", []) if isinstance(parsed, dict) else (parsed if isinstance(parsed, list) else [])
+                if isinstance(batch_items, list):
+                    items.extend([it for it in batch_items if isinstance(it, dict)])
+            except Exception:
+                pass
 
         by_id = {str(it.get("paper_id")): it for it in items if isinstance(it, dict) and it.get("paper_id")}
         results: List[StructuredPaperAnalysis] = []
