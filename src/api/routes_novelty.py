@@ -1,5 +1,4 @@
 import datetime
-import os
 import time
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException
@@ -7,9 +6,8 @@ from pydantic import BaseModel, Field
 
 from src.core.config import settings
 from src.core.logger import logger
-from src.graph.novelty_engine import GraphNoveltyEngine, NoveltyItem
+from src.graph.novelty_engine import GraphNoveltyEngine
 from src.graph.schema import NodeType
-from src.graph.store import ResearchGraphStore
 from src.providers.gemini import GeminiFlashLiteProvider
 from src.providers.groq import GroqProvider
 from src.providers.llm import LocalOllamaProvider
@@ -21,7 +19,6 @@ from src.core.provider_settings import (
     resolve_provider_credentials,
     save_provider_config,
     delete_provider_config,
-    get_saved_provider_config,
 )
 
 router = APIRouter(prefix="/api/v1/novelty", tags=["Novelty Studio"])
