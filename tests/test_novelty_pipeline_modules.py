@@ -19,6 +19,13 @@ def test_parse_llm_json_repairs_latex_and_trailing_commas():
     assert parsed["proposals"][0]["title"] == "Sparse \\alpha-Attention"
 
 
+def test_parse_llm_json_handles_conversational_prose_and_unescaped_newlines():
+    raw = 'Here is {thought}: {"proposals": [{"title": "Sparse\nAttention", "math": "\\alpha"}]} That was my reasoning.'
+    parsed = parse_llm_json(raw)
+    assert isinstance(parsed, dict)
+    assert parsed["proposals"][0]["title"] == "Sparse\nAttention"
+
+
 def test_candidate_deduplication_removes_near_duplicates():
     cands = [
         NoveltyCandidate(
