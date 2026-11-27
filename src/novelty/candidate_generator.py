@@ -97,10 +97,14 @@ class CandidateGenerator:
     @staticmethod
     def deduplicate(candidates: List[NoveltyCandidate], threshold: float = 0.72) -> List[NoveltyCandidate]:
         """Remove semantically near-duplicate candidates using normalized token Jaccard similarity."""
+        token_map = {
+            i: set(re.findall(r"[a-z0-9]+", f"{cand.title} {cand.core_contribution}".lower()))
+            for i, cand in enumerate(candidates)
+        }
         kept: List[NoveltyCandidate] = []
         seen_sets: List[Set[str]] = []
-        for cand in candidates:
-            tokens = set(re.findall(r"[a-z0-9]+", f"{cand.title} {cand.core_contribution}".lower()))
+        for i, cand in enumerate(candidates):
+            tokens = token_map[i]
             if not tokens:
                 continue
             is_dup = False
