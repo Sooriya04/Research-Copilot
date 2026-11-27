@@ -56,10 +56,20 @@ class ResearchGrounder:
                     target_pids.append(nid)
 
         papers: List[GroundedPaper] = []
-        for pid in target_pids:
-            paper = await self._load_single_paper(pid)
-            if paper:
-                papers.append(paper)
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                for pid in target_pids:
+                    try:
+                        paper = await self._load_single_paper(pid, db=db)
+                    except TypeError:
+                        paper = await self._load_single_paper(pid)
+                    if paper:
+                        papers.append(paper)
+        except Exception:
+            for pid in target_pids:
+                paper = await self._load_single_paper(pid)
+                if paper:
+                    papers.append(paper)
 
         # Collect inter-paper graph edges
         all_edges = await self.store.get_all_edges()
@@ -84,7 +94,9 @@ class ResearchGrounder:
             graph_version=f"edges:{len(edges)}",
         )
 
-    async def _load_single_paper(self, pid: str) -> Optional[GroundedPaper]:
+    async def _load_single_paper(
+        self, pid: str, db: Optional[aiosqlite.Connection] = None
+    ) -> Optional[GroundedPaper]:
         """Load paper metadata, abstract, and full text (if available) from graph + SQLite."""
         p_node = await self.store.get_node(pid)
         title = pid
@@ -107,9 +119,10 @@ class ResearchGrounder:
             source = "graph"
 
         # Enrich with SQLite papers table + chunks/full_text if present
-        try:
-            async with aiosqlite.connect(self.db_path) as db:
-                async with db.execute(
+        async def _enrich_from_conn(conn: aiosqlite.Connection) -> None:
+            nonlocal title, abstract, year, full_text
+            try:
+                async with conn.execute(
                     "SELECT title, abstract, year FROM papers WHERE id = ? OR arxiv_id = ?",
                     (pid, pid),
                 ) as cur:
@@ -123,7 +136,7 @@ class ResearchGrounder:
                             year = row[2]
                 # Check if parsed paper chunks exist in paper_chunks table
                 try:
-                    async with db.execute(
+                    async with conn.execute(
                         "SELECT content FROM paper_chunks WHERE paper_id = ? ORDER BY chunk_index ASC LIMIT 12",
                         (pid,),
                     ) as c2:
@@ -132,8 +145,17 @@ class ResearchGrounder:
                             full_text = "\n\n".join(r[0] for r in chunk_rows if r[0])
                 except Exception:
                     pass
-        except Exception:
-            pass
+            except Exception:
+                pass
+
+        if db is not None:
+            await _enrich_from_conn(db)
+        else:
+            try:
+                async with aiosqlite.connect(self.db_path) as conn:
+                    await _enrich_from_conn(conn)
+            except Exception:
+                pass
 
         if not title and not abstract and not p_node:
             return None
