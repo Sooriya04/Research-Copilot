@@ -206,6 +206,8 @@ export function useNoveltyWorkspace(initialMechanism = 'all') {
           paper_ids: selectedPaperIds,
           provider: selectedProvider,
           model: selectedModel || undefined,
+          analysis_mode: analysisDepth,
+          verify_prior_art: verifyPriorArt,
           force_refresh: analysisDepth === 'comprehensive',
         }),
       });
