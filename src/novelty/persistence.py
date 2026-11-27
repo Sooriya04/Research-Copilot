@@ -196,16 +196,24 @@ class NoveltyPersistence:
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(id) DO UPDATE SET
+                    workspace_id = excluded.workspace_id,
+                    topic = excluded.topic,
                     title = excluded.title,
                     mechanism = excluded.mechanism,
+                    engine = excluded.engine,
+                    model_name = excluded.model_name,
                     pitch = excluded.pitch,
                     novelty_statement = excluded.novelty_statement,
+                    grounded_paper_ids = excluded.grounded_paper_ids,
+                    grounded_paper_titles = excluded.grounded_paper_titles,
                     mathematical_formulation = excluded.mathematical_formulation,
                     testable_hypothesis = excluded.testable_hypothesis,
                     target_datasets = excluded.target_datasets,
                     baselines_to_beat = excluded.baselines_to_beat,
                     expected_metrics = excluded.expected_metrics,
+                    confidence_score = excluded.confidence_score,
                     extra_json = excluded.extra_json,
+                    is_custom = excluded.is_custom,
                     updated_at = CURRENT_TIMESTAMP;
                 """,
                 (
