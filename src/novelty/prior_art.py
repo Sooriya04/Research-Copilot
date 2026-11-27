@@ -12,7 +12,7 @@ Classes & Functions:
   PriorArtAssessment with explicit status and retrieved evidence.
 """
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import httpx
 
@@ -26,6 +26,25 @@ from src.novelty.schemas import (
 
 class PriorArtVerifier:
     """Stage 5: Verifies novelty candidates against workspace and academic literature."""
+
+    def __init__(self, http_client: Optional[httpx.AsyncClient] = None):
+        self._custom_client = http_client
+        self._shared_client: Optional[httpx.AsyncClient] = None
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        if self._custom_client is not None:
+            return self._custom_client
+        if self._shared_client is None or self._shared_client.is_closed:
+            self._shared_client = httpx.AsyncClient(
+                timeout=5.0,
+                headers={"User-Agent": "ResearchCopilot/2.0 (mailto:admin@local)"},
+            )
+        return self._shared_client
+
+    async def close(self) -> None:
+        """Close internal HTTP client pool if open."""
+        if self._shared_client is not None and not self._shared_client.is_closed:
+            await self._shared_client.aclose()
 
     async def verify_candidate(
         self,
@@ -57,26 +76,26 @@ class PriorArtVerifier:
         search_ok = True
         if run_external_search and query:
             try:
-                async with httpx.AsyncClient(timeout=5.0) as client:
-                    resp = await client.get(
-                        "https://api.openalex.org/works",
-                        params={"search": query, "per-page": 4, "select": "title,publication_year,doi"},
-                    )
-                    if resp.status_code == 200:
-                        for w in resp.json().get("results", []):
-                            w_title = w.get("title") or ""
-                            if w_title:
-                                w_tokens = set(re.findall(r"[a-z0-9]{3,}", w_title.lower()))
-                                sim = len(cand_tokens & w_tokens) / max(len(cand_tokens), 1) if cand_tokens else 0.0
-                                closest.append({
-                                    "title": w_title,
-                                    "year": w.get("publication_year"),
-                                    "doi": w.get("doi"),
-                                    "source": "openalex",
-                                    "similarity": round(sim, 2),
-                                })
-                    else:
-                        search_ok = False
+                client = await self._get_client()
+                resp = await client.get(
+                    "https://api.openalex.org/works",
+                    params={"search": query, "per-page": 4, "select": "title,publication_year,doi"},
+                )
+                if resp.status_code == 200:
+                    for w in resp.json().get("results", []):
+                        w_title = w.get("title") or ""
+                        if w_title:
+                            w_tokens = set(re.findall(r"[a-z0-9]{3,}", w_title.lower()))
+                            sim = len(cand_tokens & w_tokens) / max(len(cand_tokens), 1) if cand_tokens else 0.0
+                            closest.append({
+                                "title": w_title,
+                                "year": w.get("publication_year"),
+                                "doi": w.get("doi"),
+                                "source": "openalex",
+                                "similarity": round(sim, 2),
+                            })
+                else:
+                    search_ok = False
             except Exception:
                 search_ok = False
 
