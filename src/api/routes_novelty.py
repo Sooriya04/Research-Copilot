@@ -504,6 +504,8 @@ async def delete_saved_proposal_endpoint(proposal_id: str):
         if not success:
             raise HTTPException(status_code=404, detail="Proposal not found or could not be deleted")
         return {"status": "deleted", "id": proposal_id}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("[NoveltyAPI] Failed deleting proposal '%s': %s", proposal_id, e)
         raise HTTPException(status_code=500, detail=str(e))

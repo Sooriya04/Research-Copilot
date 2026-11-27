@@ -225,6 +225,82 @@ def test_workspace_novelty_strict_isolation(client):
     client.delete(f"/api/v1/novelty/proposals/{p_a['id']}")
 
 
+def test_delete_proposal_endpoint(client):
+    """Verify DELETE /api/v1/novelty/proposals/{id} removes proposal and handles 404."""
+    create_resp = client.post(
+        "/api/v1/novelty/custom",
+        json={
+            "workspace_id": "ws-del-test",
+            "title": "Temporary Proposal to Delete",
+            "mechanism": "recombination",
+            "pitch": "Will be deleted immediately",
+        },
+    )
+    assert create_resp.status_code == 200
+    prop_id = create_resp.json()["id"]
+
+    # Delete proposal
+    del_resp = client.delete(f"/api/v1/novelty/proposals/{prop_id}")
+    assert del_resp.status_code == 200
+    assert del_resp.json()["status"] == "deleted"
+    assert del_resp.json()["id"] == prop_id
+
+    # Verify not found on second delete
+    del_again = client.delete(f"/api/v1/novelty/proposals/{prop_id}")
+    assert del_again.status_code == 404
+
+
+def test_clear_proposals_endpoint(client):
+    """Verify DELETE /api/v1/novelty/proposals clears proposals for a workspace."""
+    ws = "ws-clear-endpoint-test"
+    for i in range(2):
+        client.post(
+            "/api/v1/novelty/custom",
+            json={
+                "workspace_id": ws,
+                "title": f"Clearable Proposal {i}",
+                "mechanism": "recombination",
+                "pitch": f"Pitch {i}",
+            },
+        )
+
+    list_resp = client.get(f"/api/v1/novelty/proposals?workspace_id={ws}")
+    assert list_resp.status_code == 200
+    assert len(list_resp.json()["proposals"]) >= 2
+
+    # Clear proposals for this workspace
+    clear_resp = client.delete(f"/api/v1/novelty/proposals?workspace_id={ws}")
+    assert clear_resp.status_code == 200
+    data = clear_resp.json()
+    assert data["status"] == "cleared"
+    assert data["deleted_count"] >= 2
+
+    # Verify list is empty
+    empty_resp = client.get(f"/api/v1/novelty/proposals?workspace_id={ws}")
+    assert empty_resp.status_code == 200
+    assert len(empty_resp.json()["proposals"]) == 0
+
+
+def test_add_novelty_to_graph_endpoint(client):
+    """Verify POST /api/v1/novelty/add-to-graph injects a candidate node into the graph."""
+    body = {
+        "workspace_id": "ws-inject-test",
+        "topic": "Graph Neural Networks",
+        "novelty": {
+            "id": "novelty-injected-cand-1",
+            "title": "Spectral Diffusion Graph Convolution",
+            "mechanism": "recombination",
+            "pitch": "Fuses spectral graph filters with continuous diffusion dynamics.",
+            "grounded_paper_ids": [],
+        },
+    }
+    resp = client.post("/api/v1/novelty/add-to-graph", json=body)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "injected"
+    assert "cand-novelty-injected-cand-1" in data["node_id"]
+
+
 def test_multi_model_synthesis_resilience(client):
     """Verify multi-model synthesis produces guaranteed proposals even if no papers are staged."""
     body = {
