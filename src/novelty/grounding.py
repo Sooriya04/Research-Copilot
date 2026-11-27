@@ -37,7 +37,20 @@ class ResearchGrounder:
 
         target_pids = list(paper_ids) if paper_ids else []
         if not target_pids:
+            scoped_paper_ids = None
+            if workspace_id and workspace_id.strip():
+                ws_clean = workspace_id.strip()
+                ws_id = ws_clean if ws_clean.startswith("ws-") else f"ws-{ws_clean}"
+                scoped_paper_ids = set()
+                if ws_id in self.store.graph:
+                    for succ in self.store.graph.successors(ws_id):
+                        scoped_paper_ids.add(succ)
+                    for pred in self.store.graph.predecessors(ws_id):
+                        scoped_paper_ids.add(pred)
+
             for nid in self.store.graph.nodes:
+                if scoped_paper_ids is not None and nid not in scoped_paper_ids:
+                    continue
                 node = await self.store.get_node(nid)
                 if node and getattr(node, "node_type", None) == NodeType.PAPER:
                     target_pids.append(nid)

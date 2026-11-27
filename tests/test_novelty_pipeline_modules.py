@@ -90,3 +90,36 @@ async def test_prior_art_verifier_detects_workspace_overlap():
     res = await verifier.verify_candidate(cand, ws_papers, run_external_search=False)
     assert res.status in (PriorArtStatus.POTENTIAL_OVERLAP, PriorArtStatus.SUBSTANTIAL_OVERLAP)
     assert len(res.closest_papers) == 1
+
+
+@pytest.mark.asyncio
+async def test_grounder_scopes_fallback_to_workspace():
+    from unittest.mock import AsyncMock, MagicMock
+    import networkx as nx
+    from src.novelty.grounding import ResearchGrounder
+    from src.graph.schema import NodeType, PaperNode
+
+    mock_store = MagicMock()
+    mock_store._ensure_initialized = AsyncMock()
+    graph = nx.DiGraph()
+    graph.add_node("ws-alpha")
+    graph.add_node("paper-1")
+    graph.add_node("paper-2")
+    graph.add_edge("ws-alpha", "paper-1")
+
+    mock_store.graph = graph
+
+    async def mock_get_node(nid):
+        if nid in ("paper-1", "paper-2"):
+            return PaperNode(id=nid, title=nid)
+        return None
+
+    mock_store.get_node = mock_get_node
+    mock_store.get_all_edges = AsyncMock(return_value=[])
+
+    grounder = ResearchGrounder(mock_store, db_path=":memory:")
+    grounder._load_single_paper = AsyncMock(side_effect=lambda pid: GroundedPaper(id=pid, title=pid))
+
+    ctx = await grounder.ground(workspace_id="alpha", paper_ids=None)
+    assert len(ctx.papers) == 1
+    assert ctx.papers[0].id == "paper-1"
