@@ -60,6 +60,12 @@ class Settings(BaseSettings):
     web_search_cache_ttl: int = 900
     web_search_enabled: bool = True
 
+    # Paper-Drift Sidecar Configuration (Port 7490)
+    paper_drift_base_url: str = "http://127.0.0.1:7490"
+    paper_drift_enabled: bool = True
+    paper_drift_timeout: float = 30.0
+    paper_drift_max_chunk_chars: int = 1500
+
     # Graph & Loop Execution limits
     max_loop_iterations: int = 10
     default_rank_limit: int = 25

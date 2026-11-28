@@ -150,6 +150,14 @@ class NoveltyItem(BaseModel):
     prior_art_status: str = PriorArtStatus.NOT_ASSESSED.value
     prior_art_check: Optional[PriorArtAssessment] = None
     quality_assessment: Optional[QualityAssessment] = None
+    baseline_figure_data_url: Optional[str] = Field(
+        default=None,
+        description="Base64 data URL (e.g. data:image/png;base64,...) of the baseline architecture diagram from paper-drift",
+    )
+    baseline_figure_caption: Optional[str] = Field(
+        default=None,
+        description="Caption associated with the extracted baseline architecture figure",
+    )
     evidence_status: str = "abstract_only"
     confidence_score: float = 0.75
 

@@ -19,6 +19,8 @@ BACKEND_LOG="$LOG_DIR/backend.log"
 FRONTEND_LOG="$LOG_DIR/frontend.log"
 BACKEND_PID_FILE="$LOG_DIR/backend.pid"
 FRONTEND_PID_FILE="$LOG_DIR/frontend.pid"
+PAPER_DRIFT_PID_FILE="$LOG_DIR/paper-drift.pid"
+PAPER_DRIFT_LOG="$LOG_DIR/paper-drift.log"
 
 # ── Colors ───────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
@@ -75,6 +77,29 @@ kill_pid_file() {
     fi
 }
 
+# ── Start paper-drift Sidecar ──────────────────────────────────────────────────
+start_paper_drift() {
+    local paper_kit_dir="/media/workspace/paper-kit"
+    if [[ -d "$paper_kit_dir" ]]; then
+        if curl -s http://localhost:7490/api/health >/dev/null 2>&1; then
+            success "paper-drift sidecar already running on http://localhost:7490"
+        else
+            info "Starting paper-drift sidecar on http://localhost:7490 ..."
+            check_node
+            ensure_logs
+            cd "$paper_kit_dir"
+            nohup node bin/cli.js serve --port 7490 > "$PAPER_DRIFT_LOG" 2>&1 &
+            echo $! > "$PAPER_DRIFT_PID_FILE"
+            sleep 1
+            if curl -s http://localhost:7490/api/health >/dev/null 2>&1; then
+                success "paper-drift started → http://localhost:7490 (log: .logs/paper-drift.log)"
+            else
+                warn "paper-drift spawned but health check pending (PID $(cat "$PAPER_DRIFT_PID_FILE"))"
+            fi
+        fi
+    fi
+}
+
 # ── Start Backend ─────────────────────────────────────────────────────────────
 start_backend() {
     info "Starting backend (FastAPI/Uvicorn) on http://localhost:8000 ..."
@@ -115,8 +140,9 @@ start_frontend() {
 # ── Stop ──────────────────────────────────────────────────────────────────────
 stop_all() {
     info "Stopping Research Copilot..."
-    kill_pid_file "$BACKEND_PID_FILE"  "Backend"
-    kill_pid_file "$FRONTEND_PID_FILE" "Frontend"
+    kill_pid_file "$BACKEND_PID_FILE"     "Backend"
+    kill_pid_file "$FRONTEND_PID_FILE"    "Frontend"
+    kill_pid_file "$PAPER_DRIFT_PID_FILE" "paper-drift"
     success "All processes stopped."
 }
 
@@ -140,6 +166,7 @@ case "$MODE" in
         stop_all
         ;;
     both|"")
+        start_paper_drift
         start_backend
         sleep 1
         start_frontend

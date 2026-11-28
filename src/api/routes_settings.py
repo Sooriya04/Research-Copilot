@@ -357,6 +357,35 @@ async def _test_redis_service(url: str) -> Dict[str, Any]:
         }
 
 
+async def _test_paper_drift_service(url: str) -> Dict[str, Any]:
+    start = time.perf_counter()
+    target = (url or getattr(settings, "paper_drift_base_url", "http://127.0.0.1:7490")).rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(f"{target}/api/health")
+            latency = round((time.perf_counter() - start) * 1000, 2)
+            if resp.status_code == 200:
+                data = resp.json()
+                ver = data.get("version", "0.1.6")
+                return {
+                    "success": True,
+                    "latency_ms": latency,
+                    "message": f"paper-drift daemon responsive (v{ver}, HTTP 200 in {latency} ms)",
+                }
+            return {
+                "success": False,
+                "latency_ms": latency,
+                "error": f"paper-drift responded with HTTP {resp.status_code}",
+            }
+    except Exception as e:
+        latency = round((time.perf_counter() - start) * 1000, 2)
+        return {
+            "success": False,
+            "latency_ms": latency,
+            "error": f"paper-drift unreachable at {target}: {str(e)}",
+        }
+
+
 async def _test_searqon_service(url: str) -> Dict[str, Any]:
     start = time.perf_counter()
     target = (url or "http://localhost:7493").rstrip("/")
@@ -475,6 +504,9 @@ async def test_service_connection_endpoint(req: TestServiceRequest):
     elif s_id == "searqon":
         url = req.target_url or getattr(settings, "searqon_base_url", "http://localhost:7493")
         res = await _test_searqon_service(url)
+    elif s_id in ("paper_drift", "paper-drift"):
+        url = req.target_url or getattr(settings, "paper_drift_base_url", "http://127.0.0.1:7490")
+        res = await _test_paper_drift_service(url)
     elif s_id == "semantic_scholar":
         key = req.api_key or getattr(settings, "semantic_scholar_api_key", None)
         res = await _test_semantic_scholar_service(key)
